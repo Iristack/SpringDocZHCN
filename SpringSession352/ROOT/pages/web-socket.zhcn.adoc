@@ -1,0 +1,27 @@
+[[websocket]]
+= WebSocket 集成
+
+Spring Session 提供了与 Spring WebSocket 支持的透明集成。
+
+include::guides/boot-websocket.adoc[tags=disclaimer,leveloffset=+1]
+
+[[websocket-why]]
+== 为什么使用 WebSockets 时还需要 Spring Session？
+
+那么，当我们使用 WebSockets 时，为什么还需要 Spring Session 呢？
+
+考虑一个电子邮件应用，其大部分功能通过 HTTP 请求完成。然而，该应用内嵌了一个基于 WebSocket API 的聊天功能。如果用户正在与他人积极聊天，我们就不应让 `HttpSession` 超时，否则将严重影响用户体验。但根据 https://java.net/jira/browse/WEBSOCKET_SPEC-175[JSR-356] 规范，这正是当前发生的情况。
+
+另一个问题是，根据 JSR-356 规范，如果 `HttpSession` 超时，任何基于该 `HttpSession` 创建并由已认证用户使用的 WebSocket 连接都应被强制关闭。这意味着，即使我们在应用中正在进行活跃的聊天，只要 `HttpSession` 因不活动而超时，我们也会被断开聊天连接。
+
+[[websocket-usage]]
+== WebSocket 使用方法
+
+xref:samples.adoc#samples[WebSocket 示例] 提供了一个可运行的示例，展示如何将 Spring Session 与 WebSockets 集成。你可以在接下来的小节中参考基本的集成步骤，但我们建议你在将自己的应用集成时，同时参考详细的 WebSocket 指南。
+
+[[websocket-httpsession]]
+=== `HttpSession` 集成
+
+在使用 WebSocket 集成之前，你应该首先确保已成功配置 xref:http-session.adoc#httpsession[`HttpSession` 集成]。
+
+include::guides/boot-websocket.adoc[tags=config,leveloffset=+2]

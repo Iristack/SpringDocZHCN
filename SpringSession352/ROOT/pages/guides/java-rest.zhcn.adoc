@@ -1,0 +1,266 @@
+= Spring Session - REST
+Rob Winch
+:stylesdir: ../
+:highlightjsdir: ../js/highlight
+:docinfodir: guides
+
+本指南介绍如何在使用 REST 端点时，通过 Spring Session 透明地利用 Redis 来支持 Web 应用程序的 `HttpSession`。
+
+NOTE: 您可以在 <<rest-sample, rest 示例应用>> 中找到完整的指南。
+
+[#index-link]
+link:../index.html[索引]
+
+== 更新依赖项
+
+在使用 Spring Session 之前，您必须更新项目的依赖项。  
+如果使用 Maven，请添加以下依赖：
+
+====
+.pom.xml
+[source,xml]
+[subs="verbatim,attributes"]
+----
+<dependencies>
+	<!-- ... -->
+
+	<dependency>
+		<groupId>org.springframework.session</groupId>
+		<artifactId>spring-session-data-redis</artifactId>
+		<version>{spring-session-version}</version>
+		<type>pom</type>
+	</dependency>
+	<dependency>
+		<groupId>io.lettuce</groupId>
+		<artifactId>lettuce-core</artifactId>
+		<version>{lettuce-core-version}</version>
+	</dependency>
+	<dependency>
+		<groupId>org.springframework</groupId>
+		<artifactId>spring-web</artifactId>
+		<version>{spring-core-version}</version>
+	</dependency>
+</dependencies>
+----
+====
+
+ifeval::["{version-snapshot}" == "true"]
+由于我们使用的是 SNAPSHOT 版本，因此需要添加 Spring 快照仓库。您必须在 pom.xml 中包含以下内容：
+
+====
+.pom.xml
+[source,xml]
+----
+<repositories>
+
+	<!-- ... -->
+
+	<repository>
+		<id>spring-snapshot</id>
+		<url>https://repo.spring.io/libs-snapshot</url>
+	</repository>
+</repositories>
+----
+====
+endif::[]
+
+ifeval::["{version-milestone}" == "true"]
+由于我们使用的是里程碑版本，因此需要添加 Spring 里程碑仓库。您必须在 pom.xml 中包含以下内容：
+
+====
+.pom.xml
+[source,xml]
+----
+<repository>
+	<id>spring-milestone</id>
+	<url>https://repo.spring.io/libs-milestone</url>
+</repository>
+----
+====
+endif::[]
+
+// tag::config[]
+
+[[rest-spring-configuration]]
+== Spring 配置
+
+添加必要的依赖后，我们可以创建 Spring 配置。该配置负责创建一个 Servlet 过滤器（Filter），用于将 `HttpSession` 的实现替换为由 Spring Session 支持的实现。为此，请添加如下 Spring 配置：
+
+====
+[source,java]
+----
+include::{samples-dir}spring-session-sample-javaconfig-rest/src/main/java/sample/HttpSessionConfig.java[tags=class]
+----
+
+<1> `@EnableRedisHttpSession` 注解会创建一个名为 `springSessionRepositoryFilter` 的 Spring Bean，该 Bean 实现了 `Filter` 接口。这个过滤器负责将 `HttpSession` 的实现替换为由 Spring Session 支持的实现。在此示例中，Spring Session 使用 Redis 作为后端存储。
+<2> 我们创建了一个 `RedisConnectionFactory`，用于连接 Spring Session 与 Redis 服务器。此处配置为连接本地主机上的默认端口（6379）。有关 Spring Data Redis 配置的更多信息，请参见 {docs-url}/spring-data/data-redis/docs/{spring-data-redis-version}/reference/html/[参考文档]。
+<3> 我们自定义了 Spring Session 对 HttpSession 的集成方式，使用 HTTP 头部传递当前会话信息，而不是使用 Cookie。
+====
+
+== Servlet 容器初始化
+
+我们的 <<rest-spring-configuration,Spring 配置>> 创建了一个名为 `springSessionRepositoryFilter` 的 Spring Bean，它实现了 `Filter` 接口。该 Bean 负责将标准的 `HttpSession` 替换为由 Spring Session 支持的自定义实现。
+
+为了让该 `Filter` 正常工作，Spring 必须加载我们的 `Config` 类。我们在 Spring 的 `MvcInitializer` 中提供此配置，如下例所示：
+
+====
+.src/main/java/sample/mvc/MvcInitializer.java
+[source,java,indent=0]
+----
+include::{samples-dir}spring-session-sample-javaconfig-rest/src/main/java/sample/mvc/MvcInitializer.java[tags=config]
+----
+====
+
+最后，我们需要确保 Servlet 容器（例如 Tomcat）对每个请求都使用我们的 `springSessionRepositoryFilter`。幸运的是，Spring Session 提供了一个名为 `AbstractHttpSessionApplicationInitializer` 的工具类，使这一过程变得简单。只需使用默认构造函数继承该类即可，如以下示例所示：
+
+====
+.src/main/java/sample/Initializer.java
+[source,java]
+----
+include::{samples-dir}spring-session-sample-javaconfig-rest/src/main/java/sample/Initializer.java[tags=class]
+----
+====
+
+NOTE: 我们的类名（`Initializer`）并不重要，关键在于我们继承了 `AbstractHttpSessionApplicationInitializer`。
+
+// end::config[]
+
+[[rest-sample]]
+== `rest` 示例应用程序
+
+本节介绍如何使用 `rest` 示例应用程序。
+
+=== 运行 `rest` 示例应用程序
+
+您可以通过获取 {download-url}[源代码] 并执行以下命令来运行该示例：
+
+NOTE: 要使示例正常运行，您必须在本地主机上 https://redis.io/download[安装 Redis 2.8 或更高版本]，并使用默认端口（6379）运行。或者，您可以更新 `RedisConnectionFactory` 以指向其他 Redis 服务器。另一种选择是使用 https://www.docker.com/[Docker] 在本地主机上运行 Redis。详细说明请参阅 https://hub.docker.com/_/redis/[Docker Redis 仓库]。
+
+====
+----
+$ ./gradlew :spring-session-sample-javaconfig-rest:tomcatRun
+----
+====
+
+现在您应该可以通过 http://localhost:8080/ 访问该应用程序。
+
+=== 探索 `rest` 示例应用程序
+
+现在可以尝试使用该应用程序。首先，使用您喜欢的 REST 客户端请求 http://localhost:8080/
+
+====
+----
+	$ curl -v http://localhost:8080/
+----
+====
+
+注意，系统会提示输入基本认证信息。请提供以下用户名和密码：
+
+* *用户名* _user_
+* *密码* _password_
+
+然后运行以下命令：
+
+====
+----
+$ curl -v http://localhost:8080/ -u user:password
+----
+====
+
+输出中应看到如下内容：
+
+====
+----
+HTTP/1.1 200 OK
+...
+X-Auth-Token: 0dc1f6e1-c7f1-41ac-8ce2-32b6b3e57aa3
+
+{"username":"user"}
+----
+====
+
+具体来说，响应中有以下几点值得注意：
+
+* HTTP 状态码为 200。
+* 响应头中包含名为 `X-Auth-Token` 的字段，其值为新生成的会话 ID。
+* 显示了当前用户名。
+
+现在我们可以使用 `X-Auth-Token` 发起另一个请求，而无需再次提供用户名和密码。例如，以下命令将像之前一样输出用户名：
+
+====
+----
+	$ curl -v http://localhost:8080/ -H "X-Auth-Token: 0dc1f6e1-c7f1-41ac-8ce2-32b6b3e57aa3"
+----
+====
+
+唯一的区别是响应头中不再返回新的 `X-Auth-Token`，因为我们正在复用现有的会话。
+
+如果我们使会话失效，则响应头中的 `X-Auth-Token` 将为空字符串。例如，以下命令会使当前会话失效：
+
+====
+----
+	$ curl -v http://localhost:8080/logout -H "X-Auth-Token: 0dc1f6e1-c7f1-41ac-8ce2-32b6b3e57aa3"
+----
+====
+
+在输出中可以看到，`X-Auth-Token` 返回空字符串，表示之前的会话已被销毁：
+
+====
+----
+HTTP/1.1 204 No Content
+...
+X-Auth-Token:
+----
+====
+
+=== 它是如何工作的？
+
+Spring Security 在 `SecurityContextPersistenceFilter` 中与标准的 `HttpSession` 进行交互。
+
+现在，Spring Security 不再使用 Tomcat 的 `HttpSession`，而是将数据持久化到 Redis 中。Spring Session 会在浏览器中创建一个名为 `X-Auth-Token` 的头部，该头部包含了会话的 ID。
+
+您可以轻松验证会话是否已正确创建在 Redis 中。例如，先通过以下命令创建一个会话：
+
+====
+----
+$ curl -v http://localhost:8080/ -u user:password
+----
+====
+
+输出中应看到类似以下内容：
+
+====
+----
+HTTP/1.1 200 OK
+...
+X-Auth-Token: 7e8383a4-082c-4ffe-a4bc-c40fd3363c5e
+
+{"username":"user"}
+----
+====
+
+然后，您可以通过 redis-cli 删除该会话。例如，在基于 Linux 的系统上，可输入以下命令：
+
+====
+----
+	$ redis-cli keys '*' | xargs redis-cli del
+----
+====
+
+TIP: Redis 官方文档提供了 https://redis.io/topics/quickstart[安装 redis-cli] 的说明。
+
+或者，您也可以删除特定的键。在终端中输入以下命令，并将 `7e8383a4-082c-4ffe-a4bc-c40fd3363c5e` 替换为您实际的会话 ID：
+
+====
+----
+	$ redis-cli del spring:session:sessions:7e8383a4-082c-4ffe-a4bc-c40fd3363c5e
+----
+====
+
+现在，使用已删除的会话的 `X-Auth-Token` 再次发起请求，您会发现系统重新提示进行身份验证。例如，以下命令将返回 HTTP 401 错误：
+
+====
+----
+	$ curl -v http://localhost:8080/ -H "X-Auth-Token: 0dc1f6e1-c7f1-41ac-8ce2-32b6b3e57aa3"
+----
+====

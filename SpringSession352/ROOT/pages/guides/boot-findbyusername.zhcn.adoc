@@ -1,0 +1,134 @@
+= Spring Session - 按用户名查找会话
+Rob Winch
+:stylesdir: ../
+:highlightjsdir: ../js/highlight
+:docinfodir: guides
+
+本文档介绍如何使用 Spring Session 按用户名查找会话。
+
+NOTE: 你可以在 <<findbyusername-sample, findbyusername 示例应用>> 中找到完整的实现代码。
+
+[#index-link]
+link:../index.html[首页]
+
+[[findbyusername-assumptions]]
+== 前提条件
+
+本指南假设你已经通过使用内置的 Redis 配置支持将 Spring Session 添加到你的应用程序中，并且也已为应用配置了 Spring Security。  
+不过，本指南具有一定的通用性，稍作修改即可应用于其他技术栈，相关内容将在后文讨论。
+
+NOTE: 如果你需要学习如何在项目中添加 Spring Session，请参阅 link:../#samples[示例与指南列表]。
+
+[[findbyusername-about-sample]]
+== 关于示例
+
+我们的示例利用此功能来使用户能够终止可能已被泄露的会话。考虑以下场景：
+
+* 用户在图书馆登录应用。
+* 用户回到家后意识到自己忘记登出。
+* 用户可以在家中登录，并根据位置、创建时间、最后访问时间等线索，结束在图书馆的会话。
+
+如果用户能够在任意设备上登录后，都能终止其在图书馆的会话，是不是很方便？  
+本示例展示了如何实现这一功能。
+
+[[findbyindexnamesessionrepository]]
+== 使用 `FindByIndexNameSessionRepository`
+
+若要按用户名查找用户会话，首先必须选择一个实现了 link:../#api-findbyindexnamesessionrepository[`FindByIndexNameSessionRepository`] 接口的 `SessionRepository`。  
+在本示例中，我们假设 Redis 支持已经配置完成，因此可以直接使用。
+
+== 映射用户名
+
+只有当开发者明确告知 Spring Session 当前 `Session` 关联的是哪个用户时，`FindByIndexNameSessionRepository` 才能根据用户名查找会话。  
+你可以通过确保会话中名为 `FindByUsernameSessionRepository.PRINCIPAL_NAME_INDEX_NAME` 的属性被设置为用户名来实现这一点。
+
+通常情况下，你可以在用户认证成功后立即使用如下代码进行设置：
+
+====
+[source,java,indent=0]
+----
+include::{docs-test-dir}docs/FindByIndexNameSessionRepositoryTests.java[tags=set-username]
+----
+====
+
+== 使用 Spring Security 映射用户名
+
+由于我们使用了 Spring Security，用户名会被自动索引，因此无需额外操作即可保证用户名被正确索引。
+
+== 向会话添加额外数据
+
+将一些附加信息（如 IP 地址、浏览器类型、地理位置等）与会话关联起来会很有帮助，这样用户可以更容易地识别每个会话的来源。
+
+为此，你需要确定要使用的会话属性名称以及希望存储的信息内容，然后创建一个 Java Bean 并将其作为会话属性添加。例如，在我们的示例应用中，我们添加了会话的位置和访问类型，如下所示：
+
+====
+[source,java,indent=0]
+----
+include::{samples-dir}spring-session-sample-boot-findbyusername/src/main/java/sample/session/SessionDetails.java[tags=class]
+----
+====
+
+接着，我们通过一个 `SessionDetailsFilter` 在每次 HTTP 请求时将这些信息注入会话中，如下例所示：
+
+====
+[source,java,indent=0]
+----
+include::{samples-dir}spring-session-sample-boot-findbyusername/src/main/java/sample/session/SessionDetailsFilter.java[tags=dofilterinternal]
+----
+====
+
+我们获取所需信息后，将其封装为 `SessionDetails` 对象并设置为会话的一个属性。之后当我们通过用户名检索会话时，就可以像访问其他任何会话属性一样访问 `SessionDetails`。
+
+NOTE: 你可能会疑惑为什么 Spring Session 不直接提供 `SessionDetails` 功能。原因有两个：第一，这类功能非常简单，应用可以轻松自行实现；第二，会话中需要填充哪些信息以及更新频率高度依赖具体应用场景。
+
+== 查找特定用户的会话
+
+现在我们可以查找某个特定用户的所有活动会话。以下示例展示了如何实现：
+
+====
+[source,java,indent=0]
+----
+include::{samples-dir}spring-session-sample-boot-findbyusername/src/main/java/sample/mvc/IndexController.java[tags=findbyusername]
+----
+====
+
+在本例中，我们查找当前登录用户的所有会话。但你也可以扩展此功能，让管理员通过表单指定要查询的用户。
+
+[[findbyusername-sample]]
+== `findbyusername` 示例应用
+
+本节介绍如何使用 `findbyusername` 示例应用。
+
+=== 运行 `findbyusername` 示例应用
+
+你可以通过获取 {download-url}[源码] 并执行以下命令来运行该示例：
+
+====
+----
+$ ./gradlew :spring-session-sample-boot-findbyusername:bootRun
+----
+====
+
+NOTE: 要使示例正常运行，你必须在本地主机上 https://redis.io/download[安装 Redis 2.8 或更高版本]，并使用默认端口（6379）运行。  
+或者，你可以修改 `RedisConnectionFactory` 指向一个远程 Redis 服务器。  
+另一个选择是使用 https://www.docker.com/[Docker] 在本地运行 Redis。详细说明请参考 https://hub.docker.com/_/redis/[Docker Redis 仓库]。
+
+完成后，你应该可以通过 http://localhost:8080/ 访问该应用。
+
+=== 探索安全示例应用
+
+现在你可以尝试使用该应用。使用以下凭据登录：
+
+* *用户名* _user_
+* *密码* _password_
+
+点击 *Login* 按钮后，你应该能看到一条消息，提示你已使用上述用户成功登录，并显示当前用户的所有活跃会话列表。
+
+你可以通过以下步骤模拟 <<About the Sample>> 小节中描述的流程：
+
+* 打开一个新的无痕浏览窗口，访问 http://localhost:8080/
+* 使用以下信息登录：
+** *用户名* _user_
+** *密码* _password_
+* 回到原始窗口，结束原始会话
+* 刷新原始窗口，确认你已被注销

@@ -1,0 +1,162 @@
+[[common-configurations]]
+= 常见配置
+
+本节包含适用于所有或大多数 Spring Session 模块的通用配置。  
+它提供了以下使用场景的配置示例：
+
+- 我需要 <<changing-how-session-ids-are-generated,更改会话 ID 的生成方式>>
+- 我需要 <<customizing-session-cookie,自定义会话 Cookie 属性>>
+- 我希望 <<spring-session-backed-reactive-session-registry,为 `ReactiveSessionRepository` 提供一个 Spring Session 实现>>，以支持 {spring-security-ref-docs}/reactive/authentication/concurrent-sessions-control.html[并发会话控制]
+
+[[changing-how-session-ids-are-generated]]
+== 更改会话 ID 的生成方式
+
+默认情况下，Spring Session 使用 `UuidSessionIdGenerator`，该类又依赖 `java.util.UUID` 来生成会话 ID。  
+在某些场景下，你可能希望引入更多字符以提高熵值，或者想使用不同的算法来生成会话 ID。  
+为此，你可以提供一个自定义的 `SessionIdGenerator` Bean：
+
+.更改会话 ID 生成方式
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public SessionIdGenerator sessionIdGenerator() {
+    return new MySessionIdGenerator();
+}
+
+class MySessionIdGenerator implements SessionIdGenerator {
+
+    @Override
+    public String generate() {
+        // ...
+    }
+
+}
+----
+======
+
+暴露你的 `SessionIdGenerator` Bean 后，Spring Session 将使用它来生成会话 ID。
+
+如果你手动配置了 `SessionRepository` Bean（例如，没有使用 `@EnableRedisHttpSession`），则可以直接在 `SessionRepository` 实现上设置 `SessionIdGenerator`：
+
+.直接将 `SessionIdGenerator` 设置到 `SessionRepository` 实现中
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public RedisSessionRepository redisSessionRepository(RedisOperations redisOperations) {
+    RedisSessionRepository repository = new RedisSessionRepository(redisOperations);
+    repository.setSessionIdGenerator(new MySessionIdGenerator());
+    return repository;
+}
+----
+======
+
+[[customizing-session-cookie]]
+== 自定义会话 Cookie
+
+设置好 Spring Session 后，可以通过将 `CookieSerializer` 作为 Spring Bean 暴露出来，来自定义会话 Cookie 的写入方式。  
+Spring Session 提供了 `DefaultCookieSerializer`。  
+当你使用类似 `@EnableRedisHttpSession` 这样的注解时，将 `DefaultCookieSerializer` 暴露为 Spring Bean 可以增强现有配置。  
+以下示例展示了如何自定义 Spring Session 的 Cookie：
+
+====
+[source,java]
+----
+include::{samples-dir}spring-session-sample-javaconfig-custom-cookie/src/main/java/sample/Config.java[tags=cookie-serializer]
+----
+
+<1> 我们将 Cookie 名称自定义为 `JSESSIONID`。  
+<2> 我们将 Cookie 路径自定义为 `/`（而不是默认的上下文根路径）。  
+<3> 我们将域名模式（正则表达式）自定义为 `^.+?\\.(\\w+\\.[a-z]+)$`。  
+这允许在不同域和应用之间共享会话。如果正则表达式不匹配，则不会设置 domain，而是使用现有的 domain；如果匹配，则使用第一个 https://docs.oracle.com/javase/tutorial/essential/regex/groups.html[分组] 作为 domain。  
+这意味着对 https://child.example.com 的请求会将 domain 设置为 `example.com`。  
+然而，对 http://localhost:8080/ 或 https://192.168.1.100:8080/ 的请求不会设置 domain，因此在开发环境中仍可正常工作，无需为生产环境做额外修改。
+====
+
+WARNING: 你应该仅匹配有效的域名字符，因为域名会被直接反映在响应中。  
+这样做可以防止恶意用户发起如 https://en.wikipedia.org/wiki/HTTP_response_splitting[HTTP 响应拆分] 等攻击。
+
+[[custom-cookie-options]]
+=== 配置选项
+
+以下是可用的配置选项：
+
+* `cookieName`: 使用的 Cookie 名称。  
+  默认值：`SESSION`
+* `useSecureCookie`: 是否使用安全 Cookie（即仅通过 HTTPS 传输）。  
+  默认值：创建时使用 `HttpServletRequest.isSecure()` 的值
+* `cookiePath`: Cookie 的路径。  
+  默认值：上下文根路径（context root）
+* `cookieMaxAge`: 在创建会话时设置 Cookie 的最大存活时间（以秒为单位）。  
+  默认值：`-1`，表示浏览器关闭时删除 Cookie
+* `jvmRoute`: 指定附加到会话 ID 并包含在 Cookie 中的后缀。  
+  用于标识用于会话亲和性的 JVM。某些实现（如 Redis）下此选项无性能优势，但有助于追踪特定用户的日志。
+* `domainName`: 允许指定用于 Cookie 的具体域名。  
+  此选项易于理解，但通常需要在开发和生产环境之间使用不同的配置。可考虑使用 `domainNamePattern` 作为替代方案。
+* `domainNamePattern`: 不区分大小写的模式，用于从 `HttpServletRequest#getServerName()` 中提取域名。  
+  该模式应提供一个分组，用于提取 Cookie domain 的值。  
+  如果正则表达式不匹配，则不设置 domain，保留原有 domain；  
+  如果匹配，则使用第一个 https://docs.oracle.com/javase/tutorial/essential/regex/groups.html[分组] 作为 domain。
+* `sameSite`: `SameSite` Cookie 指令的值。  
+  若设为 `null`，则禁用 `SameSite` 指令的序列化。  
+  默认值：`Lax`
+* `rememberMeRequestAttribute`: 表示“记住我”登录的请求属性名称。  
+  如果指定了该属性，Cookie 的有效期将被设置为 `Integer.MAX_VALUE`。
+
+[NOTE]
+====
+如果你正在使用 `SpringSessionRememberMeServices` 并声明了一个自定义的 `DefaultCookieSerializer` Bean，建议设置 `rememberMeRequestAttribute` 字段，以确保 Spring Session 依赖于会话过期而非 Cookie 过期。  
+为此，可以使用如下代码片段：  
+`defaultCookieSerializer.setRememberMeRequestAttribute(SpringSessionRememberMeServices.REMEMBER_ME_LOGIN_ATTR);`
+====
+
+[[custom-cookie-in-webflux]]
+=== WebFlux 中的自定义 Cookie
+
+在 WebFlux 应用中，你可以通过暴露一个 `WebSessionIdResolver` 作为 Spring Bean 来自定义会话 Cookie 的写入方式。  
+Spring Session 默认使用 `CookieWebSessionIdResolver`。  
+以下示例展示如何自定义 Spring Session 的 Cookie：
+
+====
+[source,java]
+----
+include::{samples-dir}spring-session-sample-boot-webflux-custom-cookie/src/main/java/sample/CookieConfig.java[tags=webflux-cookie-serializer]
+----
+
+<1> 我们将 Cookie 名称自定义为 `JSESSIONID`。  
+<2> 我们将 Cookie 路径自定义为 `/`（而不是默认的上下文根路径）。  
+<3> 我们将 `SameSite` Cookie 指令设置为 `Strict`。
+====
+
+[[spring-session-backed-reactive-session-registry]]
+== 提供 `ReactiveSessionRegistry` 的 Spring Session 实现
+
+Spring Session 提供了与 Spring Security 的集成，以支持响应式编程模型下的并发会话控制。  
+这使得可以限制单个用户同时拥有的活动会话数量，并且与 Spring Security 的默认支持不同的是，这种机制在集群环境中也能正常工作。  
+这是通过提供 `SpringSessionBackedReactiveSessionRegistry` 类来实现的，它是 Spring Security 的 `ReactiveSessionRegistry` 接口的一个实现。
+
+.将 SpringSessionBackedReactiveSessionRegistry 定义为 Bean
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public <S extends Session> SpringSessionBackedReactiveSessionRegistry<S> sessionRegistry(
+        ReactiveSessionRepository<S> sessionRepository,
+        ReactiveFindByIndexNameSessionRepository<S> indexedSessionRepository) {
+    return new SpringSessionBackedReactiveSessionRegistry<>(sessionRepository, indexedSessionRepository);
+}
+----
+======
+
+请参考 {spring-security-ref-docs}/reactive/authentication/concurrent-sessions-control.html[Spring Security 并发会话控制文档]，了解更多关于 `ReactiveSessionRegistry` 的使用方法。  
+你也可以在此处查看示例应用：https://github.com/spring-projects/spring-session/tree/main/spring-session-samples/spring-session-sample-boot-reactive-max-sessions

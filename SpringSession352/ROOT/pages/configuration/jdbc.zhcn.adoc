@@ -1,0 +1,521 @@
+[[jdbc-configurations]]
+= JDBC
+
+Spring Session JDBC 是一个模块，它使用 https://en.wikipedia.org/wiki/Java_Database_Connectivity[JDBC] 作为数据存储来实现会话管理。
+
+- 我想 <<adding-spring-session-jdbc,使用 Spring Session JDBC>>
+- 我想 <<session-storage-details,了解 JDBC 表结构是如何定义的>>
+- 我想 <<customizing-table-name,自定义表名>>
+- 我想 <<customize-sql-queries,自定义 SQL 查询>>
+- 我想将 <<session-attributes-as-json,会话属性以 JSON 格式保存>> 而不是字节数组
+- 我想 <<specifying-datasource,为 Spring Session JDBC 使用不同的 `DataSource`>>
+- 我想 <<customizing-transaction-operations,自定义 JDBC 事务操作>>
+- 我想自定义 <<customizing-cleanup-job,过期会话清理任务>>
+
+[[adding-spring-session-jdbc]]
+== 将 Spring Session JDBC 添加到你的应用中
+
+要使用 Spring Session JDBC，你必须将 `org.springframework.session:spring-session-jdbc` 依赖添加到你的应用程序中：
+
+[tabs]
+======
+Gradle::
++
+[source,groovy]
+----
+implementation 'org.springframework.session:spring-session-jdbc'
+----
+Maven::
++
+[source,xml]
+----
+<dependency>
+    <groupId>org.springframework.session</groupId>
+    <artifactId>spring-session-jdbc</artifactId>
+</dependency>
+----
+======
+
+如果你使用的是 Spring Boot，它会自动启用 Spring Session JDBC，更多细节请参见其文档：{spring-boot-ref-docs}/web.html#web.spring-session。
+否则，你需要在配置类上添加 `@EnableJdbcHttpSession` 注解：
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+@Configuration
+@EnableJdbcHttpSession
+public class SessionConfig {
+    //...
+}
+----
+======
+
+就这样，你的应用现在已配置为使用 Spring Session JDBC。
+
+[[session-storage-details]]
+== 理解会话存储细节
+
+默认情况下，该实现使用 `SPRING_SESSION` 和 `SPRING_SESSION_ATTRIBUTES` 表来存储会话。
+注意：当你 <<customizing-table-name,自定义表名>> 时，用于存储属性的表名将以提供的表名加上后缀 `_ATTRIBUTES` 来命名。
+如果需要进一步定制，你可以 <<customize-sql-queries,自定义仓库使用的 SQL 查询>>。
+
+由于不同数据库厂商之间的差异（尤其是在存储二进制数据方面），请确保使用针对你所用数据库的特定 SQL 脚本。
+大多数主流数据库厂商的脚本被打包在 `org/springframework/session/jdbc/schema-\*.sql` 中，其中 `*` 是目标数据库类型。
+
+例如，在 PostgreSQL 上，你可以使用以下模式脚本：
+
+====
+[source,sql,indent=0]
+----
+include::{session-jdbc-main-resources-dir}org/springframework/session/jdbc/schema-postgresql.sql[]
+----
+====
+
+[[customizing-table-name]]
+== 自定义表名
+
+要自定义数据库表名，可以使用 `@EnableJdbcHttpSession` 注解中的 `tableName` 属性：
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+@Configuration
+@EnableJdbcHttpSession(tableName = "MY_TABLE_NAME")
+public class SessionConfig {
+    //...
+}
+----
+======
+
+另一种方法是将 `SessionRepositoryCustomizer<JdbcIndexedSessionRepository>` 的实现暴露为 Bean，直接在实现中修改表名：
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+@Configuration
+@EnableJdbcHttpSession
+public class SessionConfig {
+
+    @Bean
+    public TableNameCustomizer tableNameCustomizer() {
+        return new TableNameCustomizer();
+    }
+
+}
+
+public class TableNameCustomizer
+        implements SessionRepositoryCustomizer<JdbcIndexedSessionRepository> {
+
+    @Override
+    public void customize(JdbcIndexedSessionRepository sessionRepository) {
+        sessionRepository.setTableName("MY_TABLE_NAME");
+    }
+
+}
+----
+======
+
+[[customize-sql-queries]]
+== 自定义 SQL 查询
+
+有时，能够自定义 Spring Session JDBC 执行的 SQL 查询非常有用。
+存在某些场景下，会话或其属性可能在数据库中被并发修改。例如，一个请求试图插入已存在的属性，导致主键冲突异常。
+因此，你可以应用特定于 RDBMS 的查询来处理这些情况。
+要自定义 Spring Session JDBC 对数据库执行的 SQL 查询，可以使用 `JdbcIndexedSessionRepository` 提供的 `set*Query` 方法：
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+@Configuration
+@EnableJdbcHttpSession
+public class SessionConfig {
+
+    @Bean
+    public QueryCustomizer tableNameCustomizer() {
+        return new QueryCustomizer();
+    }
+
+}
+
+public class QueryCustomizer
+        implements SessionRepositoryCustomizer<JdbcIndexedSessionRepository> {
+
+    private static final String CREATE_SESSION_ATTRIBUTE_QUERY = """
+            INSERT INTO %TABLE_NAME%_ATTRIBUTES (SESSION_PRIMARY_ID, ATTRIBUTE_NAME, ATTRIBUTE_BYTES) <1>
+            VALUES (?, ?, ?)
+            ON CONFLICT (SESSION_PRIMARY_ID, ATTRIBUTE_NAME)
+            DO NOTHING
+            """;
+
+    private static final String UPDATE_SESSION_ATTRIBUTE_QUERY = """
+		UPDATE %TABLE_NAME%_ATTRIBUTES
+		SET ATTRIBUTE_BYTES = convert_from(?, 'UTF8')::jsonb
+		WHERE SESSION_PRIMARY_ID = ?
+		AND ATTRIBUTE_NAME = ?
+		""";
+
+    @Override
+    public void customize(JdbcIndexedSessionRepository sessionRepository) {
+        sessionRepository.setCreateSessionAttributeQuery(CREATE_SESSION_ATTRIBUTE_QUERY);
+        sessionRepository.setUpdateSessionAttributeQuery(UPDATE_SESSION_ATTRIBUTE_QUERY);
+    }
+
+}
+----
+======
+
+<1> 查询中的 `%TABLE_NAME%` 占位符将被 `JdbcIndexedSessionRepository` 使用的实际表名替换。
+
+[TIP]
+====
+Spring Session JDBC 提供了几个 `SessionRepositoryCustomizer<JdbcIndexedSessionRepository>` 的实现，它们为最常见的 RDBMS 配置了优化后的 SQL 查询。
+====
+
+[[session-attributes-as-json]]
+== 将会话属性保存为 JSON
+
+默认情况下，Spring Session JDBC 将会话属性值保存为字节数组，该数组是由属性值通过 JDK 序列化生成的。
+
+有时，将属性以其他格式（如 JSON）保存会更方便，特别是当 RDBMS 原生支持 JSON 时，可以在 SQL 查询中提供更好的函数和操作符兼容性。
+
+在此示例中，我们将使用 https://www.postgresql.org/[PostgreSQL] 作为我们的 RDBMS，并使用 JSON 而非 JDK 序列化来序列化会话属性值。
+首先，我们创建 `SPRING_SESSION_ATTRIBUTES` 表，并将 `attribute_values` 列设置为 `jsonb` 类型。
+
+[tabs]
+======
+SQL::
++
+[source,sql]
+----
+CREATE TABLE SPRING_SESSION
+(
+    -- ...
+);
+
+-- indexes...
+
+CREATE TABLE SPRING_SESSION_ATTRIBUTES
+(
+    -- ...
+    ATTRIBUTE_BYTES    JSONB        NOT NULL,
+    -- ...
+);
+
+----
+======
+
+为了自定义属性值的序列化方式，首先我们需要为 Spring Session JDBC 提供一个 {spring-framework-ref-docs}/core/validation/convert.html#core-convert-ConversionService-API[自定义 `ConversionService`]，负责在 `Object` 和 `byte[]` 之间进行转换。
+为此，我们可以创建一个名为 `springSessionConversionService` 的 `ConversionService` 类型的 Bean。
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+import org.springframework.beans.factory.BeanClassLoaderAware;
+import org.springframework.core.serializer.support.DeserializingConverter;
+import org.springframework.core.serializer.support.SerializingConverter;
+
+@Configuration
+@EnableJdbcHttpSession
+public class SessionConfig implements BeanClassLoaderAware {
+
+    private ClassLoader classLoader;
+
+    @Bean("springSessionConversionService")
+    public GenericConversionService springSessionConversionService(ObjectMapper objectMapper) { <1>
+        ObjectMapper copy = objectMapper.copy(); <2>
+        // Register Spring Security Jackson Modules
+        copy.registerModules(SecurityJackson2Modules.getModules(this.classLoader)); <3>
+        // Activate default typing explicitly if not using Spring Security
+        // copy.activateDefaultTyping(copy.getPolymorphicTypeValidator(), ObjectMapper.DefaultTyping.NON_FINAL, JsonTypeInfo.As.PROPERTY);
+        GenericConversionService converter = new GenericConversionService();
+        converter.addConverter(Object.class, byte[].class, new SerializingConverter(new JsonSerializer(copy))); <4>
+        converter.addConverter(byte[].class, Object.class, new DeserializingConverter(new JsonDeserializer(copy))); <4>
+        return converter;
+    }
+
+    @Override
+    public void setBeanClassLoader(ClassLoader classLoader) {
+        this.classLoader = classLoader;
+    }
+
+    static class JsonSerializer implements Serializer<Object> {
+
+        private final ObjectMapper objectMapper;
+
+        JsonSerializer(ObjectMapper objectMapper) {
+            this.objectMapper = objectMapper;
+        }
+
+        @Override
+        public void serialize(Object object, OutputStream outputStream) throws IOException {
+            this.objectMapper.writeValue(outputStream, object);
+        }
+
+    }
+
+    static class JsonDeserializer implements Deserializer<Object> {
+
+        private final ObjectMapper objectMapper;
+
+        JsonDeserializer(ObjectMapper objectMapper) {
+            this.objectMapper = objectMapper;
+        }
+
+        @Override
+        public Object deserialize(InputStream inputStream) throws IOException {
+            return this.objectMapper.readValue(inputStream, Object.class);
+        }
+
+    }
+
+}
+----
+======
+
+<1> 注入应用程序中默认使用的 `ObjectMapper`。你也可以选择创建一个新的实例。
+<2> 创建该 `ObjectMapper` 的副本，以便仅对副本进行更改。
+<3> 由于我们使用了 Spring Security，必须注册其 Jackson 模块，以告知 Jackson 如何正确地序列化/反序列化 Spring Security 的对象。对于其他持久化在会话中的对象，你也可能需要做类似的操作。
+<4> 将我们创建的 `JsonSerializer` / `JsonDeserializer` 添加到 `ConversionService` 中。
+
+现在我们已经配置好了 Spring Session JDBC 如何将属性值转换为 `byte[]`，接下来需要自定义插入和更新会话属性的 SQL 查询。
+之所以需要此定制，是因为 Spring Session JDBC 在 SQL 语句中以字节形式设置内容，而 `bytea` 与 `jsonb` 不兼容，所以我们需要先将 `bytea` 值编码为文本，再将其转换为 `jsonb`。
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+@Configuration
+@EnableJdbcHttpSession
+public class SessionConfig {
+
+    private static final String CREATE_SESSION_ATTRIBUTE_QUERY = """
+            INSERT INTO %TABLE_NAME%_ATTRIBUTES (SESSION_PRIMARY_ID, ATTRIBUTE_NAME, ATTRIBUTE_BYTES)
+            VALUES (?, ?, convert_from(?, 'UTF8')::jsonb) <1>
+            """;
+
+    private static final String UPDATE_SESSION_ATTRIBUTE_QUERY = """
+            UPDATE %TABLE_NAME%_ATTRIBUTES
+            SET ATTRIBUTE_BYTES = convert_from(?, 'UTF8')::jsonb
+            WHERE SESSION_PRIMARY_ID = ?
+            AND ATTRIBUTE_NAME = ?
+            """;
+
+    @Bean
+    SessionRepositoryCustomizer<JdbcIndexedSessionRepository> customizer() {
+        return (sessionRepository) -> {
+            sessionRepository.setCreateSessionAttributeQuery(CREATE_SESSION_ATTRIBUTE_QUERY);
+            sessionRepository.setUpdateSessionAttributeQuery(UPDATE_SESSION_ATTRIBUTE_QUERY);
+        };
+    }
+
+}
+----
+======
+
+<1> 使用 https://www.postgresql.org/docs/current/functions-binarystring.html[PostgreSQL encode] 函数将 `bytea` 转换为 `text`
+
+就这样，你现在应该可以看到数据库中会话属性是以 JSON 形式保存的了。
+这里有一个可用的 https://github.com/spring-projects/spring-session/tree/main/spring-session-samples/spring-session-sample-boot-jdbc-json-attribute[示例项目]，你可以查看完整实现并运行测试。
+
+[NOTE]
+====
+如果你的 https://docs.spring.io/spring-security/reference/servlet/authentication/passwords/user-details.html#page-title[`UserDetails` 实现] 继承自 Spring Security 的 `org.springframework.security.core.userdetails.User` 类，则必须为其注册一个自定义反序列化器。
+否则，Jackson 将使用现有的 `org.springframework.security.jackson2.UserDeserializer`，这可能导致无法得到预期的 `UserDetails` 实现。更多详情请参见 https://github.com/spring-projects/spring-session/issues/3009[gh-3009]。
+====
+
+[[specifying-datasource]]
+== 指定替代的 `DataSource`
+
+默认情况下，Spring Session JDBC 使用应用中可用的主要 `DataSource` Bean。
+然而，在某些场景下，应用程序可能有多个 `DataSource` Bean。在这种情况下，你可以通过使用 `@SpringSessionDataSource` 注解标注 Bean，来告诉 Spring Session JDBC 应该使用哪一个 `DataSource`：
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+import org.springframework.session.jdbc.config.annotation.SpringSessionDataSource;
+
+@Configuration
+@EnableJdbcHttpSession
+public class SessionConfig {
+
+    @Bean
+    public DataSource dataSourceOne() {
+        // create and configure datasource
+        return dataSourceOne;
+    }
+
+    @Bean
+    @SpringSessionDataSource <1>
+    public DataSource dataSourceTwo() {
+        // create and configure datasource
+        return dataSourceTwo;
+    }
+
+}
+----
+======
+
+<1> 我们使用 `@SpringSessionDataSource` 注解标注 `dataSourceTwo` Bean，以指示 Spring Session JDBC 使用该 Bean 作为 `DataSource`。
+
+[[customizing-transaction-operations]]
+== 自定义 Spring Session JDBC 的事务使用方式
+
+所有 JDBC 操作都是以事务方式进行的。
+事务的传播行为被设置为 `REQUIRES_NEW`，以避免因与现有事务交互而导致意外行为（例如，在已参与只读事务的线程中执行保存操作）。
+若要自定义 Spring Session JDBC 使用事务的方式，可以提供一个名为 `springSessionTransactionOperations` 的 `TransactionOperations` Bean。
+例如，如果你想完全禁用事务，可以这样做：
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+import org.springframework.transaction.support.TransactionOperations;
+
+@Configuration
+@EnableJdbcHttpSession
+public class SessionConfig {
+
+    @Bean("springSessionTransactionOperations")
+    public TransactionOperations springSessionTransactionOperations() {
+        return TransactionOperations.withoutTransaction();
+    }
+
+}
+----
+======
+
+如果你需要更多控制权，还可以提供 `TransactionTemplate` 所使用的 `TransactionManager`。
+默认情况下，Spring Session 会尝试从应用上下文中解析主要的 `TransactionManager` Bean。
+在某些场景下（例如存在多个 `DataSource` 时），很可能也会存在多个 `TransactionManager`，此时你可以使用 `@SpringSessionTransactionManager` 注解来指定希望与 Spring Session JDBC 一起使用的 `TransactionManager` Bean：
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+@Configuration
+@EnableJdbcHttpSession
+public class SessionConfig {
+
+    @Bean
+    @SpringSessionTransactionManager
+    public TransactionManager transactionManager1() {
+        return new MyTransactionManager();
+    }
+
+    @Bean
+    public TransactionManager transactionManager2() {
+        return otherTransactionManager;
+    }
+
+}
+----
+======
+
+[[customizing-cleanup-job]]
+== 自定义过期会话清理任务
+
+为了避免数据库中积累过多已过期的会话，Spring Session JDBC 每分钟都会执行一次清理任务，删除已过期的会话及其属性。
+你可能会出于多种原因想要自定义这个清理任务，下面我们来看最常见的几种情况。
+但请注意，默认任务的可定制性有限——这是有意为之的设计，因为 Spring Session 并不打算提供强大的批处理功能，这类工作更适合由专门的框架或库（如 Spring Batch）来完成。
+因此，如果你需要更高的定制能力，请考虑<<disabling-the-job,禁用默认任务>> 并自行实现。
+
+[[customizing-cleaned-up-frequency]]
+=== 自定义清理频率
+
+你可以通过 `@EnableJdbcHttpSession` 中的 `cleanupCron` 属性来自定义 {spring-framework-ref-docs}/integration/scheduling.html#scheduling-cron-expression[cron 表达式]，从而控制清理任务的执行频率：
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+@Configuration
+@EnableJdbcHttpSession(cleanupCron = "0 0 * * * *") // 每天每小时整点执行
+public class SessionConfig {
+
+}
+----
+======
+
+或者，如果你使用的是 Spring Boot，可以设置 `spring.session.jdbc.cleanup-cron` 属性：
+
+[tabs]
+======
+application.properties::
++
+[source,properties]
+----
+spring.session.jdbc.cleanup-cron="0 0 * * * *"
+----
+======
+
+[[disabling-the-job]]
+=== 禁用清理任务
+
+要禁用该任务，需将 `Scheduled.CRON_DISABLED` 传给 `@EnableJdbcHttpSession` 的 `cleanupCron` 属性：
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+@Configuration
+@EnableJdbcHttpSession(cleanupCron = Scheduled.CRON_DISABLED)
+public class SessionConfig {
+
+}
+----
+======
+
+=== 自定义按过期时间删除的查询
+
+你可以通过 `SessionRepositoryCustomizer<JdbcIndexedSessionRepository>` Bean，调用 `JdbcIndexedSessionRepository.setDeleteSessionsByExpiryTimeQuery` 方法来自定义删除过期会话的查询：
+
+[tabs]
+======
+Java::
++
+[source,java]
+----
+@Configuration
+@EnableJdbcHttpSession
+public class SessionConfig {
+
+    @Bean
+    public SessionRepositoryCustomizer<JdbcIndexedSessionRepository> customizer() {
+        return (sessionRepository) -> sessionRepository.setDeleteSessionsByExpiryTimeQuery("""
+            DELETE FROM %TABLE_NAME%
+            WHERE EXPIRY_TIME < ?
+            AND OTHER_COLUMN = 'value'
+            """);
+    }
+
+}
+----
+======

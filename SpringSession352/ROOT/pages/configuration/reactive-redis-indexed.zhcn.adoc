@@ -1,0 +1,228 @@
+[[reactive-indexed-redis-configurations]]
+= Reactive Redis 索引化配置
+
+要开始使用 Redis 索引化的 Web 会话支持，你需要将以下依赖项添加到项目中：
+
+[tabs]
+======
+Maven::
++
+[source,xml]
+----
+<dependency>
+    <groupId>org.springframework.session</groupId>
+    <artifactId>spring-session-data-redis</artifactId>
+</dependency>
+----
+Gradle::
++
+[source,groovy]
+----
+implementation 'org.springframework.session:spring-session-data-redis'
+----
+======
+
+然后，在一个配置类上添加 `@EnableRedisIndexedWebSession` 注解：
+
+[source,java,role="primary"]
+----
+@Configuration
+@EnableRedisIndexedWebSession
+public class SessionConfig {
+    // ...
+}
+----
+
+就这样。你的应用现在具备了基于 Reactive 模式的 Redis 支持的索引化 Web 会话功能。  
+配置完成后，你可能希望对某些行为进行自定义：
+
+- 我想 <<serializing-session-using-json,使用 JSON 序列化会话>>。
+- 我想 <<using-a-different-namespace,为 Spring Session 使用的键指定不同的命名空间>>。
+- 我想知道 <<how-spring-session-cleans-up-expired-sessions,Spring Session 如何清理过期会话>>。
+- 我想 <<changing-the-frequency-of-the-session-cleanup,更改会话清理的频率>>。
+- 我想 <<taking-control-over-the-cleanup-task,接管清理任务的控制权>>。
+- 我想 <<listening-session-events,监听会话事件>>。
+
+[[serializing-session-using-json]]
+== 使用 JSON 序列化会话
+
+默认情况下，Spring Session Data Redis 使用 Java 原生序列化机制来序列化会话属性。  
+但在某些情况下这可能会出现问题，尤其是当多个应用程序共享同一个 Redis 实例，但它们拥有相同类的不同版本时。
+
+你可以提供一个名为 `RedisSerializer` 的 Bean 来自定义会话在 Redis 中的序列化方式。  
+Spring Data Redis 提供了 `GenericJackson2JsonRedisSerializer`，它使用 Jackson 的 `ObjectMapper` 来实现对象的序列化和反序列化。
+
+====
+.配置 RedisSerializer
+[source,java]
+----
+include::{samples-dir}spring-session-sample-boot-redis-json/src/main/java/sample/config/SessionConfig.java[tags=class]
+----
+====
+
+上面的代码片段使用了 Spring Security，因此我们创建了一个自定义的 `ObjectMapper`，并注册了 Spring Security 的 Jackson 模块。  
+如果你不需要 Spring Security 的 Jackson 模块，可以直接注入你应用中的 `ObjectMapper` Bean 并像下面这样使用：
+
+====
+[source,java]
+----
+@Bean
+public RedisSerializer<Object> springSessionDefaultRedisSerializer(ObjectMapper objectMapper) {
+    return new GenericJackson2JsonRedisSerializer(objectMapper);
+}
+----
+====
+
+[NOTE]
+====
+`RedisSerializer` Bean 的名称必须是 `springSessionDefaultRedisSerializer`，以避免与 Spring Data Redis 使用的其他 `RedisSerializer` Bean 发生冲突。  
+如果使用其他名称，Spring Session 将不会识别该 Bean。
+====
+
+[[using-a-different-namespace]]
+== 指定不同的命名空间
+
+多个应用程序共用同一个 Redis 实例，或希望将会话数据与其他 Redis 数据隔离是很常见的需求。  
+为此，Spring Session 使用一个 `namespace`（默认值为 `spring:session`）来隔离会话数据。
+
+你可以通过在 `@EnableRedisIndexedWebSession` 注解中设置 `redisNamespace` 属性来自定义命名空间：
+
+====
+.指定不同的命名空间
+[source,java,role="primary"]
+----
+@Configuration
+@EnableRedisIndexedWebSession(redisNamespace = "spring:session:myapplication")
+public class SessionConfig {
+    // ...
+}
+----
+====
+
+[[how-spring-session-cleans-up-expired-sessions]]
+== 理解 Spring Session 如何清理过期会话
+
+Spring Session 依赖 https://redis.io/docs/manual/keyspace-notifications/[Redis 键空间事件] 来清理过期的会话。  
+具体来说，它监听发布到 `pass:[__keyevent@*__:expired]` 和 `pass:[__keyevent@*__:del]` 频道的事件，并根据被删除的键解析出对应的会话 ID。
+
+举个例子：假设有一个 ID 为 `1234` 的会话，且该会话设定在 30 分钟后过期。  
+当过期时间到达时，Redis 会向 `pass:[__keyevent@*__:expired]` 频道发送一条消息，内容为 `spring:session:sessions:expires:1234`，表示这个键已经过期。  
+Spring Session 接收到事件后，从该键中解析出会话 ID（即 `1234`），然后删除 Redis 中所有与此会话相关的键。
+
+仅依赖 Redis 自动过期机制的一个问题是：Redis 并不能保证在键过期时立即触发过期事件，除非该键被访问过。  
+更多细节请参见 Redis 官方文档中的 https://redis.io/commands/expire/#:~:text=How%20Redis%20expires%20keys[Redis 如何过期键]。
+
+为了规避“过期事件不一定会触发”的问题，我们可以确保每个键在其预期过期时被访问一次。  
+这意味着，如果某个键的 TTL 已经到期，当我们尝试访问它时，Redis 会立即删除该键并触发过期事件。  
+因此，Spring Session 还会将每个会话 ID 存入一个按过期时间排序的有序集合中，用于追踪会话的过期时间。  
+这使得后台任务可以主动访问那些可能已过期的会话，从而更确定地触发 Redis 的过期事件。例如：
+----
+ZADD spring:session:sessions:expirations "1.702402961162E12" "648377f7-c76f-4f45-b847-c0268bb48381"
+----
+
+我们不会显式地删除这些键，因为在某些情况下可能存在竞争条件，错误地判断一个尚未过期的键为已过期。  
+如果不使用分布式锁（而这会严重影响性能），就无法完全保证过期映射的一致性。  
+通过简单地访问该键，我们可以确保只有当键的 TTL 确实已过期时才会被删除。
+
+默认情况下，Spring Session 每隔 60 秒检查最多 100 个过期会话。  
+如果你想调整清理任务的执行频率，请参考 <<changing-the-frequency-of-the-session-cleanup,更改会话清理频率>> 章节。
+
+== 配置 Redis 发送键空间事件
+
+默认情况下，Spring Session 会尝试使用 `ConfigureNotifyKeyspaceEventsReactiveAction` 来配置 Redis 发送键空间事件，这可能会将 `notify-keyspace-events` 配置项设置为 `Egx`。  
+然而，如果 Redis 实例已被安全加固，这种自动配置方式将失效。  
+此时应通过外部方式配置 Redis，并暴露一个类型为 `ConfigureReactiveRedisAction.NO_OP` 的 Bean 来禁用自动配置。
+
+[source,java]
+----
+@Bean
+public ConfigureReactiveRedisAction configureReactiveRedisAction() {
+    return ConfigureReactiveRedisAction.NO_OP;
+}
+----
+
+[[changing-the-frequency-of-the-session-cleanup]]
+== 更改会话清理的频率
+
+根据你的应用需求，你可能需要调整会话清理的频率。  
+为此，你可以声明一个 `ReactiveSessionRepositoryCustomizer<ReactiveRedisIndexedSessionRepository>` Bean，并设置 `cleanupInterval` 属性：
+
+[source,java]
+----
+@Bean
+public ReactiveSessionRepositoryCustomizer<ReactiveRedisIndexedSessionRepository> reactiveSessionRepositoryCustomizer() {
+    return (sessionRepository) -> sessionRepository.setCleanupInterval(Duration.ofSeconds(30));
+}
+----
+
+你也可以调用 `disableCleanupTask()` 方法来完全禁用清理任务：
+
+[source,java]
+----
+@Bean
+public ReactiveSessionRepositoryCustomizer<ReactiveRedisIndexedSessionRepository> reactiveSessionRepositoryCustomizer() {
+    return (sessionRepository) -> sessionRepository.disableCleanupTask();
+}
+----
+
+[[taking-control-over-the-cleanup-task]]
+=== 接管清理任务的控制权
+
+有时，默认的清理任务可能无法满足你的应用需求。  
+你可能希望采用不同的策略来清理过期会话。  
+由于你知道 <<how-spring-session-cleans-up-expired-sessions,会话 ID 被存储在一个名为 `spring:session:sessions:expirations` 的有序集合中，并按过期时间排序>>，  
+你可以 <<changing-the-frequency-of-the-session-cleanup,禁用默认的清理任务>>，并实现自己的清理逻辑。例如：
+
+[source,java]
+----
+@Component
+public class SessionEvicter {
+
+    private ReactiveRedisOperations<String, String> redisOperations;
+
+    @Scheduled
+    public Mono<Void> cleanup() {
+        Instant now = Instant.now();
+        Instant oneMinuteAgo = now.minus(Duration.ofMinutes(1));
+        Range<Double> range = Range.closed((double) oneMinuteAgo.toEpochMilli(), (double) now.toEpochMilli());
+        Limit limit = Limit.limit().count(1000);
+        return this.redisOperations.opsForZSet().reverseRangeByScore("spring:session:sessions:expirations", range, limit)
+                // 对获取到的会话 ID 执行相应操作
+                .then();
+    }
+
+}
+----
+
+[[listening-session-events]]
+== 监听会话事件
+
+通常，响应会话事件非常有用，例如你可能希望根据会话生命周期执行某些处理逻辑。
+
+你可以配置应用来监听 `SessionCreatedEvent`、`SessionDeletedEvent` 和 `SessionExpiredEvent` 等事件。  
+在 Spring 中有 https://docs.spring.io/spring-framework/reference/core/beans/context-introduction.html#context-functionality-events[多种方式监听应用事件]，本示例中我们将使用 `@EventListener` 注解。
+
+====
+[source,java]
+----
+@Component
+public class SessionEventListener {
+
+    @EventListener
+    public Mono<Void> processSessionCreatedEvent(SessionCreatedEvent event) {
+        // 执行必要的处理逻辑
+    }
+
+    @EventListener
+    public Mono<Void> processSessionDeletedEvent(SessionDeletedEvent event) {
+        // 执行必要的处理逻辑
+    }
+
+    @EventListener
+    public Mono<Void> processSessionExpiredEvent(SessionExpiredEvent event) {
+        // 执行必要的处理逻辑
+    }
+
+}
+----
+====

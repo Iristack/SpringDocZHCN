@@ -1,0 +1,4 @@
+= 3.4 版本中的新特性
+
+- https://github.com/spring-projects/spring-session/issues/2787[gh-2787] - 为 `DefaultCookieSerializer` 添加对分区 Cookie 的支持
+- https://github.com/spring-projects/spring-session/issues/2906[gh-2906] - xref:configuration/redis.adoc#customizing-session-expiration-store[文档] - 允许自定义 `RedisIndexedHttpSession` 中的过期策略

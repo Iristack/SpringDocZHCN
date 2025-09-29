@@ -1,0 +1,4 @@
+[[configuration]]
+= 配置
+
+本节提供了针对 Spring Session 支持的每种数据存储进行进一步配置的指导。

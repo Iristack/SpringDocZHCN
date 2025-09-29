@@ -1,0 +1,104 @@
+[[samples]]
+= 示例与指南（从此开始）
+
+要开始使用 Spring Session，最佳起点是我们的示例应用程序。
+
+.使用 Spring Boot 的示例应用程序
+|===
+| 源码 | 描述 | 指南
+
+| {gh-samples-url}spring-session-sample-boot-redis[HttpSession 与 Redis]
+| 演示如何使用 Spring Session 将 `HttpSession` 替换为 Redis。
+| link:guides/boot-redis.html[HttpSession 与 Redis 指南]
+
+| {gh-samples-url}spring-session-sample-boot-jdbc[HttpSession 与 JDBC]
+| 演示如何使用 Spring Session 将 `HttpSession` 替换为关系型数据库存储。
+| link:guides/boot-jdbc.html[HttpSession 与 JDBC 指南]
+
+| {gh-samples-url}spring-session-sample-boot-hazelcast[HttpSession 与 Hazelcast]
+| 演示如何使用 Spring Session 将 `HttpSession` 替换为 Hazelcast。
+|
+
+| {gh-samples-url}spring-session-sample-boot-findbyusername[按用户名查找]
+| 演示如何使用 Spring Session 根据用户名查找会话。
+| link:guides/boot-findbyusername.html[按用户名查找指南]
+
+| {gh-samples-url}spring-session-sample-boot-websocket[WebSockets]
+| 演示如何在 WebSockets 中使用 Spring Session。
+| link:guides/boot-websocket.html[WebSockets 指南]
+
+| {gh-samples-url}spring-session-sample-boot-webflux[WebFlux]
+| 演示如何使用 Spring Session 将 Spring WebFlux 的 `WebSession` 替换为 Redis。
+|
+
+| {gh-samples-url}spring-session-sample-boot-webflux-custom-cookie[WebFlux 与自定义 Cookie]
+| 演示如何在基于 WebFlux 的应用中使用 Spring Session 自定义会话 Cookie。
+| link:guides/boot-webflux-custom-cookie.html[WebFlux 与自定义 Cookie 指南]
+
+| {gh-samples-url}spring-session-sample-boot-redis-json[HttpSession 与 Redis JSON 序列化]
+| 演示如何使用 JSON 序列化方式将 `HttpSession` 替换为 Redis 存储。
+|
+
+| {gh-samples-url}spring-session-sample-boot-mongodb-traditional[Spring Session 与 MongoDB 仓库（基于 Servlet）]
+| 演示如何使用传统的 MongoDB 仓库支持 Spring Session。
+| link:guides/boot-mongo.html[Spring Session 与 MongoDB 仓库]
+
+| {gh-samples-url}spring-session-sample-boot-mongodb-reactive[Spring Session 与 MongoDB 仓库（响应式）]
+| 演示如何使用响应式的 MongoDB 仓库支持 Spring Session。
+| link:guides/boot-mongo.html[Spring Session 与 MongoDB 仓库]
+
+|===
+
+.使用 Spring 基于 Java 配置的示例应用程序
+|===
+| 源码 | 描述 | 指南
+
+| {gh-samples-url}spring-session-sample-javaconfig-redis[HttpSession 与 Redis]
+| 演示如何使用 Spring Session 将 `HttpSession` 替换为 Redis。
+| link:guides/java-redis.html[HttpSession 与 Redis 指南]
+
+| {gh-samples-url}spring-session-sample-javaconfig-jdbc[HttpSession 与 JDBC]
+| 演示如何使用 Spring Session 将 `HttpSession` 替换为关系型数据库存储。
+| link:guides/java-jdbc.html[HttpSession 与 JDBC 指南]
+
+| {gh-samples-url}spring-session-sample-javaconfig-hazelcast[HttpSession 与 Hazelcast]
+| 演示如何使用 Spring Session 将 `HttpSession` 替换为 Hazelcast。
+| link:guides/java-hazelcast.html[HttpSession 与 Hazelcast 指南]
+
+| {gh-samples-url}spring-session-sample-javaconfig-custom-cookie[自定义 Cookie]
+| 演示如何使用 Spring Session 并自定义会话 Cookie。
+| link:guides/java-custom-cookie.html[自定义 Cookie 指南]
+
+| {gh-samples-url}spring-session-sample-javaconfig-security[Spring Security]
+| 演示如何在已有的 Spring Security 应用中集成 Spring Session。
+| link:guides/java-security.html[Spring Security 指南]
+
+| {gh-samples-url}spring-session-sample-javaconfig-rest[REST]
+| 演示如何在 REST 应用中使用 Spring Session，以支持通过请求头进行身份验证。
+| link:guides/java-rest.html[REST 指南]
+
+|===
+
+.使用 Spring 基于 XML 配置的示例应用程序
+|===
+| 源码 | 描述 | 指南
+
+| {gh-samples-url}spring-session-sample-xml-redis[HttpSession 与 Redis]
+| 演示如何使用 Spring Session 将 `HttpSession` 替换为 Redis 存储。
+| link:guides/xml-redis.html[HttpSession 与 Redis 指南]
+
+| {gh-samples-url}spring-session-sample-xml-jdbc[HttpSession 与 JDBC]
+| 演示如何使用 Spring Session 将 `HttpSession` 替换为关系型数据库存储。
+| link:guides/xml-jdbc.html[HttpSession 与 JDBC 指南]
+
+|===
+
+.其他示例应用程序
+|===
+| 源码 | 描述 | 指南
+
+| {gh-samples-url}spring-session-sample-misc-hazelcast[Hazelcast]
+| 演示如何在 Java EE 应用中使用 Spring Session 与 Hazelcast。
+|
+
+|===

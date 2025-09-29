@@ -1,0 +1,461 @@
+[[redis-configurations]]
+= Redis 配置
+
+现在你的应用已经配置完成，你可能希望开始进行一些自定义设置：
+
+- 我想使用 Spring Boot 属性 <<{spring-boot-ref-docs}/application-properties.html#application-properties.data.spring.data.redis.host,自定义 Redis 配置>>
+- 我需要帮助 <<choosing-between-regular-and-indexed,选择>> 使用 `RedisSessionRepository` 还是 `RedisIndexedSessionRepository`
+- 我想 <<serializing-session-using-json,使用 JSON 序列化会话>>
+- 我想 <<using-a-different-namespace,指定不同的命名空间>>
+- 我想 <<listening-session-events,了解何时创建、删除、销毁或过期会话>>
+- 我想 <<finding-all-user-sessions,查找特定用户的所有会话>>
+- 我想 <<configuring-redis-session-mapper,安全地反序列化 Redis 会话>>
+- 自定义 <<customizing-session-expiration-store,会话过期存储>>
+
+[[serializing-session-using-json]]
+== 使用 JSON 序列化会话
+
+默认情况下，Spring Session 使用 Java 序列化来序列化会话属性。  
+有时这可能会带来问题，特别是当你有多个使用相同 Redis 实例但具有同一类不同版本的应用程序时。  
+你可以提供一个 `RedisSerializer` Bean 来自定义会话如何被序列化到 Redis 中。  
+Spring Data Redis 提供了 `GenericJackson2JsonRedisSerializer`，它使用 Jackson 的 `ObjectMapper` 来序列化和反序列化对象。
+
+====
+.配置 RedisSerializer
+[source,java]
+----
+include::{samples-dir}spring-session-sample-boot-redis-json/src/main/java/sample/config/SessionConfig.java[tags=class]
+----
+====
+
+上面的代码片段使用了 Spring Security，因此我们创建了一个使用 Spring Security Jackson 模块的自定义 `ObjectMapper`。  
+如果你不需要 Spring Security 的 Jackson 模块，可以注入你应用程序中的 `ObjectMapper` Bean 并像下面这样使用：
+
+====
+[source,java]
+----
+@Bean
+public RedisSerializer<Object> springSessionDefaultRedisSerializer(ObjectMapper objectMapper) {
+    return new GenericJackson2JsonRedisSerializer(objectMapper);
+}
+----
+====
+
+[[using-a-different-namespace]]
+== 指定不同的命名空间
+
+多个应用程序共享同一个 Redis 实例是很常见的场景。  
+因此，Spring Session 使用一个 `namespace`（默认为 `spring:session`）来在必要时隔离会话数据。
+
+=== 使用 Spring Boot 属性
+
+你可以通过设置 `spring.session.redis.namespace` 属性来指定命名空间。
+
+====
+.application.properties
+[source,properties,role="primary"]
+----
+spring.session.redis.namespace=spring:session:myapplication
+----
+
+.application.yml
+[source,yml,role="secondary"]
+----
+spring:
+  session:
+    redis:
+      namespace: "spring:session:myapplication"
+----
+====
+
+=== 使用注解属性
+
+你可以在 `@EnableRedisHttpSession`、`@EnableRedisIndexedHttpSession` 或 `@EnableRedisWebSession` 注解中设置 `redisNamespace` 属性来指定命名空间：
+
+====
+.@EnableRedisHttpSession
+[source,java,role="primary"]
+----
+@Configuration
+@EnableRedisHttpSession(redisNamespace = "spring:session:myapplication")
+public class SessionConfig {
+    // ...
+}
+----
+
+.@EnableRedisIndexedHttpSession
+[source,java,role="secondary"]
+----
+@Configuration
+@EnableRedisIndexedHttpSession(redisNamespace = "spring:session:myapplication")
+public class SessionConfig {
+    // ...
+}
+----
+
+.@EnableRedisWebSession
+[source,java,role="secondary"]
+----
+@Configuration
+@EnableRedisWebSession(redisNamespace = "spring:session:myapplication")
+public class SessionConfig {
+    // ...
+}
+----
+====
+
+[[choosing-between-regular-and-indexed]]
+== 在 `RedisSessionRepository` 和 `RedisIndexedSessionRepository` 之间选择
+
+在使用 Spring Session Redis 时，你通常需要在 `RedisSessionRepository` 和 `RedisIndexedSessionRepository` 之间做出选择。  
+两者都是将会话数据存储在 Redis 中的 `SessionRepository` 接口实现，但在会话索引和查询方式上有所不同。
+
+- `RedisSessionRepository`：这是一个基础实现，以简单的键值结构将在 Redis 中存储会话数据，不包含额外的索引功能。每个会话都有唯一的会话 ID，会话数据存储在与该 ID 关联的 Redis 键下。当需要获取会话时，仓库通过会话 ID 查询 Redis 获取对应的数据。由于没有索引，基于除会话 ID 外的其他属性或条件查询会话效率较低。
+
+- `RedisIndexedSessionRepository`：这是扩展实现，提供了对 Redis 中会话的索引能力。它在 Redis 中引入了额外的数据结构，以便高效地根据属性或条件查询会话。除了 `RedisSessionRepository` 使用的键值结构外，它还维护额外的索引来支持快速查找。例如，它可以基于用户 ID 或最后访问时间等会话属性创建索引。这些索引允许根据特定条件高效查询会话，提升性能并支持高级会话管理功能。此外，`RedisIndexedSessionRepository` 还支持会话过期和删除。
+
+CAUTION: 当将 `RedisIndexedSessionRepository` 与 Redis Cluster 一起使用时，必须注意 https://github.com/spring-projects/spring-data-redis/issues/1111[它仅订阅集群中某个随机 Redis 节点的事件]，如果事件发生在另一个节点，则可能导致某些会话索引无法被清理。
+
+=== 配置 `RedisSessionRepository`
+
+==== 使用 Spring Boot 属性
+
+如果你使用的是 Spring Boot，`RedisSessionRepository` 是默认实现。  
+不过如果你想显式声明，可以在应用中设置以下属性：
+
+====
+.application.properties
+[source,properties,role="primary"]
+----
+spring.session.redis.repository-type=default
+----
+
+.application.yml
+[source,yml,role="secondary"]
+----
+spring:
+  session:
+    redis:
+      repository-type: default
+----
+====
+
+==== 使用注解
+
+你可以使用 `@EnableRedisHttpSession` 注解来配置 `RedisSessionRepository`：
+
+====
+[source,java,role="primary"]
+----
+@Configuration
+@EnableRedisHttpSession
+public class SessionConfig {
+    // ...
+}
+----
+====
+
+[[configuring-redisindexedsessionrepository]]
+=== 配置 `RedisIndexedSessionRepository`
+
+==== 使用 Spring Boot 属性
+
+你可以通过在应用中设置以下属性来配置 `RedisIndexedSessionRepository`：
+
+====
+.application.properties
+[source,properties,role="primary"]
+----
+spring.session.redis.repository-type=indexed
+----
+
+.application.yml
+[source,yml,role="secondary"]
+----
+spring:
+  session:
+    redis:
+      repository-type: indexed
+----
+====
+
+==== 使用注解
+
+你可以使用 `@EnableRedisIndexedHttpSession` 注解来配置 `RedisIndexedSessionRepository`：
+
+====
+[source,java,role="primary"]
+----
+@Configuration
+@EnableRedisIndexedHttpSession
+public class SessionConfig {
+    // ...
+}
+----
+====
+
+[[listening-session-events]]
+== 监听会话事件
+
+通常，响应会话事件非常有价值。例如，你可能希望根据会话生命周期执行某些处理逻辑。  
+为此，你必须使用 <<configuring-redisindexedsessionrepository,带索引的仓库>>。  
+如果你不清楚带索引仓库和默认仓库的区别，请参考 <<choosing-between-regular-and-indexed,此部分>>。
+
+配置好带索引的仓库后，你现在可以监听 `SessionCreatedEvent`、`SessionDeletedEvent`、`SessionDestroyedEvent` 和 `SessionExpiredEvent` 等事件。  
+在 Spring 中有 {docs-url}/spring-framework/reference/core/beans/context-introduction.html#context-functionality-events[多种方式监听应用事件]，我们将使用 `@EventListener` 注解。
+
+====
+[source,java]
+----
+@Component
+public class SessionEventListener {
+
+    @EventListener
+    public void processSessionCreatedEvent(SessionCreatedEvent event) {
+        // 执行必要的操作
+    }
+
+    @EventListener
+    public void processSessionDeletedEvent(SessionDeletedEvent event) {
+        // 执行必要的操作
+    }
+
+    @EventListener
+    public void processSessionDestroyedEvent(SessionDestroyedEvent event) {
+        // 执行必要的操作
+    }
+
+    @EventListener
+    public void processSessionExpiredEvent(SessionExpiredEvent event) {
+        // 执行必要的操作
+    }
+
+}
+----
+====
+
+[[finding-all-user-sessions]]
+== 查找特定用户的所有会话
+
+通过检索特定用户的所有会话，你可以跨设备或浏览器跟踪用户的活跃会话。  
+例如，你可以利用这些信息进行会话管理，如允许用户使特定会话失效或登出，或者基于用户的会话活动执行相应操作。
+
+要实现这一点，首先你必须使用 <<configuring-redisindexedsessionrepository,带索引的仓库>>，然后可以注入 `FindByIndexNameSessionRepository` 接口，如下所示：
+
+====
+[source,java]
+----
+@Autowired
+public FindByIndexNameSessionRepository<? extends Session> sessions;
+
+public Collection<? extends Session> getSessions(Principal principal) {
+    Collection<? extends Session> usersSessions = this.sessions.findByPrincipalName(principal.getName()).values();
+    return usersSessions;
+}
+
+public void removeSession(Principal principal, String sessionIdToDelete) {
+    Set<String> usersSessionIds = this.sessions.findByPrincipalName(principal.getName()).keySet();
+    if (usersSessionIds.contains(sessionIdToDelete)) {
+        this.sessions.deleteById(sessionIdToDelete);
+    }
+}
+----
+====
+
+在上面的例子中，你可以使用 `getSessions` 方法查找特定用户的所有会话，并使用 `removeSession` 方法删除用户的某个特定会话。
+
+[[configuring-redis-session-mapper]]
+== 配置 Redis 会话映射器
+
+Spring Session Redis 从 Redis 获取会话信息并将其存储在一个 `Map<String, Object>` 中。  
+这个 map 需要经过映射过程转换为 `MapSession` 对象，然后在 `RedisSession` 中使用。
+
+用于此目的的默认映射器称为 `RedisSessionMapper`。  
+如果会话 map 缺少构建会话所需的最少必要键（如 `creationTime`），该映射器将抛出异常。  
+缺少所需键的一种可能情况是：在保存过程中，会话键因过期而被并发删除。  
+这是因为使用了 https://redis.io/commands/hset/[HSET 命令] 来设置键内的字段，如果键不存在，该命令会创建它。
+
+如果你想自定义映射过程，可以创建 `BiFunction<String, Map<String, Object>, MapSession>` 的实现，并将其设置到会话仓库中。  
+以下示例展示了如何将映射委托给默认映射器，但如果抛出异常，则从 Redis 中删除该会话：
+
+[tabs]
+======
+RedisSessionRepository::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableRedisHttpSession
+public class SessionConfig {
+
+    @Bean
+    SessionRepositoryCustomizer<RedisSessionRepository> redisSessionRepositoryCustomizer() {
+        return (redisSessionRepository) -> redisSessionRepository
+                .setRedisSessionMapper(new SafeRedisSessionMapper(redisSessionRepository));
+    }
+
+    static class SafeRedisSessionMapper implements BiFunction<String, Map<String, Object>, MapSession> {
+
+        private final RedisSessionMapper delegate = new RedisSessionMapper();
+
+        private final RedisSessionRepository sessionRepository;
+
+        SafeRedisSessionMapper(RedisSessionRepository sessionRepository) {
+            this.sessionRepository = sessionRepository;
+        }
+
+        @Override
+        public MapSession apply(String sessionId, Map<String, Object> map) {
+            try {
+                return this.delegate.apply(sessionId, map);
+            }
+            catch (IllegalStateException ex) {
+                this.sessionRepository.deleteById(sessionId);
+                return null;
+            }
+        }
+
+    }
+
+}
+----
+
+RedisIndexedSessionRepository::
++
+[source,java,role="secondary"]
+----
+@Configuration
+@EnableRedisIndexedHttpSession
+public class SessionConfig {
+
+    @Bean
+    SessionRepositoryCustomizer<RedisIndexedSessionRepository> redisSessionRepositoryCustomizer() {
+        return (redisSessionRepository) -> redisSessionRepository.setRedisSessionMapper(
+                new SafeRedisSessionMapper(redisSessionRepository.getSessionRedisOperations()));
+    }
+
+    static class SafeRedisSessionMapper implements BiFunction<String, Map<String, Object>, MapSession> {
+
+        private final RedisSessionMapper delegate = new RedisSessionMapper();
+
+        private final RedisOperations<String, Object> redisOperations;
+
+        SafeRedisSessionMapper(RedisOperations<String, Object> redisOperations) {
+            this.redisOperations = redisOperations;
+        }
+
+        @Override
+        public MapSession apply(String sessionId, Map<String, Object> map) {
+            try {
+                return this.delegate.apply(sessionId, map);
+            }
+            catch (IllegalStateException ex) {
+                // 如果你使用了不同的 redis 命名空间，请相应修改 key
+                this.redisOperations.delete("spring:session:sessions:" + sessionId); // 不调用 RedisIndexedSessionRepository#deleteById 以避免无限循环（该方法也会调用此映射器）
+                return null;
+            }
+        }
+
+    }
+
+}
+----
+
+ReactiveRedisSessionRepository::
++
+[source,java,role="tertiary"]
+----
+@Configuration
+@EnableRedisWebSession
+public class SessionConfig {
+
+    @Bean
+    ReactiveSessionRepositoryCustomizer<ReactiveRedisSessionRepository> redisSessionRepositoryCustomizer() {
+        return (redisSessionRepository) -> redisSessionRepository
+                .setRedisSessionMapper(new SafeRedisSessionMapper(redisSessionRepository));
+    }
+
+    static class SafeRedisSessionMapper implements BiFunction<String, Map<String, Object>, Mono<MapSession>> {
+
+        private final RedisSessionMapper delegate = new RedisSessionMapper();
+
+        private final ReactiveRedisSessionRepository sessionRepository;
+
+        SafeRedisSessionMapper(ReactiveRedisSessionRepository sessionRepository) {
+            this.sessionRepository = sessionRepository;
+        }
+
+        @Override
+        public Mono<MapSession> apply(String sessionId, Map<String, Object> map) {
+            return Mono.fromSupplier(() -> this.delegate.apply(sessionId, map))
+                .onErrorResume(IllegalStateException.class,
+                    (ex) -> this.sessionRepository.deleteById(sessionId).then(Mono.empty()));
+        }
+
+    }
+
+}
+----
+======
+
+[[customizing-session-expiration-store]]
+== 自定义会话过期存储
+
+由于 Redis 的特性，如果一个过期的键未被访问，则不能保证其过期事件一定会被触发。  
+更多细节请参阅 Redis 文档关于 https://redis.io/docs/latest/commands/expire/#:~:text=How%20Redis%20expires%20keys[key 过期机制] 的说明。
+
+为了减轻过期事件的不确定性，会话还会以其预期的过期时间一并存储。  
+这确保了系统可以在预期过期时主动访问每个键。  
+`RedisSessionExpirationStore` 接口定义了跟踪会话及其过期时间的通用操作，并提供了一种清理过期会话的策略。
+
+默认情况下，每个会话的过期时间会被记录到最近的一分钟。  
+这使得后台任务能够访问潜在已过期的会话，从而让 Redis 的过期事件以更确定的方式触发。
+
+例如：
+[source]
+----
+SADD spring:session:expirations:1439245080000 expires:33fdd1b6-b496-4b33-9f7d-df96679d32fe
+EXPIRE spring:session:expirations:1439245080000 2100
+----
+
+然后后台任务将使用这些映射关系显式请求每个会话的过期键。  
+通过访问键而不是直接删除它，我们确保只有当 TTL 到期时 Redis 才会真正删除该键。
+
+通过自定义会话过期存储，你可以根据需求更有效地管理会话过期行为。  
+为此，你应该提供一个类型为 `RedisSessionExpirationStore` 的 Bean，Spring Session Data Redis 配置将会自动使用它：
+
+[tabs]
+======
+SessionConfig::
++
+[source,java,role="primary"]
+----
+import org.springframework.session.data.redis.SortedSetRedisSessionExpirationStore;
+
+@Configuration
+@EnableRedisIndexedHttpSession
+public class SessionConfig {
+
+    @Bean
+    public RedisSessionExpirationStore redisSessionExpirationStore(RedisConnectionFactory redisConnectionFactory) {
+        RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
+        redisTemplate.setKeySerializer(RedisSerializer.string());
+        redisTemplate.setHashKeySerializer(RedisSerializer.string());
+        redisTemplate.setConnectionFactory(redisConnectionFactory);
+        redisTemplate.afterPropertiesSet();
+        return new SortedSetRedisSessionExpirationStore(redisTemplate, RedisIndexedSessionRepository.DEFAULT_NAMESPACE);
+    }
+
+}
+----
+======
+
+上述代码中使用了 `SortedSetRedisSessionExpirationStore` 实现，该实现使用 https://redis.io/docs/latest/develop/data-types/sorted-sets/[有序集合（Sorted Set）] 来存储会话 ID，并以过期时间作为分数（score）。
+
+[NOTE]
+====
+我们不会显式删除键，因为在某些情况下可能存在竞争条件，错误地将未过期的键识别为已过期。  
+除非使用分布式锁（这会严重影响性能），否则无法保证过期映射的一致性。  
+通过简单地访问键，我们确保只有当该键的 TTL 已过期时，Redis 才会将其删除。  
+但对于你的实现，可以选择最适合的策略。
+====

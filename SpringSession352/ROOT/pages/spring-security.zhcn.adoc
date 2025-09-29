@@ -1,0 +1,66 @@
+[[spring-security]]
+= Spring Security 集成
+
+Spring Session 提供了与 Spring Security 的集成支持。
+
+[[spring-security-rememberme]]
+== Spring Security 记住我（Remember-me）功能支持
+
+Spring Session 支持 {docs-url}/spring-security/site/docs/{spring-security-core-version}/reference/html5/#servlet-rememberme[Spring Security 的“记住我”认证功能]。该支持包括：
+
+* 更改会话的过期时长
+* 确保会话 Cookie 的过期时间为 `Integer.MAX_VALUE`。  
+  将 Cookie 过期时间设置为最大可能值，是因为 Cookie 仅在会话创建时被设置。如果将其设置为与会话相同的过期时间，则当用户使用会话时会触发会话续期，但 Cookie 的过期时间不会更新（导致 Cookie 的过期时间固定不变）。
+
+要在 Java 配置中配置 Spring Session 与 Spring Security 的集成，可以参考以下示例：
+
+====
+[source,java,indent=0]
+----
+include::{docs-test-dir}docs/security/RememberMeSecurityConfiguration.java[tags=http-rememberme]
+	}
+
+include::{docs-test-dir}docs/security/RememberMeSecurityConfiguration.java[tags=rememberme-bean]
+----
+====
+
+基于 XML 的配置则类似于以下内容：
+
+====
+[source,xml,indent=0]
+----
+include::{docs-test-resources-dir}docs/security/RememberMeSecurityConfigurationXmlTests-context.xml[tags=config]
+----
+====
+
+[[spring-security-concurrent-sessions]]
+== Spring Security 并发会话控制
+
+Spring Session 提供了与 Spring Security 的集成，以支持其并发会话控制功能。这允许限制单个用户可同时拥有的活跃会话数量。与默认的 Spring Security 支持不同的是，这种机制在集群环境中同样有效。这是通过提供 Spring Security 的 `SessionRegistry` 接口的自定义实现来完成的。
+
+当使用 Spring Security 的 Java 配置 DSL 时，可以通过 `SessionManagementConfigurer` 来配置自定义的 `SessionRegistry`，如下例所示：
+
+====
+[source,java,indent=0]
+----
+include::{docs-test-dir}docs/security/SecurityConfiguration.java[tags=class]
+----
+====
+
+此配置假设你已经配置了 Spring Session，使其提供一个返回 `Session` 实例的 `FindByIndexNameSessionRepository`。
+
+若使用 XML 配置，则应类似于以下示例：
+
+====
+[source,xml,indent=0]
+----
+include::{docs-test-resources-dir}docs/security/security-config.xml[tags=config]
+----
+====
+
+此配置假设你的 Spring Session 中 `SessionRegistry` Bean 的名称为 `sessionRegistry`，这也是所有 `SpringHttpSessionConfiguration` 子类所使用的默认名称。
+
+[[spring-security-concurrent-sessions-limitations]]
+== 局限性
+
+Spring Session 对 Spring Security 的 `SessionRegistry` 接口的实现不支持 `getAllPrincipals` 方法，因为无法通过 Spring Session 获取该信息。不过，Spring Security 自身并不会调用此方法，因此这一限制仅影响那些直接访问 `SessionRegistry` 的应用程序。

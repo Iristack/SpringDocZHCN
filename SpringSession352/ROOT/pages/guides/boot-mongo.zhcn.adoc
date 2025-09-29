@@ -1,0 +1,157 @@
+= Spring Session - MongoDB 仓库
+Jakub Kubrynski, Greg Turnquist
+:stylesdir: ../
+:highlightjsdir: ../js/highlight
+:docinfodir: guides
+
+本指南介绍如何使用由 MongoDB 支持的 Spring Session。
+
+NOTE: 完整的示例可以在 <<mongo-sample, MongoDB 示例应用>> 中找到。
+
+[#index-link]
+link:../index.html[索引]
+
+== 更新依赖项
+在使用 Spring Session 的 MongoDB 支持之前，必须确保更新项目的依赖。我们假设你正在开发一个基于 Spring Boot 的 Web 应用程序。如果你使用的是 Maven，请添加以下依赖：
+
+====
+[source,xml]
+[subs="verbatim,attributes"]
+.pom.xml
+----
+<dependencies>
+	<!-- ... -->
+	<dependency>
+		<groupId>org.springframework.session</groupId>
+		<artifactId>spring-session-data-mongodb</artifactId>
+	</dependency>
+</dependencies>
+----
+====
+
+ifeval::["{version-snapshot}" == "true"]
+由于我们使用的是 SNAPSHOT 版本，需要添加 Spring 快照（Snapshot）Maven 仓库。请确保你的 pom.xml 包含以下内容：
+
+====
+[source,xml]
+.pom.xml
+----
+<repositories>
+	<!-- ... -->
+	<repository>
+		<id>spring-snapshot</id>
+		<url>https://repo.spring.io/libs-snapshot</url>
+	</repository>
+</repositories>
+----
+====
+endif::[]
+
+ifeval::["{version-milestone}" == "true"]
+由于我们使用的是里程碑（Milestone）版本，需要添加 Spring 里程碑 Maven 仓库。请确保你的 pom.xml 包含以下内容：
+
+====
+[source,xml]
+.pom.xml
+----
+<repository>
+	<id>spring-milestone</id>
+	<url>https://repo.spring.io/libs-milestone</url>
+</repository>
+----
+====
+endif::[]
+
+[[mongo-spring-configuration]]
+== Spring 配置
+
+添加必要的依赖后，我们可以创建 Spring 配置。该配置的作用是创建一个 Servlet Filter，将默认的 `HttpSession` 实现替换为由 Spring Session 支持的实现。
+
+// tag::config[]
+只需添加如下 Spring 配置即可：
+
+====
+[source,java]
+----
+include::{samples-dir}spring-session-sample-boot-mongodb-traditional/src/main/java/org/springframework/session/mongodb/examples/config/HttpSessionConfig.java[tag=class]
+----
+<1> `@EnableMongoHttpSession` 注解会创建一个名为 `springSessionRepositoryFilter` 的 Spring Bean，该 Bean 实现了 `Filter` 接口。这个过滤器负责将默认的 `HttpSession` 替换为由 MongoDB 支持的会话实现。
+<2> 设置会话超时时间为 30 分钟。
+====
+
+// end::config[]
+
+[[boot-mongo-configuration]]
+== 配置 MongoDB 连接
+
+Spring Boot 会自动创建一个 `MongoClient`，连接到运行在本地主机（localhost）端口 27017（默认端口）上的 MongoDB 服务器。在生产环境中，你需要修改配置以指向实际的 MongoDB 服务器。例如，可以在 *application.properties* 文件中添加以下内容：
+
+====
+.src/main/resources/application.properties
+----
+spring.data.mongodb.host=mongo-srv
+spring.data.mongodb.port=27018
+spring.data.mongodb.database=prod
+----
+====
+
+更多详细信息，请参考 Spring Boot 文档中的 {docs-url}/spring-boot/docs/current/reference/htmlsingle/#boot-features-connecting-to-mongodb[连接 MongoDB] 章节。
+
+[[boot-servlet-configuration]]
+== Servlet 容器初始化
+
+我们的 <<boot-mongo-configuration,Spring 配置>> 创建了一个名为 `springSessionRepositoryFilter` 的 Spring Bean，它实现了 `Filter` 接口。该 Bean 负责将原始的 `HttpSession` 替换为由 Spring Session 支持的自定义实现。
+
+为了让这个 `Filter` 正常工作，Spring 必须加载我们的 `Config` 类。此外，还需确保 Servlet 容器（如 Tomcat）在每个请求中都使用 `springSessionRepositoryFilter`。幸运的是，Spring Boot 已经为我们自动完成了这些步骤。
+
+[[mongo-sample]]
+== MongoDB 示例应用
+
+该 MongoDB 示例应用演示了如何在使用 Spring Boot 时，通过 Spring Session 透明地利用 MongoDB 来支持 Web 应用的 `HttpSession`。
+
+[[mongo-running]]
+=== 运行 MongoDB 示例应用
+
+你可以通过获取 {download-url}[源码] 并执行以下命令来运行示例：
+
+====
+----
+$ ./gradlew :samples:mongo:bootRun
+----
+====
+
+完成后，你现在可以通过 http://localhost:8080/ 访问应用程序。
+
+[[boot-explore]]
+=== 探索安全示例应用
+
+尝试使用该应用进行登录：
+
+* **用户名** _user_
+* **密码** _password_
+
+点击 **登录** 按钮后，你应该会看到一条消息，提示你已使用上述用户成功登录。用户的会话信息实际上存储在 MongoDB 中，而不是 Tomcat 的 `HttpSession` 实现中。
+
+[[mongo-how]]
+=== 它是如何工作的？
+
+我们并没有使用 Tomcat 的 `HttpSession`，而是将数据持久化到 MongoDB 中。Spring Session 提供了一个基于 MongoDB 的 `HttpSession` 实现。当 Spring Security 的 `SecurityContextPersistenceFilter` 将 `SecurityContext` 保存到 `HttpSession` 时，该上下文会被持久化到 MongoDB。
+
+每当创建一个新的 `HttpSession` 时，Spring Session 会在浏览器中设置一个名为 `SESSION` 的 Cookie，其中包含会话的 ID。你可以查看 Cookie（点击获取 https://developer.chrome.com/devtools/docs/resources#cookies[Chrome] 或 https://getfirebug.com/wiki/index.php/Cookies_Panel#Cookies_List[Firefox] 的帮助）。
+
+你也可以使用 MongoDB 客户端轻松检查会话数据。例如，在基于 Linux 的系统上可以输入：
+
+[NOTE]
+====
+示例应用使用的是嵌入式 MongoDB 实例，监听一个随机分配的端口。启动应用时，日志会输出嵌入式 MongoDB 使用的端口号以及连接命令。
+====
+
+	$ mongo --port ...
+	> use test
+	> db.sessions.find().pretty()
+
+或者，你也可以手动删除某个会话记录。在终端中输入以下命令，并将 `60f17293-839b-477c-bb92-07a9c3658843` 替换为你浏览器中 SESSION Cookie 的实际值：
+
+	> db.sessions.remove({"_id":"60f17293-839b-477c-bb92-07a9c3658843"})
+
+然后访问 http://localhost:8080/，你会发现当前会话已失效，不再处于认证状态。

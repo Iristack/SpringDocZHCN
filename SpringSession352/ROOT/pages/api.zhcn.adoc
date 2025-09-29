@@ -1,0 +1,679 @@
+[[api]]
+= API 文档
+
+你可以在在线浏览完整的 {docs-url}/spring-session/docs/{spring-session-version}/api/[Javadoc]。关键的 API 在以下章节中描述：
+
+* <<api-session>>
+* <<api-sessionrepository>>
+* <<api-findbyindexnamesessionrepository>>
+* <<api-reactivesessionrepository>>
+* <<api-enablespringhttpsession>>
+* <<api-enablespringwebsession>>
+* <<api-redisindexedsessionrepository>>
+* <<api-reactiveredissessionrepository>>
+* <<api-mapsessionrepository>>
+* <<api-reactivemapsessionrepository>>
+* <<api-jdbcindexedsessionrepository>>
+* <<api-hazelcastindexedsessionrepository>>
+* <<api-cookieserializer>>
+
+[[api-session]]
+== 使用 `Session`
+
+`Session` 是一个简化的键值对（name-value）映射。
+
+典型的用法如下所示：
+
+====
+[source,java,indent=0]
+----
+include::{indexdoc-tests}[tags=repository-demo]
+----
+
+<1> 我们创建一个泛型类型为 `S` 的 `SessionRepository` 实例，其中 `S` 继承自 `Session`。该泛型类型在我们的类中定义。
+<2> 我们使用 `SessionRepository` 创建一个新的 `Session`，并将其赋值给类型为 `S` 的变量。
+<3> 我们与 `Session` 进行交互。在此示例中，我们演示将一个 `User` 保存到 `Session` 中。
+<4> 我们现在保存 `Session`。这就是为什么我们需要泛型类型 `S`。`SessionRepository` 只允许保存由同一个 `SessionRepository` 创建或检索的 `Session` 实例。这使得 `SessionRepository` 能够进行特定于实现的优化（例如，仅写入已更改的属性）。
+<5> 我们从 `SessionRepository` 中获取 `Session`。
+<6> 我们从 `Session` 中获取持久化的 `User`，而无需显式地转换属性。
+====
+
+`Session` API 还提供了与 `Session` 实例过期相关的属性。
+
+典型用法可能如下所示：
+
+====
+[source,java,indent=0]
+----
+include::{indexdoc-tests}[tags=expire-repository-demo]
+----
+
+<1> 我们创建一个泛型类型为 `S` 的 `SessionRepository` 实例，其中 `S` 继承自 `Session`。该泛型类型在我们的类中定义。
+<2> 我们使用 `SessionRepository` 创建一个新的 `Session`，并将其赋值给类型为 `S` 的变量。
+<3> 我们与 `Session` 进行交互。在此示例中，我们演示更新 `Session` 在过期前可保持非活动状态的时间长度。
+<4> 我们现在保存 `Session`。这就是为什么我们需要泛型类型 `S`。`SessionRepository` 只允许保存由同一个 `SessionRepository` 创建或检索的 `Session` 实例。这使得 `SessionRepository` 能够进行特定于实现的优化（例如，仅写入已更改的属性）。当保存 `Session` 时，最后访问时间会自动更新。
+<5> 我们从 `SessionRepository` 中获取 `Session`。如果 `Session` 已过期，则结果为 null。
+====
+
+[[api-sessionrepository]]
+== 使用 `SessionRepository`
+
+`SessionRepository` 负责创建、检索和持久化 `Session` 实例。
+
+只要可能，你不应直接与 `SessionRepository` 或 `Session` 交互。相反，开发者应更倾向于通过 xref:http-session.adoc#httpsession[`HttpSession`] 和 xref:web-socket.adoc#websocket[WebSocket] 集成间接地与 `SessionRepository` 和 `Session` 交互。
+
+[[api-findbyindexnamesessionrepository]]
+== 使用 `FindByIndexNameSessionRepository`
+
+Spring Session 最基础的 `Session` 使用 API 是 `SessionRepository`。这个 API 故意设计得非常简单，以便你可以轻松地为基本功能提供额外的实现。
+
+某些 `SessionRepository` 实现也可能选择实现 `FindByIndexNameSessionRepository`。例如，Spring 的 Redis、JDBC 和 Hazelcast 支持库都实现了 `FindByIndexNameSessionRepository`。
+
+`FindByIndexNameSessionRepository` 提供了一个方法，用于查找具有指定索引名称和索引值的所有会话。作为所有提供的 `FindByIndexNameSessionRepository` 实现支持的常见用例，你可以使用一个便捷的方法来查找特定用户的所有会话。这是通过确保名为 `FindByIndexNameSessionRepository.PRINCIPAL_NAME_INDEX_NAME` 的会话属性被用户名填充来实现的。你需要负责确保该属性被正确填充，因为 Spring Session 并不知道所使用的认证机制。以下示例展示了如何使用它：
+
+====
+[source,java,indent=0]
+----
+include::{docs-test-dir}docs/FindByIndexNameSessionRepositoryTests.java[tags=set-username]
+----
+====
+
+NOTE: 某些 `FindByIndexNameSessionRepository` 实现提供了钩子以自动索引其他会话属性。例如，许多实现在当前 Spring Security 用户名上自动建立索引，并使用 `FindByIndexNameSessionRepository.PRINCIPAL_NAME_INDEX_NAME` 作为索引名称。
+
+一旦会话被索引，你可以使用类似以下的代码进行查找：
+
+====
+[source,java,indent=0]
+----
+include::{docs-test-dir}docs/FindByIndexNameSessionRepositoryTests.java[tags=findby-username]
+----
+====
+
+[[api-reactivesessionrepository]]
+== 使用 `ReactiveSessionRepository`
+
+`ReactiveSessionRepository` 以非阻塞和响应式的方式负责创建、检索和持久化 `Session` 实例。
+
+只要可能，你不应直接与 `ReactiveSessionRepository` 或 `Session` 交互。相反，你应该更倾向于通过 xref:web-session.adoc#websession[WebSession] 集成间接地与 `ReactiveSessionRepository` 和 `Session` 交互。
+
+[[api-enablespringhttpsession]]
+== 使用 `@EnableSpringHttpSession`
+
+你可以将 `@EnableSpringHttpSession` 注解添加到 `@Configuration` 类中，以暴露名为 `springSessionRepositoryFilter` 的 `SessionRepositoryFilter` Bean。要使用此注解，你必须提供一个 `SessionRepository` Bean。以下示例展示了如何操作：
+
+====
+[source,java,indent=0]
+----
+include::{docs-test-dir}docs/SpringHttpSessionConfig.java[tags=class]
+----
+====
+
+注意：没有为你配置会话过期的基础架构。这是因为诸如会话过期等功能高度依赖于具体实现。这意味着，如果你需要清理过期的会话，你有责任手动清理这些过期的会话。
+
+[[api-enablespringwebsession]]
+== 使用 `@EnableSpringWebSession`
+
+你可以将 `@EnableSpringWebSession` 注解添加到 `@Configuration` 类中，以暴露名为 `webSessionManager` 的 `WebSessionManager` Bean。要使用此注解，你必须提供一个 `ReactiveSessionRepository` Bean。以下示例展示了如何操作：
+
+====
+[source,java,indent=0]
+----
+include::{docs-test-dir}docs/SpringWebSessionConfig.java[tags=class]
+----
+====
+
+注意：没有为你配置会话过期的基础架构。这是因为诸如会话过期等功能高度依赖于具体实现。这意味着，如果你需要清理过期的会话，你有责任手动清理这些过期的会话。
+
+[[api-redissessionrepository]]
+== 使用 `RedisSessionRepository`
+
+`RedisSessionRepository` 是使用 Spring Data 的 `RedisOperations` 实现的 `SessionRepository`。在 Web 环境中，通常与 `SessionRepositoryFilter` 结合使用。请注意，此实现不支持发布会话事件。
+
+[[api-redissessionrepository-new]]
+=== 实例化 `RedisSessionRepository`
+
+你可以在以下示例中看到如何创建新实例的典型例子：
+
+====
+[source,java,indent=0]
+----
+include::{indexdoc-tests}[tags=new-redissessionrepository]
+----
+====
+
+有关如何创建 `RedisConnectionFactory` 的更多信息，请参阅 Spring Data Redis 参考文档。
+
+[[api-redissessionrepository-config]]
+=== 使用 `@EnableRedisHttpSession`
+
+在 Web 环境中，创建新的 `RedisSessionRepository` 最简单的方法是使用 `@EnableRedisHttpSession`。你可以在 xref:samples.adoc#samples[示例和指南（从此开始）] 中找到完整示例。你可以使用以下属性来自定义配置：
+
+enableIndexingAndEvents
+* *enableIndexingAndEvents*: 是否使用 `RedisIndexedSessionRepository` 而不是 `RedisSessionRepository`。默认为 `false`。
+* *maxInactiveIntervalInSeconds*: 会话过期前的时间长度（秒）。
+* *redisNamespace*: 允许为会话配置应用程序特定的命名空间。Redis 键和通道 ID 以前缀 `<redisNamespace>:` 开头。
+* *flushMode*: 允许指定数据何时写入 Redis。默认情况下仅在 `SessionRepository` 上调用 `save` 时写入。设置为 `FlushMode.IMMEDIATE` 表示尽可能快地写入 Redis。
+
+==== 自定义 `RedisSerializer`
+
+你可以通过创建一个名为 `springSessionDefaultRedisSerializer` 并实现 `RedisSerializer<Object>` 的 Bean 来自定义序列化方式。
+
+[[api-redissessionrepository-cli]]
+=== 在 Redis 中查看会话
+
+安装 https://redis.io/topics/quickstart[redis-cli] 后，你可以使用 redis-cli https://redis.io/commands#hash[检查 Redis 中的值]。例如，你可以在终端窗口中输入以下命令：
+
+====
+[source,bash]
+----
+$ redis-cli
+redis 127.0.0.1:6379> keys *
+1) "spring:session:sessions:4fc39ce3-63b3-4e17-b1c4-5e1ed96fb021" <1>
+----
+
+<1> 此键的后缀是 Spring Session 的会话标识符。
+====
+
+你还可以使用 `hkeys` 命令查看每个会话的属性。以下示例展示了如何操作：
+
+====
+[source,bash]
+----
+redis 127.0.0.1:6379> hkeys spring:session:sessions:4fc39ce3-63b3-4e17-b1c4-5e1ed96fb021
+1) "lastAccessedTime"
+2) "creationTime"
+3) "maxInactiveInterval"
+4) "sessionAttr:username"
+redis 127.0.0.1:6379> hget spring:session:sessions:4fc39ce3-63b3-4e17-b1c4-5e1ed96fb021 sessionAttr:username
+"\xac\xed\x00\x05t\x00\x03rob"
+----
+====
+
+[[api-redisindexedsessionrepository]]
+== 使用 `RedisIndexedSessionRepository`
+
+`RedisIndexedSessionRepository` 是使用 Spring Data 的 `RedisOperations` 实现的 `SessionRepository`。在 Web 环境中，通常与 `SessionRepositoryFilter` 结合使用。该实现通过 `SessionMessageListener` 支持 `SessionDestroyedEvent` 和 `SessionCreatedEvent`。
+
+[[api-redisindexedsessionrepository-new]]
+=== 实例化 `RedisIndexedSessionRepository`
+
+你可以在以下示例中看到如何创建新实例的典型例子：
+
+====
+[source,java,indent=0]
+----
+include::{indexdoc-tests}[tags=new-redisindexedsessionrepository]
+----
+====
+
+有关如何创建 `RedisConnectionFactory` 的更多信息，请参阅 Spring Data Redis 参考文档。
+
+[[api-redisindexedsessionrepository-config]]
+=== 使用 `@EnableRedisHttpSession(enableIndexingAndEvents = true)`
+
+在 Web 环境中，创建新的 `RedisIndexedSessionRepository` 最简单的方法是使用 `@EnableRedisHttpSession(enableIndexingAndEvents = true)`。你可以在 xref:samples.adoc#samples[示例和指南（从此开始）] 中找到完整示例。你可以使用以下属性来自定义配置：
+
+* *enableIndexingAndEvents*: 是否使用 `RedisIndexedSessionRepository` 而不是 `RedisSessionRepository`。默认为 `false`。
+* *maxInactiveIntervalInSeconds*: 会话过期前的时间长度（秒）。
+* *redisNamespace*: 允许为会话配置应用程序特定的命名空间。Redis 键和通道 ID 以前缀 `<redisNamespace>:` 开头。
+* *flushMode*: 允许指定数据何时写入 Redis。默认情况下仅在 `SessionRepository` 上调用 `save` 时写入。设置为 `FlushMode.IMMEDIATE` 表示尽可能快地写入 Redis。
+
+==== 自定义 `RedisSerializer`
+
+你可以通过创建一个名为 `springSessionDefaultRedisSerializer` 并实现 `RedisSerializer<Object>` 的 Bean 来自定义序列化方式。
+
+=== Redis `TaskExecutor`
+
+`RedisIndexedSessionRepository` 使用 `RedisMessageListenerContainer` 订阅接收来自 Redis 的事件。你可以通过创建名为 `springSessionRedisTaskExecutor` 或 `springSessionRedisSubscriptionExecutor` 的 Bean 来自定义这些事件的分发方式。有关配置 Redis task executors 的更多细节，请参见 {docs-url}/spring-data-redis/docs/{spring-data-redis-version}/reference/html/#redis:pubsub:subscribe:containers[此处]。
+
+[[api-redisindexedsessionrepository-storage]]
+=== 存储细节
+
+以下部分概述了每次操作时 Redis 如何更新。以下示例展示了创建新会话的过程：
+
+====
+----
+HMSET spring:session:sessions:33fdd1b6-b496-4b33-9f7d-df96679d32fe creationTime 1404360000000 \
+	maxInactiveInterval 1800 \
+	lastAccessedTime 1404360000000 \
+	sessionAttr:attrName someAttrValue \
+	sessionAttr:attrName2 someAttrValue2
+EXPIRE spring:session:sessions:33fdd1b6-b496-4b33-9f7d-df96679d32fe 2100
+APPEND spring:session:sessions:expires:33fdd1b6-b496-4b33-9f7d-df96679d32fe ""
+EXPIRE spring:session:sessions:expires:33fdd1b6-b496-4b33-9f7d-df96679d32fe 1800
+SADD spring:session:expirations:1439245080000 expires:33fdd1b6-b496-4b33-9f7d-df96679d32fe
+EXPIRE spring:session:expirations1439245080000 2100
+----
+====
+
+后续小节描述了详细信息。
+
+==== 保存会话
+
+每个会话都以 `Hash` 形式存储在 Redis 中。每个会话都使用 `HMSET` 命令设置和更新。以下示例展示了每个会话的存储方式：
+
+====
+----
+HMSET spring:session:sessions:33fdd1b6-b496-4b33-9f7d-df96679d32fe creationTime 1404360000000 \
+	maxInactiveInterval 1800 \
+	lastAccessedTime 1404360000000 \
+	sessionAttr:attrName someAttrValue \
+	sessionAttr:attrName2 someAttrValue2
+----
+====
+
+在上述示例中，关于该会话的陈述如下：
+
+* 会话 ID 是 33fdd1b6-b496-4b33-9f7d-df96679d32fe。
+* 会话创建时间为 1404360000000（自 1970 年 1 月 1 日 GMT 午夜起的毫秒数）。
+* 会话将在 1800 秒（30 分钟）后过期。
+* 会话最后一次访问时间为 1404360000000（自 1970 年 1 月 1 日 GMT 午夜起的毫秒数）。
+* 会话有两个属性。第一个是 `attrName`，其值为 `someAttrValue`。第二个会话属性名为 `attrName2`，其值为 `someAttrValue2`。
+
+[[api-redisindexedsessionrepository-writes]]
+==== 优化写入
+
+由 `RedisIndexedSessionRepository` 管理的 `Session` 实例会跟踪已更改的属性，并仅更新这些属性。这意味着，如果某个属性被写入一次但多次读取，我们只需写入该属性一次。例如，假设上一节中的 `attrName2` 会话属性被更新。保存时将运行以下命令：
+
+====
+----
+HMSET spring:session:sessions:33fdd1b6-b496-4b33-9f7d-df96679d32fe sessionAttr:attrName2 newValue
+----
+====
+
+[[api-redisindexedsessionrepository-expiration]]
+==== 会话过期
+
+每个会话通过 `EXPIRE` 命令关联一个过期时间，基于 `Session.getMaxInactiveInterval()`。以下是一个典型的 `EXPIRE` 命令示例：
+
+====
+----
+EXPIRE spring:session:sessions:33fdd1b6-b496-4b33-9f7d-df96679d32fe 2100
+----
+====
+
+请注意，实际会话过期后五分钟后才设置过期时间。这是为了确保在会话过期时仍能访问会话的值。在会话本身实际过期五分钟后设置过期时间，以确保其被清理，但仅在执行必要的处理之后。
+
+NOTE: `SessionRepository.findById(String)` 方法确保不会返回已过期的会话。这意味着你在使用会话之前无需检查其是否过期。
+
+Spring Session 依赖于 Redis 发出的删除和过期 https://redis.io/topics/notifications[keyspace notifications] 来分别触发 <<api-redisindexedsessionrepository-sessiondestroyedevent,`SessionDeletedEvent`>> 和 <<api-redisindexedsessionrepository-sessiondestroyedevent,`SessionExpiredEvent`>>。`SessionDeletedEvent` 或 `SessionExpiredEvent` 确保与 `Session` 关联的资源被清理。例如，当你使用 Spring Session 的 WebSocket 支持时，Redis 的过期或删除事件会触发关闭与该会话关联的所有 WebSocket 连接。
+
+过期并未直接跟踪在会话键本身上，因为这会导致会话数据不再可用。相反，使用一个特殊的会话过期键。在上述示例中，过期键如下：
+
+====
+----
+APPEND spring:session:sessions:expires:33fdd1b6-b496-4b33-9f7d-df96679d32fe ""
+EXPIRE spring:session:sessions:expires:33fdd1b6-b496-4b33-9f7d-df96679d32fe 1800
+----
+====
+
+当会话过期键被删除或过期时，keyspace notification 触发查找实际会话，并发出 `SessionDestroyedEvent`。
+
+仅依赖 Redis 过期的一个问题是，如果键未被访问，Redis 不保证过期事件何时触发。具体来说，Redis 用于清理过期键的后台任务是低优先级任务，可能不会触发键过期。更多详情请参阅 Redis 文档中的 https://redis.io/topics/notifications[过期事件的时间安排] 部分。
+
+为了规避过期事件不保证发生的问题，我们可以确保每个键在其预期过期时被访问。这意味着，如果键的 TTL 已过期，Redis 将在我们尝试访问该键时移除该键并触发过期事件。
+
+出于这个原因，每个会话过期也被追踪到最近的一分钟。这使得后台任务可以访问可能已过期的会话，从而以更确定性的方式触发 Redis 过期事件。以下示例展示了这些事件：
+
+====
+----
+SADD spring:session:expirations:1439245080000 expires:33fdd1b6-b496-4b33-9f7d-df96679d32fe
+EXPIRE spring:session:expirations1439245080000 2100
+----
+====
+
+然后后台任务使用这些映射显式请求每个键。通过访问键而不是删除它，我们确保只有当键的 TTL 过期时 Redis 才会删除该键。
+
+NOTE: 我们不会显式删除键，因为在某些情况下可能存在竞态条件，错误地将未过期的键识别为已过期。除非使用分布式锁（这会严重影响性能），否则无法确保过期映射的一致性。通过简单地访问键，我们确保只有当该键的 TTL 过期时才会移除该键。
+
+[[api-redisindexedsessionrepository-sessiondestroyedevent]]
+=== `SessionDeletedEvent` 和 `SessionExpiredEvent`
+
+`SessionDeletedEvent` 和 `SessionExpiredEvent` 都是 `SessionDestroyedEvent` 的类型。
+
+`RedisIndexedSessionRepository` 支持在 `Session` 被删除时触发 `SessionDeletedEvent`，或在 `Session` 过期时触发 `SessionExpiredEvent`。这对于确保与 `Session` 关联的资源得到适当清理是必要的。
+
+例如，在集成 WebSocket 时，`SessionDestroyedEvent` 负责关闭任何活动的 WebSocket 连接。
+
+通过 `SessionMessageListener` 实现 `SessionDeletedEvent` 或 `SessionExpiredEvent` 的触发，该监听器监听 https://redis.io/topics/notifications[Redis Keyspace events]。为此工作，需要启用通用命令和过期事件的 Redis Keyspace events。以下示例展示了如何操作：
+
+====
+[source,bash]
+----
+redis-cli config set notify-keyspace-events Egx
+----
+====
+
+如果你使用 `@EnableRedisHttpSession(enableIndexingAndEvents = true)`，管理 `SessionMessageListener` 并启用必要的 Redis Keyspace events 会自动完成。然而，在安全的 Redis 环境中，config 命令被禁用。这意味着 Spring Session 无法为你配置 Redis Keyspace events。要禁用自动配置，请添加 `ConfigureRedisAction.NO_OP` 作为 Bean。
+
+例如，在 Java 配置中，你可以使用以下内容：
+
+====
+[source,java,indent=0]
+----
+include::{docs-test-dir}docs/RedisHttpSessionConfigurationNoOpConfigureRedisActionTests.java[tags=configure-redis-action]
+----
+====
+
+在 XML 配置中，你可以使用以下内容：
+
+====
+[source,xml,indent=0]
+----
+include::{docs-test-resources-dir}docs/HttpSessionConfigurationNoOpConfigureRedisActionXmlTests-context.xml[tags=configure-redis-action]
+----
+====
+
+[[api-redisindexedsessionrepository-sessioncreatedevent]]
+=== 使用 `SessionCreatedEvent`
+
+当创建会话时，会向 Redis 发送一个事件，通道 ID 为 `spring:session:channel:created:33fdd1b6-b496-4b33-9f7d-df96679d32fe`，其中 `33fdd1b6-b496-4b33-9f7d-df96679d32fe` 是会话 ID。事件的主体是创建的会话。
+
+如果注册为 `MessageListener`（默认行为），`RedisIndexedSessionRepository` 将把 Redis 消息转换为 `SessionCreatedEvent`。
+
+[[api-redisindexedsessionrepository-cli]]
+=== 在 Redis 中查看会话
+
+安装 https://redis.io/topics/quickstart[redis-cli] 后，你可以使用 redis-cli https://redis.io/commands#hash[检查 Redis 中的值]。例如，你可以在终端中输入以下内容：
+
+====
+[source,bash]
+----
+$ redis-cli
+redis 127.0.0.1:6379> keys *
+1) "spring:session:sessions:4fc39ce3-63b3-4e17-b1c4-5e1ed96fb021" <1>
+2) "spring:session:expirations:1418772300000" <2>
+----
+
+<1> 此键的后缀是 Spring Session 的会话标识符。
+<2> 此键包含应在时间 `1418772300000` 删除的所有会话 ID。
+====
+
+你还可以查看每个会话的属性。以下示例展示了如何操作：
+
+====
+[source,bash]
+----
+redis 127.0.0.1:6379> hkeys spring:session:sessions:4fc39ce3-63b3-4e17-b1c4-5e1ed96fb021
+1) "lastAccessedTime"
+2) "creationTime"
+3) "maxInactiveInterval"
+4) "sessionAttr:username"
+redis 127.0.0.1:6379> hget spring:session:sessions:4fc39ce3-63b3-4e17-b1c4-5e1ed96fb021 sessionAttr:username
+"\xac\xed\x00\x05t\x00\x03rob"
+----
+====
+
+[[api-reactiveredissessionrepository]]
+== 使用 `ReactiveRedisSessionRepository`
+
+`ReactiveRedisSessionRepository` 是使用 Spring Data 的 `ReactiveRedisOperations` 实现的 `ReactiveSessionRepository`。在 Web 环境中，通常与 `WebSessionStore` 结合使用。
+
+[[api-reactiveredissessionrepository-new]]
+=== 实例化 `ReactiveRedisSessionRepository`
+
+以下示例展示了如何创建新实例：
+
+====
+[source,java,indent=0]
+----
+include::{indexdoc-tests}[tags=new-reactiveredissessionrepository]
+----
+====
+
+有关如何创建 `ReactiveRedisConnectionFactory` 的更多信息，请参阅 Spring Data Redis 参考文档。
+
+[[api-reactiveredissessionrepository-config]]
+=== 使用 `@EnableRedisWebSession`
+
+在 Web 环境中，创建新的 `ReactiveRedisSessionRepository` 最简单的方法是使用 `@EnableRedisWebSession`。你可以使用以下属性来自定义配置：
+
+* *maxInactiveIntervalInSeconds*: 会话过期前的时间长度（秒）
+* *redisNamespace*: 允许为会话配置应用程序特定的命名空间。Redis 键和通道 ID 以前缀 `<redisNamespace>:` 开头。
+* *flushMode*: 允许指定数据何时写入 Redis。默认情况下仅在 `ReactiveSessionRepository` 上调用 `save` 时写入。设置为 `FlushMode.IMMEDIATE` 表示尽可能快地写入 Redis。
+
+[[api-reactiveredissessionrepository-writes]]
+==== 优化写入
+
+由 `ReactiveRedisSessionRepository` 管理的 `Session` 实例会跟踪已更改的属性，并仅更新这些属性。这意味着，如果某个属性被写入一次但多次读取，我们只需写入该属性一次。
+
+[[api-reactiveredissessionrepository-cli]]
+=== 在 Redis 中查看会话
+
+安装 https://redis.io/topics/quickstart[redis-cli] 后，你可以使用 redis-cli https://redis.io/commands#hash[检查 Redis 中的值]。例如，你可以在终端窗口中输入以下命令：
+
+====
+[source,bash]
+----
+$ redis-cli
+redis 127.0.0.1:6379> keys *
+1) "spring:session:sessions:4fc39ce3-63b3-4e17-b1c4-5e1ed96fb021" <1>
+----
+
+<1> 此键的后缀是 Spring Session 的会话标识符。
+====
+
+你还可以使用 `hkeys` 命令查看每个会话的属性。以下示例展示了如何操作：
+
+====
+[source,bash]
+----
+redis 127.0.0.1:6379> hkeys spring:session:sessions:4fc39ce3-63b3-4e17-b1c4-5e1ed96fb021
+1) "lastAccessedTime"
+2) "creationTime"
+3) "maxInactiveInterval"
+4) "sessionAttr:username"
+redis 127.0.0.1:6379> hget spring:session:sessions:4fc39ce3-63b3-4e17-b1c4-5e1ed96fb021 sessionAttr:username
+"\xac\xed\x00\x05t\x00\x03rob"
+----
+====
+
+[[api-mapsessionrepository]]
+== 使用 `MapSessionRepository`
+
+`MapSessionRepository` 允许将 `Session` 持久化到 `Map` 中，其中键是 `Session` ID，值是 `Session`。你可以将其实现与 `ConcurrentHashMap` 一起用作测试或便利机制。或者，你可以将其与分布式 `Map` 实现一起使用。例如，它可以与 Hazelcast 一起使用。
+
+[[api-mapsessionrepository-new]]
+=== 实例化 `MapSessionRepository`
+
+以下示例展示了如何创建新实例：
+
+====
+[source,java,indent=0]
+----
+include::{indexdoc-tests}[tags=new-mapsessionrepository]
+----
+====
+
+[[api-mapsessionrepository-hazelcast]]
+=== 使用 Spring Session 和 Hazelcast
+
+xref:samples.adoc#samples[Hazelcast 示例] 是一个完整的应用程序，演示了如何将 Spring Session 与 Hazelcast 一起使用。
+
+运行它，请使用以下命令：
+
+====
+----
+	./gradlew :samples:hazelcast:tomcatRun
+----
+====
+
+xref:samples.adoc#samples[Hazelcast Spring 示例] 是一个完整的应用程序，演示了如何将 Spring Session 与 Hazelcast 和 Spring Security 一起使用。
+
+它包括支持触发 `SessionCreatedEvent`、`SessionDeletedEvent` 和 `SessionExpiredEvent` 的示例 Hazelcast `MapListener` 实现。
+
+运行它，请使用以下命令：
+
+====
+----
+	./gradlew :samples:hazelcast-spring:tomcatRun
+----
+====
+
+[[api-reactivemapsessionrepository]]
+== 使用 `ReactiveMapSessionRepository`
+
+`ReactiveMapSessionRepository` 允许将 `Session` 持久化到 `Map` 中，其中键是 `Session` ID，值是 `Session`。你可以将其实现与 `ConcurrentHashMap` 一起用作测试或便利机制。或者，你可以将其与分布式 `Map` 实现一起使用，前提是你提供的 `Map` 必须是非阻塞的。
+
+[[api-jdbcindexedsessionrepository]]
+== 使用 `JdbcIndexedSessionRepository`
+
+`JdbcIndexedSessionRepository` 是一个 `SessionRepository` 实现，它使用 Spring 的 `JdbcOperations` 将会话存储在关系数据库中。在 Web 环境中，通常与 `SessionRepositoryFilter` 结合使用。请注意，此实现不支持发布会话事件。
+
+[[api-jdbcindexedsessionrepository-new]]
+=== 实例化 `JdbcIndexedSessionRepository`
+
+以下示例展示了如何创建新实例：
+
+====
+[source,java,indent=0]
+----
+include::{indexdoc-tests}[tags=new-jdbcindexedsessionrepository]
+----
+====
+
+有关如何创建和配置 `JdbcTemplate` 和 `PlatformTransactionManager` 的更多信息，请参阅 {docs-url}/spring/docs/{spring-core-version}/spring-framework-reference/data-access.html[Spring Framework 参考文档]。
+
+[[api-jdbcindexedsessionrepository-config]]
+=== 使用 `@EnableJdbcHttpSession`
+
+在 Web 环境中，创建新的 `JdbcIndexedSessionRepository` 最简单的方法是使用 `@EnableJdbcHttpSession`。你可以在 xref:samples.adoc#samples[示例和指南（从此开始）] 中找到完整示例。你可以使用以下属性来自定义配置：
+
+* *tableName*: Spring Session 用于存储会话的数据库表名
+* *maxInactiveIntervalInSeconds*: 会话过期前的时间长度（秒）
+
+==== 自定义 `LobHandler`
+
+你可以通过创建名为 `springSessionLobHandler` 并实现 `LobHandler` 的 Bean 来自定义 BLOB 处理。
+
+==== 自定义 `ConversionService`
+
+你可以通过提供 `ConversionService` 实例来自定义会话的默认序列化和反序列化。在典型的 Spring 环境中，默认的 `ConversionService` Bean（名为 `conversionService`）会被自动拾取并用于序列化和反序列化。但是，你可以通过提供名为 `springSessionConversionService` 的 Bean 来覆盖默认的 `ConversionService`。
+
+[[api-jdbcindexedsessionrepository-storage]]
+=== 存储细节
+
+默认情况下，此实现在 `SPRING_SESSION` 和 `SPRING_SESSION_ATTRIBUTES` 表中存储会话。请注意，你可以如前所述自定义表名。在这种情况下，用于存储属性的表名由提供的表名加上 `_ATTRIBUTES` 后缀构成。如果需要进一步自定义，你可以使用 `set*Query` setter 方法自定义仓库使用的 SQL 查询。在这种情况下，你需要手动配置 `sessionRepository` Bean。
+
+由于不同数据库供应商之间的差异，尤其是在存储二进制数据方面，请确保使用针对你的数据库的特定 SQL 脚本。大多数主要数据库供应商的脚本被打包为 `org/springframework/session/jdbc/schema-\*.sql`，其中 `*` 是目标数据库类型。
+
+例如，对于 PostgreSQL，你可以使用以下模式脚本：
+
+====
+[source,sql,indent=0]
+----
+include::{session-jdbc-main-resources-dir}org/springframework/session/jdbc/schema-postgresql.sql[]
+----
+====
+
+对于 MySQL 数据库，你可以使用以下脚本：
+
+====
+[source,sql,indent=0]
+----
+include::{session-jdbc-main-resources-dir}org/springframework/session/jdbc/schema-mysql.sql[]
+----
+====
+
+=== 事务管理
+
+`JdbcIndexedSessionRepository` 中的所有 JDBC 操作都是以事务方式进行的。事务传播设置为 `REQUIRES_NEW`，以避免现有事务干扰导致意外行为（例如，在已经参与只读事务的线程中运行 `save` 操作）。
+
+[[api-hazelcastindexedsessionrepository]]
+== 使用 `HazelcastIndexedSessionRepository`
+
+`HazelcastIndexedSessionRepository` 是一个 `SessionRepository` 实现，它将在 Hazelcast 的分布式 `IMap` 中存储会话。在 Web 环境中，通常与 `SessionRepositoryFilter` 结合使用。
+
+[[api-hazelcastindexedsessionrepository-new]]
+=== 实例化 `HazelcastIndexedSessionRepository`
+
+以下示例展示了如何创建新实例：
+
+====
+[source,java,indent=0]
+----
+include::{indexdoc-tests}[tags=new-hazelcastindexedsessionrepository]
+----
+====
+
+有关如何创建和配置 Hazelcast 实例的更多信息，请参阅 https://docs.hazelcast.org/docs/{hazelcast-version}/manual/html-single/index.html#hazelcast-configuration[Hazelcast 文档]。
+
+[[api-enablehazelcasthttpsession]]
+=== 使用 `@EnableHazelcastHttpSession`
+
+要使用 https://hazelcast.org/[Hazelcast] 作为 `SessionRepository` 的后端源，你可以将 `@EnableHazelcastHttpSession` 注解添加到 `@Configuration` 类中。这样做扩展了 `@EnableSpringHttpSession` 注解提供的功能，但为你在 Hazelcast 中创建了 `SessionRepository`。你需要提供一个 `HazelcastInstance` Bean 才能使配置生效。你可以在 xref:samples.adoc#samples[示例和指南（从此开始）] 中找到完整的配置示例。
+
+[[api-enablehazelcasthttpsession-customize]]
+=== 基本自定义
+你可以在 `@EnableHazelcastHttpSession` 上使用以下属性来自定义配置：
+
+* *maxInactiveIntervalInSeconds*: 会话过期前的时间长度（秒）。默认为 1800 秒（30 分钟）
+* *sessionMapName*: 用于在 Hazelcast 中存储会话数据的分布式 `Map` 的名称。
+
+[[api-enablehazelcasthttpsession-events]]
+=== 会话事件
+
+使用 `MapListener` 响应条目被添加、逐出和从分布式 `Map` 中移除时，这些事件会通过 `ApplicationEventPublisher` 触发 `SessionCreatedEvent`、`SessionExpiredEvent` 和 `SessionDeletedEvent` 事件（分别对应）。
+
+[[api-enablehazelcasthttpsession-storage]]
+=== 存储细节
+
+会话存储在 Hazelcast 的分布式 `IMap` 中。使用 `IMap` 接口方法进行 `get()` 和 `put()` 会话操作。此外，`values()` 方法支持 `FindByIndexNameSessionRepository#findByIndexNameAndIndexValue` 操作，结合适当的 `ValueExtractor`（需要在 Hazelcast 中注册）。有关此配置的更多详细信息，请参阅 xref:samples.adoc#samples[Hazelcast Spring 示例]。
+
+`IMap` 中会话的过期由 Hazelcast 对放入 `IMap` 的条目设置生存时间（TTL）的支持处理。空闲时间超过生存时间的条目（会话）会自动从 `IMap` 中移除。
+
+你不需要在 Hazelcast 配置中为 `IMap` 配置诸如 `max-idle-seconds` 或 `time-to-live-seconds` 等设置。
+
+请注意，如果你使用 Hazelcast 的 `MapStore` 来持久化会话 `IMap`，则从 `MapStore` 重新加载会话时适用以下限制：
+
+* 重新加载会触发 `EntryAddedListener`，导致 `SessionCreatedEvent` 被重新发布
+* 重新加载使用给定 `IMap` 的默认 TTL，导致会话失去其原始 TTL
+
+[[api-cookieserializer]]
+== 使用 `CookieSerializer`
+
+`CookieSerializer` 负责定义会话 Cookie 的写入方式。Spring Session 提供了一个默认实现 `DefaultCookieSerializer`。
+
+[[api-cookieserializer-bean]]
+=== 将 `CookieSerializer` 暴露为 Bean
+将 `CookieSerializer` 暴露为 Spring Bean 可增强现有配置，当你使用 `@EnableRedisHttpSession` 等配置时。
+
+以下示例展示了如何操作：
+
+====
+[source,java]
+----
+include::{samples-dir}spring-session-sample-javaconfig-custom-cookie/src/main/java/sample/Config.java[tags=cookie-serializer]
+----
+
+<1> 我们将 Cookie 名称自定义为 `JSESSIONID`。
+<2> 我们将 Cookie 路径自定义为 `/`（而不是默认的上下文根路径）。
+<3> 我们将域名模式（正则表达式）自定义为 `^.+?\\.(\\w+\\.[a-z]+)$`。这允许跨域和应用共享会话。如果正则表达式不匹配，则不设置域名并使用现有域名。如果正则表达式匹配，则使用第一个 https://docs.oracle.com/javase/tutorial/essential/regex/groups.html[分组] 作为域名。这意味着对 https://child.example.com 的请求会将域名设置为 `example.com`。然而，对 http://localhost:8080/ 或 https://192.168.1.100:8080/ 的请求不会设置 Cookie，因此在开发环境中仍然有效，无需为生产环境做任何更改。
+====
+
+WARNING: 你应该只匹配有效的域名字符，因为域名会在响应中反射。这样做可以防止恶意用户发起诸如 https://en.wikipedia.org/wiki/HTTP_response_splitting[HTTP 响应拆分] 之类的攻击。
+
+[[api-cookieserializer-customization]]
+=== 自定义 `CookieSerializer`
+
+你可以使用 `DefaultCookieSerializer` 上的以下任一配置选项来自定义会话 Cookie 的写入方式。
+
+* `cookieName`: 要使用的 Cookie 名称。默认：`SESSION`。
+* `useSecureCookie`: 是否应使用安全 Cookie。默认：使用创建时 `HttpServletRequest.isSecure()` 的值。
+* `cookiePath`: Cookie 的路径。默认：上下文根路径。
+* `cookieMaxAge`: 指定在创建会话时 Cookie 的最大年龄。默认：`-1`，表示应在浏览器关闭时移除 Cookie。
+* `jvmRoute`: 指定附加到会话 ID 并包含在 Cookie 中的后缀。用于标识哪个 JVM 应路由到以实现会话亲和性。某些实现（如 Redis）此选项不提供性能优势。但它可以帮助追踪特定用户的日志。
+* `domainName`: 允许指定用于 Cookie 的特定域名。此选项易于理解，但通常需要在开发和生产环境之间使用不同的配置。请参阅 `domainNamePattern` 作为替代方案。
+* `domainNamePattern`: 一个不区分大小写的模式，用于从 `HttpServletRequest#getServerName()` 中提取域名。该模式应提供一个分组，用于提取 Cookie 域的值。如果正则表达式不匹配，则不设置域名并使用现有域名。如果正则表达式匹配，则使用第一个 https://docs.oracle.com/javase/tutorial/essential/regex/groups.html[分组] 作为域名。
+* `sameSite`: `SameSite` Cookie 指令的值。若要禁用 `SameSite` Cookie 指令的序列化，可将此值设为 `null`。默认：`Lax`
+
+WARNING: 你应该只匹配有效的域名字符，因为域名会在响应中反射。这样做可以防止恶意用户发起诸如 https://en.wikipedia.org/wiki/HTTP_response_splitting[HTTP 响应拆分] 之类的攻击。
+
+[[custom-sessionrepository]]
+== 自定义 `SessionRepository`
+
+实现自定义的 <<api-sessionrepository,`SessionRepository`>> API 应该是一项相当直接的任务。将自定义实现与 <<api-enablespringhttpsession,`@EnableSpringHttpSession`>> 支持结合使用，可以让你重用现有的 Spring Session 配置设施和基础设施。然而，有几个方面值得特别关注。
+
+在 HTTP 请求的生命周期中，`HttpSession` 通常会被持久化到 `SessionRepository` 两次。第一次持久化操作是为了确保客户端在获得会话 ID 后立即可以访问会话，而且在会话提交后再次写入也是必要的，因为可能会对会话进行进一步修改。考虑到这一点，我们通常建议 `SessionRepository` 实现跟踪变更，以确保仅保存增量变化。这在高并发环境中尤其重要，多个请求操作同一个 `HttpSession`，可能导致彼此覆盖对方对会话属性的更改。Spring Session 提供的所有 `SessionRepository` 实现都采用上述方法来持久化会话变更，可以作为你实现自定义 `SessionRepository` 时的参考。
+
+请注意，同样的建议也适用于实现自定义的 <<api-reactivesessionrepository,`ReactiveSessionRepository`>>。在这种情况下，你应该使用 <<api-enablespringwebsession,`@EnableSpringWebSession`>>。

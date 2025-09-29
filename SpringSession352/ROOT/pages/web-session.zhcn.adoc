@@ -1,0 +1,109 @@
+[[websession]]
+= WebSession 集成
+
+Spring Session 提供了与 Spring WebFlux 的 `WebSession` 透明集成。这意味着你可以将默认的 `WebSession` 实现替换为由 Spring Session 支持的实现。
+
+[[websession-why]]
+== 为什么使用 Spring Session 和 WebSession？
+
+我们已经提到，Spring Session 能够与 Spring WebFlux 的 `WebSession` 透明集成，但这样做能带来哪些好处呢？  
+与 `HttpSession` 类似，Spring Session 可以轻松支持 <<websession-redis,集群会话>>，而无需依赖特定应用容器的解决方案。
+
+[[websession-redis]]
+== 基于 Redis 的 WebSession
+
+通过注册一个由 Spring Session 的 `ReactiveSessionRepository` 支持的 `WebSessionManager` 实现，即可启用 Spring Session 与 `WebSession` 的集成。  
+Spring 配置负责创建一个名为 `webSessionManager` 的 Bean，该 Bean 将原始的 `WebSession` 实现替换为由 Spring Session 支持的实现。为此，请添加以下 Spring 配置：
+
+====
+[source, java]
+----
+@EnableRedisWebSession // <1>
+public class SessionConfiguration {
+
+	@Bean
+	public LettuceConnectionFactory redisConnectionFactory() {
+		return new LettuceConnectionFactory(); // <2>
+	}
+
+}
+----
+
+<1> `@EnableRedisWebSession` 注解会创建一个名为 `webSessionManager` 的 Spring Bean，该 Bean 实现了 `WebSessionManager` 接口，用于将 `WebSession` 的实现替换为由 Spring Session 支持的版本。在此示例中，Spring Session 使用 Redis 作为后端存储。  
+<2> 我们创建了一个 `RedisConnectionFactory`，用于连接 Spring Session 与 Redis 服务器。此配置默认连接到本地主机的 6379 端口。  
+有关 Spring Data Redis 的更多配置信息，请参阅 {docs-url}/spring-data/data-redis/docs/{spring-data-redis-version}/reference/html/[参考文档]。
+====
+
+[[websession-how]]
+== WebSession 集成的工作原理
+
+相较于 Servlet API 及其 `HttpSession`，Spring Session 更容易与 Spring WebFlux 及其 `WebSession` 进行集成。  
+Spring WebFlux 提供了 `WebSessionStore` API，该 API 定义了持久化 `WebSession` 的策略。
+
+NOTE: 本节描述了 Spring Session 如何实现与 `WebSession` 的透明集成。我们提供这些内容是为了帮助你理解底层机制。该功能已经内置集成，**你不需要自行实现这些逻辑**。
+
+首先，我们创建一个自定义的 `SpringSessionWebSession`，它将操作委托给 Spring Session 的 `Session`。其结构大致如下：
+
+====
+[source, java]
+----
+public class SpringSessionWebSession implements WebSession {
+
+	enum State {
+		NEW, STARTED
+	}
+
+	private final S session;
+
+	private AtomicReference<State> state = new AtomicReference<>();
+
+	SpringSessionWebSession(S session, State state) {
+		this.session = session;
+		this.state.set(state);
+	}
+
+	@Override
+	public void start() {
+		this.state.compareAndSet(State.NEW, State.STARTED);
+	}
+
+	@Override
+	public boolean isStarted() {
+		State value = this.state.get();
+		return (State.STARTED.equals(value)
+				|| (State.NEW.equals(value) && !this.session.getAttributes().isEmpty()));
+	}
+
+	@Override
+	public Mono<Void> changeSessionId() {
+		return Mono.defer(() -> {
+			this.session.changeSessionId();
+			return save();
+		});
+	}
+
+	// ... 其他方法均代理到原始的 Session
+}
+----
+====
+
+接下来，我们创建一个自定义的 `WebSessionStore`，它将操作委托给 `ReactiveSessionRepository`，并将 `Session` 包装成我们自定义的 `WebSession` 实现，如下所示：
+
+====
+[source, java]
+----
+public class SpringSessionWebSessionStore<S extends Session> implements WebSessionStore {
+
+	private final ReactiveSessionRepository<S> sessions;
+
+	public SpringSessionWebSessionStore(ReactiveSessionRepository<S> reactiveSessionRepository) {
+		this.sessions = reactiveSessionRepository;
+	}
+
+	// ...
+}
+----
+====
+
+为了让 Spring WebFlux 能够识别该自定义的 `WebSessionStore`，必须将其作为一个名为 `webSessionManager` 的 Bean 注册到 `ApplicationContext` 中。  
+有关 Spring WebFlux 的更多信息，请参见 {docs-url}/spring-framework/docs/{spring-core-version}/reference/html/web-reactive.html[Spring 框架参考文档]。

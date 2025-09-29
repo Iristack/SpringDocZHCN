@@ -1,0 +1,65 @@
+= Spring Session - 基于 WebFlux 的自定义 Cookie
+Eleftheria Stein-Kousathana
+:stylesdir: ../
+:highlightjsdir: ../js/highlight
+:docinfodir: guides
+
+本指南介绍如何在基于 WebFlux 的应用程序中配置 Spring Session 以使用自定义 Cookie。  
+假设你已经在项目中使用所选的数据存储（例如 Redis）设置好了 Spring Session。详情请参见 link:./boot-redis.html[使用 Redis 实现 HttpSession]。
+
+NOTE: 你可以在 <<webflux-custom-cookie-sample, WebFlux 自定义 Cookie 示例应用>> 中找到完整的指南内容。
+
+[#index-link]
+link:../index.html[首页]
+
+[[webflux-custom-cookie-spring-configuration]]
+== Spring Boot 配置
+
+在设置好 Spring Session 后，你可以通过将 `WebSessionIdResolver` 作为 Spring Bean 暴露出来，来定制会话 Cookie 的写入方式。  
+默认情况下，Spring Session 使用的是 `CookieWebSessionIdResolver`。  
+当你使用类似 `@EnableRedisHttpSession` 的配置时，将 `WebSessionIdResolver` 声明为 Spring Bean 可以增强现有配置。  
+以下示例展示了如何自定义 Spring Session 的 Cookie：
+
+====
+[source,java]
+----
+include::{samples-dir}spring-session-sample-boot-webflux-custom-cookie/src/main/java/sample/CookieConfig.java[tags=webflux-cookie-serializer]
+----
+
+<1> 我们将 Cookie 名称自定义为 `JSESSIONID`。  
+<2> 我们将 Cookie 路径自定义为 `/`（而不是默认的上下文根路径）。  
+<3> 我们将 Cookie 的 `SameSite` 属性设置为 `Strict`。
+====
+
+[[webflux-custom-cookie-sample]]
+== `webflux-custom-cookie` 示例应用程序
+
+本节介绍如何使用 `webflux-custom-cookie` 示例应用程序。
+
+=== 运行 `webflux-custom-cookie` 示例应用程序
+
+你可以通过获取 {download-url}[源代码] 并执行以下命令来运行该示例：
+
+====
+----
+$ ./gradlew :spring-session-sample-boot-webflux-custom-cookie:bootRun
+----
+====
+
+NOTE: 要使示例正常运行，你必须在本地主机上 https://redis.io/download[安装 Redis 2.8 或更高版本]，并使用默认端口（6379）运行。  
+或者，你可以更新 `RedisConnectionFactory` 以指向一个 Redis 服务器。  
+另一个选择是使用 https://www.docker.com/[Docker] 在本地主机上运行 Redis。详细说明请参见 https://hub.docker.com/_/redis/[Docker Redis 仓库]。
+
+现在你应该可以通过 http://localhost:8080/ 访问该应用程序。
+
+=== 探索 `webflux-custom-cookie` 示例应用程序
+
+现在你可以使用该应用程序了。请填写如下表单信息：
+
+* *属性名称:* _username_  
+* *属性值:* _rob_
+
+然后点击 *Set Attribute* 按钮。  
+此时你应该能在表格中看到显示的值。
+
+如果你查看应用程序的 Cookie，会发现 Cookie 已保存为自定义名称 `JSESSIONID`。

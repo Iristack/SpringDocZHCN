@@ -1,0 +1,16 @@
+[[upgrading-3.0]]
+= 升级到 3.x 版本
+
+随着新主版本的发布，Spring Session 团队借此机会进行了一些非向后兼容的变更。这些变更的重点在于改进和统一 Spring Session 的 API，并移除已被弃用的组件。
+
+== 基线更新
+
+Spring Session 3.0 要求以 Java 17 和 Spring Framework 6.0 作为基础运行环境，因为其整个代码库现在都基于 Java 17 编写。有关升级 Spring Framework 的更多信息，请参见 https://github.com/spring-projects/spring-framework/wiki/Upgrading-to-Spring-Framework-5.x[升级到 Spring Framework 5.x]。
+
+== 替换和移除的包、类与方法
+
+以下是对包、类和方法所做的变更：
+
+
+
+== 已停止支持

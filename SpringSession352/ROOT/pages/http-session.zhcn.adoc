@@ -1,0 +1,234 @@
+[[httpsession]]
+= `HttpSession` 集成
+
+Spring Session 提供了与 `HttpSession` 的透明集成。这意味着开发者可以将默认的 `HttpSession` 实现替换为由 Spring Session 支持的实现。
+
+[[httpsession-why]]
+== 为什么使用 Spring Session 和 `HttpSession`？
+
+我们已经提到，Spring Session 提供了与 `HttpSession` 的透明集成，但这能带来哪些好处呢？
+
+* *集群会话（Clustered Sessions）*：Spring Session 可以轻松支持 <<httpsession-redis,集群会话>>，且不依赖于特定应用容器的解决方案。
+* *RESTful API 支持*：通过在请求头中传递会话 ID，Spring Session 能够与 <<httpsession-rest,RESTful API>> 协同工作。
+
+[[httpsession-redis]]
+== 使用 Redis 的 `HttpSession`
+
+通过在任何使用 `HttpSession` 的组件之前添加一个 Servlet Filter，即可启用 Spring Session 结合 `HttpSession` 的功能。你可以选择以下任一方式来启用：
+
+* <<httpsession-redis-jc,基于 Java 的配置>>
+* <<httpsession-redis-xml,基于 XML 的配置>>
+
+[[httpsession-redis-jc]]
+=== 基于 Java 的 Redis 配置
+
+本节介绍如何使用基于 Java 的配置，通过 Redis 来支持 `HttpSession`。
+
+NOTE: xref:samples.adoc#samples[ HttpSession 示例] 提供了一个完整的示例，展示如何通过 Java 配置集成 Spring Session 和 `HttpSession`。你可以在接下来的章节中阅读基本集成步骤，但我们建议你在将自己的应用程序集成时，参考详细的 HttpSession 指南。
+
+include::guides/java-redis.adoc[tags=config,leveloffset=+2]
+
+[[httpsession-redis-xml]]
+=== 基于 XML 的 Redis 配置
+
+本节介绍如何使用基于 XML 的配置，通过 Redis 来支持 `HttpSession`。
+
+NOTE: xref:samples.adoc#samples[ HttpSession XML 示例] 提供了一个完整的示例，展示如何通过 XML 配置集成 Spring Session 和 `HttpSession`。你可以在接下来的章节中阅读基本集成步骤，但我们建议你在将自己的应用程序集成时，参考详细的 HttpSession XML 指南。
+
+include::guides/xml-redis.adoc[tags=config,leveloffset=+2]
+
+[[httpsession-mongo]]
+=== 使用 MongoDB 的 HttpSession
+
+通过在任何使用 `HttpSession` 的组件之前添加一个 Servlet Filter，即可启用 Spring Session 结合 `HttpSession` 的功能。
+
+本节介绍如何使用基于 Java 的配置，通过 MongoDB 来支持 `HttpSession`。
+
+NOTE: <<samples, HttpSession Mongo 示例>> 提供了一个完整的工作示例，展示如何通过 Java 配置集成 Spring Session 和 `HttpSession`。你可以在下方阅读基本集成步骤，但我们建议你在集成自己的应用时，参考详细的 HttpSession 指南。
+
+include::guides/boot-mongo.adoc[tags=config,leveloffset=+3]
+
+==== 会话序列化机制
+
+为了能够将在 MongoDB 中持久化会话对象，我们需要提供序列化/反序列化机制。
+
+默认情况下，Spring Session MongoDB 使用 `JdkMongoSessionConverter`。
+
+但是，你只需在 Boot 应用中添加以下代码，即可切换为 `JacksonMongoSessionConverter`：
+
+[source,java]
+----
+@Bean
+JacksonMongoSessionConverter mongoSessionConverter() {
+    return new JacksonMongoSessionConverter();
+}
+----
+
+===== JacksonMongoSessionConverter
+
+该机制使用 Jackson 将会话对象序列化为 JSON 格式进行存储和读取。
+
+通过创建如下 Bean：
+
+[source,java]
+----
+@Bean
+JacksonMongoSessionConverter mongoSessionConverter() {
+    return new JacksonMongoSessionConverter();
+}
+----
+
+……你就可以从默认的 JDK 序列化切换到使用 Jackson。
+
+IMPORTANT: 如果你正在与 Spring Security 集成（将会话存储在 MongoDB 中），此配置将自动注册正确的白名单组件，以确保 Spring Security 正常运行。
+
+如果你希望提供自定义的 Jackson 模块，可以通过显式注册模块来实现，如下所示：
+
+[source,java,indent=0]
+----
+include::{spring-session-data-mongodb-dir}src/integration-test/java/org/springframework/session/data/mongo/integration/MongoRepositoryJacksonITest.java[tag=sample]
+----
+
+===== JdkMongoSessionConverter
+
+`JdkMongoSessionConverter` 使用标准的 Java 序列化机制，将以二进制形式将会话属性映射持久化到 MongoDB 中。然而，诸如会话 ID、访问时间等标准会话元素仍然以普通 Mongo 对象的形式写入，可以直接读取和查询，无需额外处理。如果未显式定义 `AbstractMongoSessionConverter` 类型的 Bean，则默认使用 `JdkMongoSessionConverter`。
+
+此外，它还提供了一个构造函数，允许传入 `Serializer` 和 `Deserializer` 对象，以便使用自定义实现，这在需要使用非默认类加载器时尤为重要。
+
+[[httpsession-jdbc]]
+== 使用 JDBC 的 `HttpSession`
+
+你可以通过在任何使用 `HttpSession` 的组件之前添加一个 Servlet Filter，来使用 Spring Session 与 `HttpSession` 集成。你可以选择以下任意一种方式：
+
+* <<httpsession-jdbc-jc,基于 Java 的配置>>
+* <<httpsession-jdbc-xml,基于 XML 的配置>>
+* <<httpsession-jdbc-boot,Spring Boot 基于注解的配置>>
+
+[[httpsession-jdbc-jc]]
+=== JDBC 基于 Java 的配置
+
+本节描述如何在使用 Java 配置时，通过关系型数据库支持 `HttpSession`。
+
+NOTE: xref:samples.adoc#samples[ HttpSession JDBC 示例] 提供了一个完整的工作示例，展示如何通过 Java 配置集成 Spring Session 和 `HttpSession`。你可以在接下来的章节中阅读基本集成步骤，但我们建议你在集成自己的应用时，参考详细的 HttpSession JDBC 指南。
+
+include::guides/java-jdbc.adoc[tags=config,leveloffset=+2]
+
+[[httpsession-jdbc-xml]]
+=== JDBC 基于 XML 的配置
+
+本节描述如何在使用 XML 配置时，通过关系型数据库支持 `HttpSession`。
+
+NOTE: xref:samples.adoc#samples[ HttpSession JDBC XML 示例] 提供了一个完整的工作示例，展示如何通过 XML 配置集成 Spring Session 和 `HttpSession`。你可以在接下来的章节中阅读基本集成步骤，但我们建议你在集成自己的应用时，参考详细的 HttpSession JDBC XML 指南。
+
+include::guides/xml-jdbc.adoc[tags=config,leveloffset=+2]
+
+[[httpsession-jdbc-boot]]
+=== 基于 Spring Boot 的 JDBC 配置
+
+本节描述如何在使用 Spring Boot 时，通过关系型数据库支持 `HttpSession`。
+
+NOTE: xref:samples.adoc#samples[ HttpSession JDBC Spring Boot 示例] 提供了一个完整的工作示例，展示如何通过 Spring Boot 集成 Spring Session 和 `HttpSession`。你可以在接下来的章节中阅读基本集成步骤，但我们建议你在集成自己的应用时，参考详细的 HttpSession JDBC Spring Boot 指南。
+
+include::guides/boot-jdbc.adoc[tags=config,leveloffset=+2]
+
+[[httpsession-hazelcast]]
+== 使用 Hazelcast 的 HttpSession
+
+通过在任何使用 `HttpSession` 的组件之前添加一个 Servlet Filter，即可启用 Spring Session 结合 `HttpSession` 的功能。
+
+本节描述如何通过 Java 配置使用 Hazelcast 来支持 `HttpSession`。
+
+NOTE: xref:samples.adoc#samples[ Hazelcast Spring 示例] 提供了一个完整的工作示例，展示如何通过 Java 配置集成 Spring Session 和 `HttpSession`。你可以在接下来的章节中阅读基本集成步骤，但我们建议你在集成自己的应用时，参考详细的 Hazelcast Spring 指南。
+
+include::guides/java-hazelcast.adoc[tags=config,leveloffset=+1]
+
+[[httpsession-how]]
+== `HttpSession` 集成的工作原理
+
+幸运的是，`HttpSession` 和 `HttpServletRequest`（用于获取 `HttpSession` 的 API）都是接口。这意味着我们可以为这些 API 提供自定义实现。
+
+NOTE: 本节解释了 Spring Session 如何实现与 `HttpSession` 的透明集成。我们提供这些内容是为了让你了解其底层机制。该功能已经集成完毕，**你不需要自己实现这些逻辑**。
+
+首先，我们创建一个自定义的 `HttpServletRequest`，它返回一个自定义的 `HttpSession` 实现。大致如下所示：
+
+====
+[source, java]
+----
+public class SessionRepositoryRequestWrapper extends HttpServletRequestWrapper {
+
+	public SessionRepositoryRequestWrapper(HttpServletRequest original) {
+		super(original);
+	}
+
+	public HttpSession getSession() {
+		return getSession(true);
+	}
+
+	public HttpSession getSession(boolean createNew) {
+		// 从 Spring Session 创建一个 HttpSession 实现
+	}
+
+	// ... 其他方法都代理给原始的 HttpServletRequest ...
+}
+----
+====
+
+所有返回 `HttpSession` 的方法都会被重写。其他方法由 `HttpServletRequestWrapper` 实现，并代理给原始的 `HttpServletRequest` 实现。
+
+我们通过名为 `SessionRepositoryFilter` 的 Servlet Filter 替换 `HttpServletRequest` 实现。以下伪代码展示了其工作方式：
+
+====
+[source, java]
+----
+public class SessionRepositoryFilter implements Filter {
+
+	public doFilter(ServletRequest request, ServletResponse response, FilterChain chain) {
+		HttpServletRequest httpRequest = (HttpServletRequest) request;
+		SessionRepositoryRequestWrapper customRequest =
+			new SessionRepositoryRequestWrapper(httpRequest);
+
+		chain.doFilter(customRequest, response, chain);
+	}
+
+	// ...
+}
+----
+====
+
+通过将自定义的 `HttpServletRequest` 实例传递给 `FilterChain`，我们确保在我们的 Filter 之后执行的所有操作都使用自定义的 `HttpSession` 实现。这也说明了为什么 Spring Session 的 `SessionRepositoryFilter` 必须放置在任何与 `HttpSession` 交互的组件之前。
+
+[[httpsession-rest]]
+== `HttpSession` 与 RESTful API
+
+Spring Session 可以通过在请求头中提供会话 ID 的方式，与 RESTful API 协同工作。
+
+NOTE: xref:samples.adoc#samples[ REST 示例] 提供了一个完整的工作示例，展示如何在 REST 应用中使用 Spring Session 并通过请求头进行身份验证。你可以在接下来的章节中阅读基本集成步骤，但我们建议你在集成自己的应用时，参考详细的 REST 指南。
+
+include::guides/java-rest.adoc[tags=config,leveloffset=+1]
+
+[[httpsession-httpsessionlistener]]
+== 使用 `HttpSessionListener`
+
+Spring Session 通过声明 `SessionEventHttpSessionListenerAdapter`，将 `SessionDestroyedEvent` 和 `SessionCreatedEvent` 转换为 `HttpSessionEvent`，从而支持 `HttpSessionListener`。要使用此功能，你需要：
+
+* 确保你的 `SessionRepository` 实现支持并已配置为触发 `SessionDestroyedEvent` 和 `SessionCreatedEvent`。
+* 将 `SessionEventHttpSessionListenerAdapter` 配置为 Spring Bean。
+* 将每一个 `HttpSessionListener` 注入到 `SessionEventHttpSessionListenerAdapter` 中。
+
+如果你使用 Redis 支持，并将 `enableIndexingAndEvents` 设置为 `true`（即 `@EnableRedisHttpSession(enableIndexingAndEvents = true)`），那么你只需要将每个 `HttpSessionListener` 注册为 Bean 即可。例如，假设你想支持 Spring Security 的并发控制，需要使用 `HttpSessionEventPublisher`，此时只需将 `HttpSessionEventPublisher` 注册为 Bean。在 Java 配置中，可能如下所示：
+
+====
+[source,java,indent=0]
+----
+include::{docs-test-dir}docs/http/RedisHttpSessionConfig.java[tags=config]
+----
+====
+
+在 XML 配置中，可能如下所示：
+
+====
+[source,xml,indent=0]
+----
+include::{docs-test-resources-dir}docs/http/HttpSessionListenerXmlTests-context.xml[tags=config]
+----
+====

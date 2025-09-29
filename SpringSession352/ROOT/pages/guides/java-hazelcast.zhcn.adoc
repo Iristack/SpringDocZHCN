@@ -1,0 +1,208 @@
+= Spring Session 与使用 Hazelcast 的 Spring Security
+Tommy Ludwig; Rob Winch
+:stylesdir: ../
+:highlightjsdir: ../js/highlight
+:docinfodir: guides
+
+本指南介绍如何在使用 Hazelcast 作为数据存储时，将 Spring Session 与 Spring Security 结合使用。  
+假设你已经将 Spring Security 应用于你的应用程序。
+
+NOTE: 你可以在 <<hazelcast-spring-security-sample, Hazelcast Spring Security 示例应用>> 中找到完整的指南。
+
+[#index-link]
+link:../index.html[索引]
+
+== 更新依赖项
+
+在使用 Spring Session 之前，必须更新你的依赖项。  
+如果你使用 Maven，则需要添加以下依赖项：
+
+====
+.pom.xml
+[source,xml]
+[subs="verbatim,attributes"]
+----
+<dependencies>
+	<!-- ... -->
+
+	<dependency>
+		<groupId>com.hazelcast</groupId>
+		<artifactId>hazelcast</artifactId>
+		<version>{hazelcast-version}</version>
+	</dependency>
+	<dependency>
+		<groupId>org.springframework</groupId>
+		<artifactId>spring-web</artifactId>
+		<version>{spring-core-version}</version>
+	</dependency>
+</dependencies>
+----
+====
+
+ifeval::["{version-snapshot}" == "true"]
+由于我们使用的是 SNAPSHOT 版本，因此需要添加 Spring 快照 Maven 仓库。你需要在 pom.xml 中包含以下内容：
+
+====
+.pom.xml
+[source,xml]
+----
+<repositories>
+
+	<!-- ... -->
+
+	<repository>
+	<id>spring-snapshot</id>
+	<url>https://repo.spring.io/libs-snapshot</url>
+	</repository>
+</repositories>
+----
+====
+endif::[]
+
+ifeval::["{version-milestone}" == "true"]
+由于我们使用的是里程碑版本，因此需要添加 Spring 里程碑 Maven 仓库。你需要在 pom.xml 中包含以下内容：
+
+====
+.pom.xml
+[source,xml]
+----
+<repository>
+<id>spring-milestone</id>
+<url>https://repo.spring.io/libs-milestone</url>
+</repository>
+----
+====
+endif::[]
+
+// tag::config[]
+
+[[security-spring-configuration]]
+== Spring 配置
+
+添加所需依赖后，我们可以创建 Spring 配置。该配置负责创建一个 Servlet 过滤器（Filter），用由 Spring Session 支持的实现替换默认的 `HttpSession` 实现。为此，请添加以下 Spring 配置：
+
+====
+[source,java]
+----
+include::{docs-test-dir}docs/http/HazelcastHttpSessionConfig.java[tags=config]
+----
+
+<1> `@EnableHazelcastHttpSession` 注解会创建一个名为 `springSessionRepositoryFilter` 的 Spring Bean，该 Bean 实现了 `Filter` 接口。这个过滤器负责将 `HttpSession` 的实现替换为由 Spring Session 支持的实现。在此示例中，Spring Session 由 Hazelcast 提供支持。  
+<2> 为了支持按主体名称索引检索会话，需要注册适当的 `ValueExtractor`。Spring Session 提供了 `PrincipalNameExtractor` 来实现此目的。  
+<3> 为了高效序列化 `MapSession` 对象，需要注册 `HazelcastSessionSerializer`。如果不设置此项，Hazelcast 将使用原生 Java 序列化来序列化会话。  
+<4> 我们创建了一个 `HazelcastInstance`，用于连接 Spring Session 和 Hazelcast。默认情况下，应用程序启动并连接到嵌入式的 Hazelcast 实例。有关 Hazelcast 配置的更多信息，请参阅 https://docs.hazelcast.com/hazelcast/latest/[参考文档]。
+====
+
+NOTE: 如果希望使用 `HazelcastSessionSerializer`，则必须在所有 Hazelcast 集群成员启动前进行配置。在一个 Hazelcast 集群中，所有成员应使用相同的会话序列化方法。此外，如果使用的是 Hazelcast 客户端/服务器拓扑结构，则客户端和成员都必须使用相同的序列化方式。可以通过 `ClientConfig` 使用与集群成员相同的 `SerializerConfiguration` 来注册序列化器。
+
+== Servlet 容器初始化
+
+我们的 xref:guides/java-security.adoc#security-spring-configuration[Spring 配置] 创建了一个名为 `springSessionRepositoryFilter` 的 Spring Bean，并实现了 `Filter` 接口。该 Bean 负责将标准的 `HttpSession` 替换为由 Spring Session 支持的自定义实现。
+
+为了让我们的过滤器生效，Spring 需要加载 `SessionConfig` 类。由于我们的应用程序已通过 `SecurityInitializer` 类加载了 Spring 配置，因此我们可以将 `SessionConfig` 添加进去。如下所示：
+
+====
+.src/main/java/sample/SecurityInitializer.java
+[source,java]
+----
+include::{samples-dir}spring-session-sample-javaconfig-hazelcast/src/main/java/sample/SecurityInitializer.java[tags=class]
+----
+====
+
+最后，我们需要确保 Servlet 容器（例如 Tomcat）对每个请求都使用我们的 `springSessionRepositoryFilter`。特别重要的是：**Spring Session 的 `springSessionRepositoryFilter` 必须在 Spring Security 的 `springSecurityFilterChain` 之前被调用**。这样才能保证 Spring Security 使用的 `HttpSession` 是由 Spring Session 支持的。
+
+幸运的是，Spring Session 提供了一个名为 `AbstractHttpSessionApplicationInitializer` 的工具类，使得这一过程变得非常简单。示例如下：
+
+====
+.src/main/java/sample/Initializer.java
+[source,java]
+----
+include::{samples-dir}spring-session-sample-javaconfig-hazelcast/src/main/java/sample/Initializer.java[tags=class]
+----
+====
+
+NOTE: 我们的类名（`Initializer`）并不重要，关键是我们继承了 `AbstractHttpSessionApplicationInitializer`。
+
+通过继承 `AbstractHttpSessionApplicationInitializer`，我们确保了名为 `springSessionRepositoryFilter` 的 Spring Bean 在每个请求中都会被注册到 Servlet 容器中，并且优先于 Spring Security 的 `springSecurityFilterChain` 执行。
+
+// end::config[]
+
+[[hazelcast-spring-security-sample]]
+== Hazelcast Spring Security 示例应用
+
+本节介绍如何使用 Hazelcast Spring Security 示例应用。
+
+=== 运行示例应用
+
+你可以通过获取 {download-url}[源代码] 并执行以下命令来运行示例：
+
+====
+----
+$ ./gradlew :spring-session-sample-javaconfig-hazelcast:tomcatRun
+----
+====
+
+NOTE: 默认情况下，Hazelcast 以嵌入模式运行并与你的应用集成。但如果你想连接到独立的 Hazelcast 实例，可以按照 https://docs.hazelcast.com/hazelcast/latest/getting-started/get-started-cli[参考文档] 中的说明进行配置。
+
+现在你应该可以在 http://localhost:8080/ 访问该应用。
+
+=== 探索安全示例应用
+
+你现在可以尝试使用该应用。登录方式如下：
+
+* *用户名* _user_  
+* *密码* _password_
+
+点击 *登录* 按钮后，你会看到一条消息，表明你已使用上述用户成功登录。此时用户的会话信息是存储在 Hazelcast 中，而不是 Tomcat 的 `HttpSession` 实现中。
+
+=== 它是如何工作的？
+
+我们并没有使用 Tomcat 的 `HttpSession`，而是将会话值持久化到 Hazelcast 中。Spring Session 使用 Hazelcast 中的一个 `Map` 来替代 `HttpSession` 的实现。当 Spring Security 的 `SecurityContextPersistenceFilter` 将 `SecurityContext` 保存到 `HttpSession` 时，实际上这些数据被持久化到了 Hazelcast 中。
+
+每当创建一个新的 `HttpSession` 时，Spring Session 会在浏览器中生成一个名为 `SESSION` 的 Cookie，其中包含了会话 ID。你可以使用 https://developers.google.com/web/tools/chrome-devtools/manage-data/cookies[Chrome] 或 https://developer.mozilla.org/en-US/docs/Tools/Storage_Inspector[Firefox] 的开发者工具查看这些 Cookie。
+
+=== 与数据存储交互
+
+你可以使用 https://docs.hazelcast.com/hazelcast/latest/clients/java[Java 客户端]、
+https://hazelcast.com/clients/[其他客户端之一]，或
+https://docs.hazelcast.com/management-center/latest/getting-started/overview[管理控制台] 来删除会话。
+
+==== 使用控制台
+
+例如，在连接到 Hazelcast 节点后，可以通过管理控制台执行以下命令来清除会话：
+
+====
+----
+	default> ns spring:session:sessions
+	spring:session:sessions> m.clear
+----
+====
+
+TIP: Hazelcast 文档提供了关于 https://docs.hazelcast.com/hazelcast/latest/clients/clc[控制台] 的详细说明。
+
+或者，你也可以删除特定的会话键。请在控制台中输入以下命令，并将 `7e8383a4-082c-4ffe-a4bc-c40fd3363c5e` 替换为你自己的 `SESSION` Cookie 值：
+
+====
+----
+	spring:session:sessions> m.remove 7e8383a4-082c-4ffe-a4bc-c40fd3363c5e
+----
+====
+
+然后访问 http://localhost:8080/，你会发现当前会话已不再认证。
+
+==== 使用 REST API
+
+如 Hazelcast 文档中关于客户端的部分所述，Hazelcast 节点提供了一个
+https://docs.hazelcast.com/hazelcast/latest/clients/rest[REST API]。
+
+例如，你可以像这样删除单个键（请务必将 `7e8383a4-082c-4ffe-a4bc-c40fd3363c5e` 替换为你的 SESSION Cookie 值）：
+
+====
+----
+	$ curl -v -X DELETE http://localhost:xxxxx/hazelcast/rest/maps/spring:session:sessions/7e8383a4-082c-4ffe-a4bc-c40fd3363c5e
+----
+====
+
+TIP: Hazelcast 节点的端口号会在启动时打印到控制台，请将 `xxxxx` 替换为实际端口。
+
+现在你可以看到，你已无法再使用该会话进行身份验证。

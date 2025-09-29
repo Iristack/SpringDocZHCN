@@ -1,0 +1,130 @@
+= Spring Session - WebSocket
+Rob Winch
+:websocketdoc-test-dir: {docs-test-dir}docs/websocket/
+:stylesdir: ../
+:highlightjsdir: ../js/highlight
+:docinfodir: guides
+
+本指南介绍如何使用 Spring Session 确保 WebSocket 消息能够保持你的 HttpSession 处于活跃状态。
+
+// tag::disclaimer[]
+
+注意：Spring Session 的 WebSocket 支持仅适用于 Spring 自身的 WebSocket 支持。  
+具体来说，它不能直接与 https://www.jcp.org/en/jsr/detail?id=356[JSR-356] 配合使用，因为 JSR-356 并没有提供拦截传入 WebSocket 消息的机制。
+
+// end::disclaimer[]
+
+[#index-link]
+link:../index.html[首页]
+
+== HttpSession 配置
+
+第一步是将 Spring Session 与 HttpSession 集成。这些步骤已在 link:./boot-redis.html[使用 Redis 的 HttpSession 指南] 中详细说明。
+
+请确保在继续之前已经完成了 Spring Session 与 HttpSession 的集成。
+
+// tag::config[]
+
+[[websocket-spring-configuration]]
+== Spring 配置
+
+在一个典型的 Spring WebSocket 应用中，你会实现 `WebSocketMessageBrokerConfigurer` 接口。例如，配置可能如下所示：
+
+====
+[source,java]
+----
+include::{websocketdoc-test-dir}WebSocketConfig.java[tags=class]
+----
+====
+
+我们可以更新配置以使用 Spring Session 提供的 WebSocket 支持。以下示例展示了如何操作：
+
+====
+.src/main/java/samples/config/WebSocketConfig.java
+[source,java]
+----
+include::{samples-dir}spring-session-sample-boot-websocket/src/main/java/sample/config/WebSocketConfig.java[tags=class]
+----
+
+要接入 Spring Session 的支持，我们只需修改两点：
+
+<1> 不再实现 `WebSocketMessageBrokerConfigurer`，而是继承 `AbstractSessionWebSocketMessageBrokerConfigurer`  
+<2> 将 `registerStompEndpoints` 方法重命名为 `configureStompEndpoints`
+====
+
+`AbstractSessionWebSocketMessageBrokerConfigurer` 在底层做了什么？
+
+* 将 `WebSocketConnectHandlerDecoratorFactory` 添加为 `WebSocketTransportRegistration` 的 `WebSocketHandlerDecoratorFactory`。这确保会触发一个包含 `WebSocketSession` 的自定义 `SessionConnectEvent`。该 `WebSocketSession` 对象对于在 Spring Session 结束时关闭仍在打开的 WebSocket 连接至关重要。
+* 将 `SessionRepositoryMessageInterceptor` 作为 `HandshakeInterceptor` 添加到每个 `StompWebSocketEndpointRegistration` 中。这确保了 `Session` 被添加到 WebSocket 属性中，从而可以更新最后访问时间。
+* 将 `SessionRepositoryMessageInterceptor` 作为 `ChannelInterceptor` 添加到入站消息通道（inbound Channel）注册中。这确保每次收到入站消息时，都会更新当前 Spring Session 的最后访问时间。
+* 创建 `WebSocketRegistryListener` 作为 Spring Bean。这使得我们可以维护所有 `Session` ID 与其对应 WebSocket 连接之间的映射关系。通过维护此映射，当某个 Spring Session（即 HttpSession）结束时，我们可以关闭其所有相关的 WebSocket 连接。
+
+// end::config[]
+
+[[websocket-sample]]
+== `websocket` 示例应用
+
+`websocket` 示例应用演示了如何将 Spring Session 与 WebSocket 结合使用。
+
+=== 运行 `websocket` 示例应用
+
+你可以通过获取 {download-url}[源代码] 并执行以下命令来运行该示例：
+
+====
+----
+$ ./gradlew :spring-session-sample-boot-websocket:bootRun
+----
+====
+
+[TIP]
+=====
+为了测试会话过期行为，你可以在启动应用前添加如下配置属性，将会话超时时间改为 1 分钟（默认为 30 分钟）：
+
+====
+.src/main/resources/application.properties
+----
+server.servlet.session.timeout=1m # 会话超时时间。如果没有指定时间单位后缀，则默认单位为秒。
+----
+====
+=====
+
+注意：要使示例正常运行，必须在本地主机上 https://redis.io/download[安装 Redis 2.8 或更高版本]，并使用默认端口（6379）运行。  
+或者，你可以修改 `RedisConnectionFactory` 使其指向其他 Redis 服务器。  
+另一个选择是使用 https://www.docker.com/[Docker] 在本地运行 Redis。有关详细说明，请参阅 https://hub.docker.com/_/redis/[Docker Redis 仓库]。
+
+现在你应该可以通过 http://localhost:8080/ 访问应用程序。
+
+=== 探索 `websocket` 示例应用
+
+现在你可以尝试使用这个应用。使用以下信息进行登录认证：
+
+* *用户名* _rob_
+* *密码* _password_
+
+点击 *登录* 按钮后，你应该已成功以用户 **rob** 身份登录。
+
+打开一个隐私浏览窗口，并访问 http://localhost:8080/
+
+系统会提示你输入登录信息。使用以下凭据登录：
+
+* *用户名* _luke_
+* *密码* _password_
+
+现在从 rob 向 luke 发送一条消息。消息应能成功显示。
+
+等待两分钟后，再次尝试从 rob 向 luke 发送消息。你会发现消息不再被发送。
+
+[NOTE]
+为什么需要等待两分钟？
+====
+Spring Session 的会话会在 60 秒后过期，但 Redis 发出的过期通知并不保证在 60 秒内立即到达。  
+为了确保 WebSocket 连接能在合理时间内关闭，Spring Session 每分钟在整点秒数（如 00 秒）执行一次后台任务，强制清理所有已过期的会话。  
+因此，最多需要等待两分钟，WebSocket 连接才会被关闭。
+====
+
+此时再次访问 http://localhost:8080/，系统会要求重新认证。这表明会话确实已经正确过期。
+
+现在重复上述操作，但不要等待两分钟，而是在两个用户之间每 30 秒互发一次消息。你会发现消息仍可正常发送。  
+尝试访问 http://localhost:8080/，系统不会要求重新登录。这表明会话因持续活动而保持有效。
+
+注意：只有由用户主动发出的消息才能延长会话生命周期。这是因为只有来自用户的发送行为才代表用户处于活跃状态。接收消息并不代表用户活动，因此不会刷新会话的有效期。

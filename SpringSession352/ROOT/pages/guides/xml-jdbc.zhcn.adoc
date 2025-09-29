@@ -1,0 +1,174 @@
+= Spring Session - HttpSession（快速入门）
+Rob Winch, Vedran Pavić
+:stylesdir: ../
+:highlightjsdir: ../js/highlight
+:docinfodir: guides
+
+本指南介绍了如何使用 Spring Session，通过基于 XML 的配置，透明地利用关系型数据库来支持 Web 应用程序的 `HttpSession`。
+
+NOTE: 你可以在 <<httpsession-jdbc-xml-sample, httpsession-jdbc-xml 示例应用>> 中找到完整的指南。
+
+[#index-link]
+link:../index.html[首页]
+
+== 更新依赖项
+
+在使用 Spring Session 之前，必须先更新项目依赖。  
+如果你使用的是 Maven，则需要添加以下依赖项：
+
+====
+.pom.xml
+[source,xml]
+[subs="verbatim,attributes"]
+----
+<dependencies>
+	<!-- ... -->
+
+	<dependency>
+		<groupId>org.springframework.session</groupId>
+		<artifactId>spring-session-jdbc</artifactId>
+		<version>{spring-session-version}</version>
+		<type>pom</type>
+	</dependency>
+	<dependency>
+		<groupId>org.springframework</groupId>
+		<artifactId>spring-web</artifactId>
+		<version>{spring-core-version}</version>
+	</dependency>
+</dependencies>
+----
+====
+
+ifeval::["{version-snapshot}" == "true"]
+由于我们使用的是 SNAPSHOT 版本，因此需要添加 Spring 快照仓库。你必须在 pom.xml 中包含以下内容：
+
+====
+.pom.xml
+[source,xml]
+----
+<repositories>
+
+	<!-- ... -->
+
+	<repository>
+		<id>spring-snapshot</id>
+		<url>https://repo.spring.io/libs-snapshot</url>
+	</repository>
+</repositories>
+----
+====
+endif::[]
+
+ifeval::["{version-milestone}" == "true"]
+由于我们使用的是里程碑版本，因此需要添加 Spring 里程碑仓库。你必须在 pom.xml 中包含以下内容：
+
+====
+.pom.xml
+[source,xml]
+----
+<repository>
+	<id>spring-milestone</id>
+	<url>https://repo.spring.io/libs-milestone</url>
+</repository>
+----
+====
+endif::[]
+
+// tag::config[]
+
+[[httpsession-jdbc-xml-spring-configuration]]
+== Spring XML 配置
+
+添加所需依赖后，我们可以创建 Spring 配置。该配置的作用是创建一个 Servlet 过滤器（Filter），用由 Spring Session 支持的实现替换默认的 `HttpSession` 实现。  
+以下示例展示了如何添加如下 Spring 配置：
+
+====
+.src/main/webapp/WEB-INF/spring/session.xml
+[source,xml,indent=0]
+----
+include::{samples-dir}spring-session-sample-xml-jdbc/src/main/webapp/WEB-INF/spring/session.xml[tags=beans]
+----
+
+<1> 我们结合使用 `<context:annotation-config/>` 和 `JdbcHttpSessionConfiguration`，因为 Spring Session 尚未提供 XML 命名空间支持（参见 https://github.com/spring-projects/spring-session/issues/104[gh-104]）。这会创建一个名为 `springSessionRepositoryFilter` 的 Spring Bean，该 Bean 实现了 `Filter` 接口。此过滤器负责将 `HttpSession` 的实现替换为由 Spring Session 支持的自定义实现。在此实例中，Spring Session 使用关系型数据库作为后端存储。
+<2> 我们创建了一个 `dataSource`，用于连接到嵌入式 H2 数据库实例。同时配置 H2 数据库使用 Spring Session 提供的 SQL 脚本来自动创建所需的数据库表。
+<3> 我们创建了一个 `transactionManager`，用于管理上述 `dataSource` 的事务。
+====
+
+有关数据访问相关配置的更多信息，请参阅 {docs-url}/spring/docs/{spring-core-version}/spring-framework-reference/data-access.html[Spring 框架参考文档]。
+
+== XML 方式的 Servlet 容器初始化
+
+我们的 <<httpsession-jdbc-xml-spring-configuration,Spring 配置>> 创建了一个名为 `springSessionRepositoryFilter` 并实现 `Filter` 接口的 Spring Bean。`springSessionRepositoryFilter` 负责将标准的 `HttpSession` 替换为由 Spring Session 支持的自定义实现。
+
+为了让这个过滤器生效，我们需要指示 Spring 加载我们的 `session.xml` 配置文件。为此，我们进行如下配置：
+
+====
+.src/main/webapp/WEB-INF/web.xml
+[source,xml,indent=0]
+----
+include::{samples-dir}spring-session-sample-xml-jdbc/src/main/webapp/WEB-INF/web.xml[tags=context-param]
+include::{samples-dir}spring-session-sample-xml-jdbc/src/main/webapp/WEB-INF/web.xml[tags=listeners]
+----
+====
+
+{docs-url}/spring/docs/{spring-core-version}/spring-framework-reference/core.html#context-create[`ContextLoaderListener`] 会读取 `contextConfigLocation` 参数，并加载我们的 `session.xml` 配置。
+
+最后，我们需要确保 Servlet 容器（例如 Tomcat）对每个请求都使用我们的 `springSessionRepositoryFilter`。以下代码片段完成了这一最后步骤：
+
+====
+.src/main/webapp/WEB-INF/web.xml
+[source,xml,indent=0]
+----
+include::{samples-dir}spring-session-sample-xml-jdbc/src/main/webapp/WEB-INF/web.xml[tags=springSessionRepositoryFilter]
+----
+====
+
+{docs-url}/spring-framework/docs/{spring-core-version}/javadoc-api/org/springframework/web/filter/DelegatingFilterProxy.html[`DelegatingFilterProxy`] 会在 Spring 容器中查找名为 `springSessionRepositoryFilter` 的 Bean，并将其转换为 `Filter` 类型。每当有请求触发 `DelegatingFilterProxy` 时，就会调用 `springSessionRepositoryFilter`。
+
+// end::config[]
+
+[[httpsession-jdbc-xml-sample]]
+== `httpsession-jdbc-xml` 示例应用程序
+
+本节介绍如何使用 `httpsession-jdbc-xml` 示例应用程序。
+
+=== 运行 `httpsession-jdbc-xml` 示例应用
+
+你可以通过获取 {download-url}[源代码] 并执行以下命令来运行该示例：
+
+====
+----
+$ ./gradlew :spring-session-sample-xml-jdbc:tomcatRun
+----
+====
+
+完成后，你现在可以通过 http://localhost:8080/ 访问该应用程序。
+
+=== 探索 `httpsession-jdbc-xml` 示例应用
+
+现在可以尝试使用该应用。请填写以下信息：
+
+* *属性名称:* _username_
+* *属性值:* _rob_
+
+然后点击 *Set Attribute*（设置属性）按钮。你应该能在页面表格中看到显示的值。
+
+=== 它是如何工作的？
+
+我们在以下 `SessionServlet` 中与标准的 `HttpSession` 进行交互：
+
+====
+.src/main/java/sample/SessionServlet.java
+[source,java]
+----
+include::{samples-dir}spring-session-sample-xml-jdbc/src/main/java/sample/SessionServlet.java[tags=class]
+----
+====
+
+但实际上并未使用 Tomcat 自带的 `HttpSession`，而是将数据持久化到了 H2 数据库中。  
+Spring Session 会在你的浏览器中创建一个名为 `SESSION` 的 Cookie，其中包含了会话的 ID。  
+你可以通过 https://developers.google.com/web/tools/chrome-devtools/manage-data/cookies[Chrome] 或 https://developer.mozilla.org/en-US/docs/Tools/Storage_Inspector[Firefox] 的开发者工具查看这些 Cookie。
+
+你可以通过 H2 数据库的 Web 控制台删除会话：http://localhost:8080/h2-console/（JDBC URL 填写 `jdbc:h2:mem:testdb`）
+
+之后再次访问 http://localhost:8080/，你会发现之前添加的属性已不再显示。

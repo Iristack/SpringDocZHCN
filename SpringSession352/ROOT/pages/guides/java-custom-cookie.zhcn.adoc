@@ -1,0 +1,91 @@
+= Spring Session - 自定义 Cookie
+Rob Winch; Eleftheria Stein-Kousathana
+:stylesdir: ../
+:highlightjsdir: ../js/highlight
+:docinfodir: guides
+
+本文档介绍如何通过 Java 配置来配置 Spring Session 使用自定义 Cookie。  
+假设你已在项目中使用所选的数据存储设置好了 Spring Session。例如，参考 link:./boot-redis.html[使用 Redis 的 HttpSession]。
+
+NOTE: 你可以在 <<custom-cookie-sample, 自定义 Cookie 示例应用>> 中找到完整的指南代码。
+
+[#index-link]
+link:../index.html[索引]
+
+[[custom-cookie-spring-configuration]]
+== Spring Java 配置
+
+在设置好 Spring Session 后，你可以通过将 `CookieSerializer` 暴露为一个 Spring Bean 来自定义会话 Cookie 的写入方式。  
+Spring Session 提供了 `DefaultCookieSerializer`。  
+将 `DefaultCookieSerializer` 声明为 Spring Bean 可以在使用如 `@EnableRedisHttpSession` 等配置时增强现有配置。  
+以下示例展示了如何自定义 Spring Session 的 Cookie：
+
+====
+[source,java]
+----
+include::{samples-dir}spring-session-sample-javaconfig-custom-cookie/src/main/java/sample/Config.java[tags=cookie-serializer]
+----
+
+<1> 我们将 Cookie 名称自定义为 `JSESSIONID`。  
+<2> 我们将 Cookie 路径自定义为 `/`（而不是默认的上下文根路径）。  
+<3> 我们自定义域名模式（正则表达式）为 `^.+?\\.(\\w+\\.[a-z]+)$`。  
+这允许在多个域和应用之间共享会话。如果正则表达式不匹配，则不会设置 domain 属性，而是使用现有的 domain；如果匹配，则使用第一个 https://docs.oracle.com/javase/tutorial/essential/regex/groups.html[分组] 作为 domain 值。这意味着对 https://child.example.com 的请求会将 cookie 的 domain 设置为 `example.com`。然而，对 http://localhost:8080/ 或 https://192.168.1.100:8080/ 的请求不会设置 domain，因此在开发环境中无需修改即可正常工作。
+====
+
+WARNING: 你应该仅匹配有效的域名字符，因为域名会被直接反映在响应中。这样做可以防止恶意用户发起诸如 https://en.wikipedia.org/wiki/HTTP_response_splitting[HTTP 响应拆分]之类的攻击。
+
+[[custom-cookie-options]]
+== 配置选项
+
+以下是可用的配置选项：
+
+* `cookieName`: 使用的 Cookie 名称。  
+  默认值：`SESSION`。
+* `useSecureCookie`: 是否使用安全 Cookie（即仅通过 HTTPS 传输）。  
+  默认值：使用创建时 `HttpServletRequest.isSecure()` 的返回值。
+* `cookiePath`: Cookie 的路径。  
+  默认值：上下文根路径（context root）。
+* `cookieMaxAge`: 在创建会话时设置 Cookie 的最大存活时间（以秒为单位）。  
+  默认值：`-1`，表示浏览器关闭时删除 Cookie。
+* `jvmRoute`: 指定附加到会话 ID 并包含在 Cookie 中的后缀，用于标识实现会话亲和性的 JVM。  
+  对于某些实现（例如 Redis），此选项不会带来性能提升，但有助于追踪特定用户的日志。
+* `domainName`: 允许指定用于 Cookie 的具体域名。  
+  此选项易于理解，但通常需要在开发和生产环境之间使用不同的配置。可考虑使用 `domainNamePattern` 作为替代方案。
+* `domainNamePattern`: 一个不区分大小写的模式，用于从 `HttpServletRequest#getServerName()` 中提取域名。该模式应提供一个分组，用于提取 Cookie domain 的值。  
+  如果正则表达式不匹配，则不设置 domain，保留原有 domain；如果匹配，则使用第一个 https://docs.oracle.com/javase/tutorial/essential/regex/groups.html[分组] 作为 domain 值。
+* `sameSite`: 设置 Cookie 的 `SameSite` 指令值。若要禁用 `SameSite` 指令的序列化，可将此值设为 `null`。  
+  默认值：`Lax`
+
+WARNING: 你应该仅匹配有效的域名字符，因为域名会被直接反映在响应中。这样做可以防止恶意用户发起诸如 https://en.wikipedia.org/wiki/HTTP_response_splitting[HTTP 响应拆分]之类的攻击。
+
+[[custom-cookie-sample]]
+== `custom-cookie` 示例应用
+
+本节介绍如何运行和使用 `custom-cookie` 示例应用。
+
+=== 运行 `custom-cookie` 示例应用
+
+你可以通过获取 {download-url}[源码] 并执行以下命令来运行该示例：
+
+====
+----
+$ ./gradlew :spring-session-sample-javaconfig-custom-cookie:tomcatRun
+----
+====
+
+NOTE: 要使示例正常运行，你必须在本地主机上 https://redis.io/download[安装 Redis 2.8 或更高版本]，并使用默认端口（6379）运行。  
+或者，你可以更新 `RedisConnectionFactory` 以指向一个远程 Redis 服务器。  
+另一个选择是使用 https://www.docker.com/[Docker] 在本地主机上运行 Redis。详细说明请参阅 https://hub.docker.com/_/redis/[Docker Redis 仓库]。
+
+现在你应该可以通过 http://localhost:8080/ 访问该应用。
+
+=== 探索 `custom-cookie` 示例应用
+
+现在你可以使用该应用了。填写以下信息：
+
+* *属性名称（Attribute Name）:* _username_  
+* *属性值（Attribute Value）:* _rob_
+
+然后点击 *Set Attribute* 按钮。你应该能在下方表格中看到显示的值。
+
+如果你查看应用的 Cookie，会发现 Cookie 已保存为自定义名称 `JSESSIONID`。
