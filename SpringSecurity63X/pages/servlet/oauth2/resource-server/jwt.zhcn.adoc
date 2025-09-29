@@ -1,0 +1,1578 @@
+= OAuth 2.0 资源服务器 JWT
+:figures: servlet/oauth2
+
+[[oauth2resourceserver-jwt-minimaldependencies]]
+== JWT 的最小依赖
+
+大多数资源服务器支持功能都集中在 `spring-security-oauth2-resource-server` 模块中。然而，解码和验证 JWT 的支持位于 `spring-security-oauth2-jose` 模块中，这意味着要构建一个支持 JWT 编码的 Bearer Token 的工作资源服务器，必须同时引入这两个模块。
+
+[[oauth2resourceserver-jwt-minimalconfiguration]]
+== JWT 的最小配置
+
+当使用 https://spring.io/projects/spring-boot[Spring Boot] 时，将应用程序配置为资源服务器包含两个基本步骤：首先，包含所需的依赖项；其次，指定授权服务器的位置。
+
+=== 指定授权服务器
+
+在 Spring Boot 应用程序中，要指定使用的授权服务器，只需执行以下操作：
+
+[source,yml]
+----
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://idp.example.com/issuer
+----
+
+其中 `https://idp.example.com/issuer` 是授权服务器签发的 JWT 令牌中 `iss` 声明的值。资源服务器将使用此属性进行进一步的自配置，发现授权服务器的公钥，并随后验证传入的 JWT。
+
+[NOTE]
+要使用 `issuer-uri` 属性，还必须满足以下条件之一：`https://idp.example.com/issuer/.well-known/openid-configuration`、`https://idp.example.com/.well-known/openid-configuration/issuer` 或 `https://idp.example.com/.well-known/oauth-authorization-server/issuer` 是授权服务器支持的端点。此端点被称为 https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfig[提供者配置] 端点或 https://tools.ietf.org/html/rfc8414#section-3[授权服务器元数据] 端点。
+
+就这样！
+
+=== 启动期望
+
+当使用此属性和这些依赖项时，资源服务器将自动配置自身以验证 JWT 编码的 Bearer Token。
+
+它通过确定性的启动过程实现这一点：
+
+1. 查询提供者配置或授权服务器元数据端点以获取 `jwks_url` 属性
+2. 查询 `jwks_url` 端点以获取支持的算法
+3. 配置验证策略，从启动期间找到的 `jwks_url` 端点查询对应算法的有效公钥
+4. 配置验证策略以针对 `https://idp.example.com` 验证每个 JWT 的 `iss` 声明
+
+此过程的一个结果是，授权服务器必须处于运行状态并能够接收请求，资源服务器才能成功启动。
+
+[NOTE]
+如果授权服务器在资源服务器查询时处于宕机状态（给定适当的超时），则启动将失败。
+
+=== 运行时期望
+
+一旦应用程序启动，资源服务器将尝试处理任何包含 `Authorization: Bearer` 头的请求：
+
+[source,html]
+----
+GET / HTTP/1.1
+Authorization: Bearer some-token-value # 资源服务器将处理此请求
+----
+
+只要指示了此方案，资源服务器就会根据 Bearer Token 规范尝试处理该请求。
+
+对于格式正确的 JWT，资源服务器将：
+
+1. 使用启动期间从 `jwks_url` 端点获取并与 JWT 匹配的公钥验证其签名
+2. 验证 JWT 的 `exp` 和 `nbf` 时间戳以及 JWT 的 `iss` 声明
+3. 将每个作用域映射到带有前缀 `SCOPE_` 的权限
+
+[NOTE]
+随着授权服务器提供新密钥，Spring Security 将自动轮换用于验证 JWT 的密钥。
+
+默认情况下，生成的 `Authentication#getPrincipal` 是一个 Spring Security `Jwt` 对象，而 `Authentication#getName` 映射到 JWT 的 `sub` 属性（如果存在）。
+
+接下来，可以跳转至：
+
+* <<oauth2resourceserver-jwt-architecture,JWT 认证的工作原理>>
+* <<oauth2resourceserver-jwt-jwkseturi,如何配置而不使资源服务器启动依赖于授权服务器的可用性>>
+* <<oauth2resourceserver-jwt-sansboot,如何在不使用 Spring Boot 的情况下进行配置>>
+
+[[oauth2resourceserver-jwt-architecture]]
+== JWT 认证的工作原理
+
+接下来，让我们看看 Spring Security 用于在基于 Servlet 的应用程序中支持 https://tools.ietf.org/html/rfc7519[JWT] 认证的架构组件，就像我们刚才看到的应用程序一样。
+
+{security-api-url}org/springframework/security/oauth2/server/resource/authentication/JwtAuthenticationProvider.html[`JwtAuthenticationProvider`] 是一个 xref:servlet/authentication/architecture.adoc#servlet-authentication-authenticationprovider[`AuthenticationProvider`] 实现，它利用 <<oauth2resourceserver-jwt-decoder,`JwtDecoder`>> 和 <<oauth2resourceserver-jwt-authorization-extraction,`JwtAuthenticationConverter`>> 来认证 JWT。
+
+让我们来看看 `JwtAuthenticationProvider` 在 Spring Security 中的工作方式。该图解释了 xref:servlet/authentication/architecture.adoc#servlet-authentication-authenticationmanager[`AuthenticationManager`] 的详细信息，如 xref:servlet/oauth2/resource-server/index.adoc#oauth2resourceserver-authentication-bearertokenauthenticationfilter[读取 Bearer Token] 图中的说明。
+
+.`JwtAuthenticationProvider` 使用
+[.invert-dark]
+image::{figures}/jwtauthenticationprovider.png[]
+
+image:{icondir}/number_1.png[] 来自 xref:servlet/oauth2/resource-server/index.adoc#oauth2resourceserver-authentication-bearertokenauthenticationfilter[读取 Bearer Token] 的认证 `Filter` 将 `BearerTokenAuthenticationToken` 传递给由 xref:servlet/authentication/architecture.adoc#servlet-authentication-providermanager[`ProviderManager`] 实现的 `AuthenticationManager`。
+
+image:{icondir}/number_2.png[] `ProviderManager` 被配置为使用类型为 `JwtAuthenticationProvider` 的 xref:servlet/authentication/architecture.adoc#servlet-authentication-authenticationprovider[AuthenticationProvider]。
+
+[[oauth2resourceserver-jwt-architecture-jwtdecoder]]
+image:{icondir}/number_3.png[] `JwtAuthenticationProvider` 使用 <<oauth2resourceserver-jwt-decoder,`JwtDecoder`>> 解码、验证和校验 `Jwt`。
+
+[[oauth2resourceserver-jwt-architecture-jwtauthenticationconverter]]
+image:{icondir}/number_4.png[] `JwtAuthenticationProvider` 然后使用 <<oauth2resourceserver-jwt-authorization-extraction,`JwtAuthenticationConverter`>> 将 `Jwt` 转换为一组授予的权限。
+
+image:{icondir}/number_5.png[] 当认证成功时，返回的 xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[`Authentication`] 类型为 `JwtAuthenticationToken`，其主体是配置的 `JwtDecoder` 返回的 `Jwt`。最终，返回的 `JwtAuthenticationToken` 将由认证 `Filter` 设置到 xref:servlet/authentication/architecture.adoc#servlet-authentication-securitycontextholder[`SecurityContextHolder`] 中。
+
+[[oauth2resourceserver-jwt-jwkseturi]]
+== 直接指定授权服务器 JWK Set Uri
+
+如果授权服务器不支持任何配置端点，或者资源服务器必须能够独立于授权服务器启动，则也可以提供 `jwk-set-uri`：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://idp.example.com
+          jwk-set-uri: https://idp.example.com/.well-known/jwks.json
+----
+
+[NOTE]
+JWK Set uri 并未标准化，但通常可以在授权服务器的文档中找到
+
+因此，资源服务器在启动时不会 ping 授权服务器。我们仍然指定 `issuer-uri`，以便资源服务器仍然验证传入 JWT 的 `iss` 声明。
+
+[NOTE]
+此属性也可以直接在 <<oauth2resourceserver-jwt-jwkseturi-dsl,DSL>> 上提供。
+
+== 提供受众
+
+正如已经看到的，<<_specifying_the_authorization_server, `issuer-uri` 属性验证 `iss` 声明>>；这是谁发送了 JWT。
+
+Boot 还有 `audiences` 属性用于验证 `aud` 声明；这是 JWT 发送给谁的。
+
+资源服务器的受众可以这样表示：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://idp.example.com
+          audiences: https://my-resource-server.example.com
+----
+
+[NOTE]
+如果需要，您还可以以编程方式添加 <<oauth2resourceserver-jwt-validation-custom, `aud` 验证>>。
+
+结果将是，如果 JWT 的 `iss` 声明不是 `https://idp.example.com`，并且其 `aud` 声明列表中不包含 `https://my-resource-server.example.com`，则验证将失败。
+
+[[oauth2resourceserver-jwt-sansboot]]
+== 覆盖或替换 Boot 自动配置
+
+Spring Boot 会代表资源服务器生成两个 ``@Bean``。
+
+第一个是配置应用程序为资源服务器的 `SecurityFilterChain`。当包含 `spring-security-oauth2-jose` 时，此 `SecurityFilterChain` 如下所示：
+
+.默认 JWT 配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    http
+        .authorizeHttpRequests(authorize -> authorize
+            .anyRequest().authenticated()
+        )
+        .oauth2ResourceServer((oauth2) -> oauth2.jwt(Customizer.withDefaults()));
+    return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+    http {
+        authorizeRequests {
+            authorize(anyRequest, authenticated)
+        }
+        oauth2ResourceServer {
+            jwt { }
+        }
+    }
+    return http.build()
+}
+----
+======
+
+如果应用程序没有暴露 `SecurityFilterChain` bean，则 Spring Boot 将暴露上述默认的 bean。
+
+替换这个很简单，只需在应用程序中暴露该 bean 即可：
+
+.自定义 JWT 配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import static org.springframework.security.oauth2.core.authorization.OAuth2AuthorizationManagers.hasScope;
+
+@Configuration
+@EnableWebSecurity
+public class MyCustomSecurityConfiguration {
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(authorize -> authorize
+                .requestMatchers("/messages/**").access(hasScope("message:read"))
+                .anyRequest().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt
+                    .jwtAuthenticationConverter(myConverter())
+                )
+            );
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.oauth2.core.authorization.OAuth2AuthorizationManagers.hasScope
+
+@Configuration
+@EnableWebSecurity
+class MyCustomSecurityConfiguration {
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        http {
+            authorizeRequests {
+                authorize("/messages/**", hasScope("message:read"))
+                authorize(anyRequest, authenticated)
+            }
+            oauth2ResourceServer {
+                jwt {
+                    jwtAuthenticationConverter = myConverter()
+                }
+            }
+        }
+        return http.build()
+    }
+}
+----
+======
+
+上述配置要求对任何以 `/messages/` 开头的 URL 具备 `message:read` 作用域。
+
+`oauth2ResourceServer` DSL 上的方法也会覆盖或替换自动配置。
+
+[[oauth2resourceserver-jwt-decoder]]
+例如，Spring Boot 创建的第二个 `@Bean` 是 `JwtDecoder`，它将 <<oauth2resourceserver-jwt-architecture-jwtdecoder,将字符串令牌解码为经过验证的 `Jwt` 实例>>：
+
+.JWT 解码器
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtDecoder jwtDecoder() {
+    return JwtDecoders.fromIssuerLocation(issuerUri);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    return JwtDecoders.fromIssuerLocation(issuerUri)
+}
+----
+======
+
+[NOTE]
+调用 `{security-api-url}org/springframework/security/oauth2/jwt/JwtDecoders.html#fromIssuerLocation-java.lang.String-[JwtDecoders#fromIssuerLocation]` 会调用提供者配置或授权服务器元数据端点，以推导出 JWK Set Uri。
+
+如果应用程序没有暴露 `JwtDecoder` bean，则 Spring Boot 将暴露上述默认的 bean。
+
+其配置可以通过 `jwkSetUri()` 覆盖或通过 `decoder()` 替换。
+
+或者，如果您完全不使用 Spring Boot，则可以在 XML 中指定这两个组件——过滤器链和 `JwtDecoder`。
+
+过滤器链如下所示指定：
+
+.默认 JWT 配置
+[tabs]
+======
+Xml::
++
+[source,xml,role="primary"]
+----
+<http>
+    <intercept-uri pattern="/**" access="authenticated"/>
+    <oauth2-resource-server>
+        <jwt decoder-ref="jwtDecoder"/>
+    </oauth2-resource-server>
+</http>
+----
+======
+
+而 `JwtDecoder` 如下所示：
+
+.JWT 解码器
+[tabs]
+======
+Xml::
++
+[source,xml,role="primary"]
+----
+<bean id="jwtDecoder"
+        class="org.springframework.security.oauth2.jwt.JwtDecoders"
+        factory-method="fromIssuerLocation">
+    <constructor-arg value="${spring.security.oauth2.resourceserver.jwt.jwk-set-uri}"/>
+</bean>
+----
+======
+
+[[oauth2resourceserver-jwt-jwkseturi-dsl]]
+=== 使用 `jwkSetUri()`
+
+授权服务器的 JWK Set Uri 可以通过 <<oauth2resourceserver-jwt-jwkseturi,作为配置属性>> 进行配置，也可以在 DSL 中提供：
+
+.JWK Set Uri 配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class DirectlyConfiguredJwkSetUri {
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(authorize -> authorize
+                .anyRequest().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt
+                    .jwkSetUri("https://idp.example.com/.well-known/jwks.json")
+                )
+            );
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+class DirectlyConfiguredJwkSetUri {
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        http {
+            authorizeRequests {
+                authorize(anyRequest, authenticated)
+            }
+            oauth2ResourceServer {
+                jwt {
+                    jwkSetUri = "https://idp.example.com/.well-known/jwks.json"
+                }
+            }
+        }
+        return http.build()
+    }
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<http>
+    <intercept-uri pattern="/**" access="authenticated"/>
+    <oauth2-resource-server>
+        <jwt jwk-set-uri="https://idp.example.com/.well-known/jwks.json"/>
+    </oauth2-resource-server>
+</http>
+----
+======
+
+使用 `jwkSetUri()` 优先于任何配置属性。
+
+[[oauth2resourceserver-jwt-decoder-dsl]]
+=== 使用 `decoder()`
+
+比 `jwkSetUri()` 更强大的是 `decoder()`，它将完全替换任何 Boot 自动配置的 <<oauth2resourceserver-jwt-architecture-jwtdecoder,`JwtDecoder`>>：
+
+.JWT 解码器配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class DirectlyConfiguredJwtDecoder {
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(authorize -> authorize
+                .anyRequest().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt
+                    .decoder(myCustomDecoder())
+                )
+            );
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+class DirectlyConfiguredJwtDecoder {
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        http {
+            authorizeRequests {
+                authorize(anyRequest, authenticated)
+            }
+            oauth2ResourceServer {
+                jwt {
+                    jwtDecoder = myCustomDecoder()
+                }
+            }
+        }
+        return http.build()
+    }
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<http>
+    <intercept-uri pattern="/**" access="authenticated"/>
+    <oauth2-resource-server>
+        <jwt decoder-ref="myCustomDecoder"/>
+    </oauth2-resource-server>
+</http>
+----
+======
+
+当需要更深入的配置时（如 <<oauth2resourceserver-jwt-validation,验证>>、<<oauth2resourceserver-jwt-claimsetmapping,映射>> 或 <<oauth2resourceserver-jwt-timeouts,请求超时>>），这非常有用。
+
+[[oauth2resourceserver-jwt-decoder-bean]]
+=== 暴露 `JwtDecoder` `@Bean`
+
+或者，暴露一个 <<oauth2resourceserver-jwt-architecture-jwtdecoder,`JwtDecoder`>> `@Bean` 与 `decoder()` 效果相同。您可以像这样使用 `jwkSetUri` 构造一个：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtDecoder jwtDecoder() {
+    return NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    return NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build()
+}
+----
+======
+
+或者您可以使用发行者并让 `NimbusJwtDecoder` 在调用 `build()` 时查找 `jwkSetUri`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtDecoder jwtDecoder() {
+    return NimbusJwtDecoder.withIssuerLocation(issuer).build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    return NimbusJwtDecoder.withIssuerLocation(issuer).build()
+}
+----
+======
+
+或者，如果默认设置适合您，您也可以使用 `JwtDecoders`，它除了配置解码器的验证器外还会执行上述操作：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtDecoders jwtDecoder() {
+    return JwtDecoders.fromIssuerLocation(issuer);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoders {
+    return JwtDecoders.fromIssuerLocation(issuer)
+}
+----
+======
+
+[[oauth2resourceserver-jwt-decoder-algorithm]]
+== 配置受信任的算法
+
+默认情况下，`NimbusJwtDecoder` 以及因此资源服务器仅会使用 `RS256` 信任和验证令牌。
+
+您可以通过 <<oauth2resourceserver-jwt-boot-algorithm,Spring Boot>>、<<oauth2resourceserver-jwt-decoder-builder,NimbusJwtDecoder 构建器>> 或来自 <<oauth2resourceserver-jwt-decoder-jwk-response,JWK Set 响应>> 来自定义此设置。
+
+[[oauth2resourceserver-jwt-boot-algorithm]]
+=== 通过 Spring Boot
+
+设置算法最简单的方法是作为属性：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jws-algorithms: RS512
+          jwk-set-uri: https://idp.example.org/.well-known/jwks.json
+----
+
+[[oauth2resourceserver-jwt-decoder-builder]]
+=== 使用构建器
+
+为了更大的灵活性，我们可以使用随 `NimbusJwtDecoder` 提供的构建器：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+JwtDecoder jwtDecoder() {
+    return NimbusJwtDecoder.withIssuerLocation(this.issuer)
+            .jwsAlgorithm(RS512).build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    return NimbusJwtDecoder.withIssuerLocation(this.issuer)
+            .jwsAlgorithm(RS512).build()
+}
+----
+======
+
+多次调用 `jwsAlgorithm` 将配置 `NimbusJwtDecoder` 以信任多个算法，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+JwtDecoder jwtDecoder() {
+    return NimbusJwtDecoder.withIssuerLocation(this.issuer)
+            .jwsAlgorithm(RS512).jwsAlgorithm(ES512).build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    return NimbusJwtDecoder.withIssuerLocation(this.issuer)
+            .jwsAlgorithm(RS512).jwsAlgorithm(ES512).build()
+}
+----
+======
+
+或者，您可以调用 `jwsAlgorithms`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+JwtDecoder jwtDecoder() {
+    return NimbusJwtDecoder.withIssuerLocation(this.issuer)
+            .jwsAlgorithms(algorithms -> {
+                    algorithms.add(RS512);
+                    algorithms.add(ES512);
+            }).build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    return NimbusJwtDecoder.withIssuerLocation(this.issuer)
+            .jwsAlgorithms {
+                it.add(RS512)
+                it.add(ES512)
+            }.build()
+}
+----
+======
+
+[[oauth2resourceserver-jwt-decoder-jwk-response]]
+=== 从 JWK Set 响应
+
+由于 Spring Security 的 JWT 支持基于 Nimbus，您也可以使用其所有优秀特性。
+
+例如，Nimbus 有一个 `JWSKeySelector` 实现，可以根据 JWK Set URI 响应选择算法集。您可以使用它来生成 `NimbusJwtDecoder`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtDecoder jwtDecoder() {
+    // 向 JWK Set 端点发出请求
+    JWSKeySelector<SecurityContext> jwsKeySelector =
+            JWSAlgorithmFamilyJWSKeySelector.fromJWKSetURL(this.jwkSetUrl);
+
+    DefaultJWTProcessor<SecurityContext> jwtProcessor =
+            new DefaultJWTProcessor<>();
+    jwtProcessor.setJWSKeySelector(jwsKeySelector);
+
+    return new NimbusJwtDecoder(jwtProcessor);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    // 向 JWK Set 端点发出请求
+    val jwsKeySelector: JWSKeySelector<SecurityContext> = JWSAlgorithmFamilyJWSKeySelector.fromJWKSetURL<SecurityContext>(this.jwkSetUrl)
+    val jwtProcessor: DefaultJWTProcessor<SecurityContext> = DefaultJWTProcessor()
+    jwtProcessor.jwsKeySelector = jwsKeySelector
+    return NimbusJwtDecoder(jwtProcessor)
+}
+----
+======
+
+[[oauth2resourceserver-jwt-decoder-public-key]]
+== 信任单个非对称密钥
+
+比使用 JWK Set 端点支持资源服务器更简单的是硬编码 RSA 公钥。密钥可以通过 <<oauth2resourceserver-jwt-decoder-public-key-boot,Spring Boot>> 或 <<oauth2resourceserver-jwt-decoder-public-key-builder,使用构建器>> 提供。
+
+[[oauth2resourceserver-jwt-decoder-public-key-boot]]
+=== 通过 Spring Boot
+
+通过 Spring Boot 指定密钥非常简单。密钥的位置可以这样指定：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          public-key-location: classpath:my-key.pub
+----
+
+或者，为了允许更复杂的查找，您可以后处理 `RsaKeyConversionServicePostProcessor`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+BeanFactoryPostProcessor conversionServiceCustomizer() {
+    return beanFactory ->
+        beanFactory.getBean(RsaKeyConversionServicePostProcessor.class)
+                .setResourceLoader(new CustomResourceLoader());
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun conversionServiceCustomizer(): BeanFactoryPostProcessor {
+    return BeanFactoryPostProcessor { beanFactory ->
+        beanFactory.getBean<RsaKeyConversionServicePostProcessor>()
+                .setResourceLoader(CustomResourceLoader())
+    }
+}
+----
+======
+
+指定您的密钥位置：
+
+[source,yaml]
+----
+key.location: hfds://my-key.pub
+----
+
+然后自动装配该值：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Value("${key.location}")
+RSAPublicKey key;
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Value("\${key.location}")
+val key: RSAPublicKey? = null
+----
+======
+
+[[oauth2resourceserver-jwt-decoder-public-key-builder]]
+=== 使用构建器
+
+要直接注入 `RSAPublicKey`，您可以简单地使用适当的 `NimbusJwtDecoder` 构建器，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtDecoder jwtDecoder() {
+    return NimbusJwtDecoder.withPublicKey(this.key).build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    return NimbusJwtDecoder.withPublicKey(this.key).build()
+}
+----
+======
+
+[[oauth2resourceserver-jwt-decoder-secret-key]]
+== 信任单个对称密钥
+
+使用单个对称密钥也很简单。您可以简单地加载您的 `SecretKey` 并使用适当的 `NimbusJwtDecoder` 构建器，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtDecoder jwtDecoder() {
+    return NimbusJwtDecoder.withSecretKey(this.key).build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    return NimbusJwtDecoder.withSecretKey(key).build()
+}
+----
+======
+
+[[oauth2resourceserver-jwt-authorization]]
+== 配置授权
+
+从 OAuth 2.0 授权服务器签发的 JWT 通常具有 `scope` 或 `scp` 属性，指示其被授予的作用域（或权限），例如：
+
+`{ ..., "scope" : "messages contacts"}`
+
+在这种情况下，资源服务器将尝试将这些作用域强制转换为授予权限的列表，并为每个作用域加上前缀 "SCOPE_"。
+
+这意味着要保护由 JWT 派生的作用域的端点或方法，相应的表达式应包含此前缀：
+
+.授权配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import static org.springframework.security.oauth2.core.authorization.OAuth2AuthorizationManagers.hasScope;
+
+@Configuration
+@EnableWebSecurity
+public class DirectlyConfiguredJwkSetUri {
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(authorize -> authorize
+                .requestMatchers("/contacts/**").access(hasScope("contacts"))
+                .requestMatchers("/messages/**").access(hasScope("messages"))
+                .anyRequest().authenticated()
+            )
+            .oauth2ResourceServer(OAuth2ResourceServerConfigurer::jwt);
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.oauth2.core.authorization.OAuth2AuthorizationManagers.hasScope;
+
+@Configuration
+@EnableWebSecurity
+class DirectlyConfiguredJwkSetUri {
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        http {
+            authorizeRequests {
+                authorize("/contacts/**", hasScope("contacts"))
+                authorize("/messages/**", hasScope("messages"))
+                authorize(anyRequest, authenticated)
+            }
+            oauth2ResourceServer {
+                jwt { }
+            }
+        }
+        return http.build()
+    }
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<http>
+    <intercept-uri pattern="/contacts/**" access="hasAuthority('SCOPE_contacts')"/>
+    <intercept-uri pattern="/messages/**" access="hasAuthority('SCOPE_messages')"/>
+    <oauth2-resource-server>
+        <jwt jwk-set-uri="https://idp.example.org/.well-known/jwks.json"/>
+    </oauth2-resource-server>
+</http>
+----
+======
+
+或者类似地使用方法安全：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@PreAuthorize("hasAuthority('SCOPE_messages')")
+public List<Message> getMessages(...) {}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@PreAuthorize("hasAuthority('SCOPE_messages')")
+fun getMessages(): List<Message> { }
+----
+======
+
+[[oauth2resourceserver-jwt-authorization-extraction]]
+=== 手动提取权限
+
+然而，在某些情况下，默认设置是不够的。例如，一些授权服务器不使用 `scope` 属性，而是使用自己的自定义属性。或者，在其他时候，资源服务器可能需要将属性或属性组合适配为内部权限。
+
+为此，Spring Security 提供了 `JwtAuthenticationConverter`，负责 <<oauth2resourceserver-jwt-architecture-jwtauthenticationconverter,将 `Jwt` 转换为 `Authentication`>>。默认情况下，Spring Security 将使用 `JwtAuthenticationConverter` 的默认实例来装配 `JwtAuthenticationProvider`。
+
+在配置 `JwtAuthenticationConverter` 时，您可以提供一个子转换器，将 `Jwt` 转换为一组授予的权限。
+
+假设您的授权服务器在一个名为 `authorities` 的自定义声明中通信权限。在这种情况下，您可以配置 <<oauth2resourceserver-jwt-architecture-jwtauthenticationconverter,`JwtAuthenticationConverter`>> 应检查的声明，如下所示：
+
+.权限声明配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtAuthenticationConverter jwtAuthenticationConverter() {
+    JwtGrantedAuthoritiesConverter grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+    grantedAuthoritiesConverter.setAuthoritiesClaimName("authorities");
+
+    JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
+    jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+    return jwtAuthenticationConverter;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtAuthenticationConverter(): JwtAuthenticationConverter {
+    val grantedAuthoritiesConverter = JwtGrantedAuthoritiesConverter()
+    grantedAuthoritiesConverter.setAuthoritiesClaimName("authorities")
+
+    val jwtAuthenticationConverter = JwtAuthenticationConverter()
+    jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter)
+    return jwtAuthenticationConverter
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<http>
+    <intercept-uri pattern="/contacts/**" access="hasAuthority('SCOPE_contacts')"/>
+    <intercept-uri pattern="/messages/**" access="hasAuthority('SCOPE_messages')"/>
+    <oauth2-resource-server>
+        <jwt jwk-set-uri="https://idp.example.org/.well-known/jwks.json"
+                jwt-authentication-converter-ref="jwtAuthenticationConverter"/>
+    </oauth2-resource-server>
+</http>
+
+<bean id="jwtAuthenticationConverter"
+        class="org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter">
+    <property name="jwtGrantedAuthoritiesConverter" ref="jwtGrantedAuthoritiesConverter"/>
+</bean>
+
+<bean id="jwtGrantedAuthoritiesConverter"
+        class="org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter">
+    <property name="authoritiesClaimName" value="authorities"/>
+</bean>
+----
+======
+
+您也可以配置不同的权限前缀。而不是为每个权限加上 `SCOPE_` 前缀，您可以将其更改为 `ROLE_`，如下所示：
+
+.权限前缀配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtAuthenticationConverter jwtAuthenticationConverter() {
+    JwtGrantedAuthoritiesConverter grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+    grantedAuthoritiesConverter.setAuthorityPrefix("ROLE_");
+
+    JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
+    jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+    return jwtAuthenticationConverter;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtAuthenticationConverter(): JwtAuthenticationConverter {
+    val grantedAuthoritiesConverter = JwtGrantedAuthoritiesConverter()
+    grantedAuthoritiesConverter.setAuthorityPrefix("ROLE_")
+
+    val jwtAuthenticationConverter = JwtAuthenticationConverter()
+    jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter)
+    return jwtAuthenticationConverter
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<http>
+    <intercept-uri pattern="/contacts/**" access="hasAuthority('SCOPE_contacts')"/>
+    <intercept-uri pattern="/messages/**" access="hasAuthority('SCOPE_messages')"/>
+    <oauth2-resource-server>
+        <jwt jwk-set-uri="https://idp.example.org/.well-known/jwks.json"
+                jwt-authentication-converter-ref="jwtAuthenticationConverter"/>
+    </oauth2-resource-server>
+</http>
+
+<bean id="jwtAuthenticationConverter"
+        class="org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter">
+    <property name="jwtGrantedAuthoritiesConverter" ref="jwtGrantedAuthoritiesConverter"/>
+</bean>
+
+<bean id="jwtGrantedAuthoritiesConverter"
+        class="org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter">
+    <property name="authorityPrefix" value="ROLE_"/>
+</bean>
+----
+======
+
+或者，您可以通过调用 `JwtGrantedAuthoritiesConverter#setAuthorityPrefix("")` 完全移除前缀。
+
+为了更大的灵活性，DSL 支持完全替换转换器，使用任何实现 `Converter<Jwt, AbstractAuthenticationToken>` 的类：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+static class CustomAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
+    public AbstractAuthenticationToken convert(Jwt jwt) {
+        return new CustomAuthenticationToken(jwt);
+    }
+}
+
+// ...
+
+@Configuration
+@EnableWebSecurity
+public class CustomAuthenticationConverterConfig {
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(authorize -> authorize
+                .anyRequest().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt
+                    .jwtAuthenticationConverter(new CustomAuthenticationConverter())
+                )
+            );
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+internal class CustomAuthenticationConverter : Converter<Jwt, AbstractAuthenticationToken> {
+    override fun convert(jwt: Jwt): AbstractAuthenticationToken {
+        return CustomAuthenticationToken(jwt)
+    }
+}
+
+// ...
+
+@Configuration
+@EnableWebSecurity
+class CustomAuthenticationConverterConfig {
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+       http {
+            authorizeRequests {
+                authorize(anyRequest, authenticated)
+            }
+           oauth2ResourceServer {
+               jwt {
+                   jwtAuthenticationConverter = CustomAuthenticationConverter()
+               }
+           }
+        }
+        return http.build()
+    }
+}
+----
+======
+
+[[oauth2resourceserver-jwt-validation]]
+== 配置验证
+
+使用 <<oauth2resourceserver-jwt-minimalconfiguration,最小 Spring Boot 配置>> 指定授权服务器的发行者 URI 时，资源服务器默认会验证 `iss` 声明以及 `exp` 和 `nbf` 时间戳声明。
+
+在需要自定义验证的情况下，资源服务器提供了两个标准验证器，并接受自定义的 `OAuth2TokenValidator` 实例。
+
+[[oauth2resourceserver-jwt-validation-clockskew]]
+=== 自定义时间戳验证
+
+JWT 通常具有一个有效窗口，窗口的开始由 `nbf` 声明指示，结束由 `exp` 声明指示。
+
+然而，每台服务器都可能经历时钟漂移，这可能导致令牌在一个服务器上看起来已过期，而在另一个服务器上却没有。随着分布式系统中协作服务器数量的增加，这可能会导致一些实现上的麻烦。
+
+资源服务器使用 `JwtTimestampValidator` 验证令牌的有效窗口，并且可以通过 `clockSkew` 进行配置以缓解上述问题：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+JwtDecoder jwtDecoder() {
+     NimbusJwtDecoder jwtDecoder = (NimbusJwtDecoder)
+             JwtDecoders.fromIssuerLocation(issuerUri);
+
+     OAuth2TokenValidator<Jwt> withClockSkew = new DelegatingOAuth2TokenValidator<>(
+            new JwtTimestampValidator(Duration.ofSeconds(60)),
+            new JwtIssuerValidator(issuerUri));
+
+     jwtDecoder.setJwtValidator(withClockSkew);
+
+     return jwtDecoder;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    val jwtDecoder: NimbusJwtDecoder = JwtDecoders.fromIssuerLocation(issuerUri) as NimbusJwtDecoder
+
+    val withClockSkew: OAuth2TokenValidator<Jwt> = DelegatingOAuth2TokenValidator(
+            JwtTimestampValidator(Duration.ofSeconds(60)),
+            JwtIssuerValidator(issuerUri))
+
+    jwtDecoder.setJwtValidator(withClockSkew)
+
+    return jwtDecoder
+}
+----
+======
+
+[NOTE]
+默认情况下，资源服务器配置了 60 秒的时钟偏差。
+
+[[oauth2resourceserver-jwt-validation-custom]]
+=== 配置自定义验证器
+
+使用 `OAuth2TokenValidator` API 添加对 <<_supplying_audiences, `aud` 声明>> 的检查很简单：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+OAuth2TokenValidator<Jwt> audienceValidator() {
+    return new JwtClaimValidator<List<String>>(AUD, aud -> aud.contains("messaging"));
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+fun audienceValidator(): OAuth2TokenValidator<Jwt?> {
+    return JwtClaimValidator<List<String>>(AUD) { aud -> aud.contains("messaging") }
+}
+----
+======
+
+或者，为了更多的控制，您可以实现自己的 `OAuth2TokenValidator`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+static class AudienceValidator implements OAuth2TokenValidator<Jwt> {
+    OAuth2Error error = new OAuth2Error("custom_code", "Custom error message", null);
+
+    @Override
+    public OAuth2TokenValidatorResult validate(Jwt jwt) {
+        if (jwt.getAudience().contains("messaging")) {
+            return OAuth2TokenValidatorResult.success();
+        } else {
+            return OAuth2TokenValidatorResult.failure(error);
+        }
+    }
+}
+
+// ...
+
+OAuth2TokenValidator<Jwt> audienceValidator() {
+    return new AudienceValidator();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+internal class AudienceValidator : OAuth2TokenValidator<Jwt> {
+    var error: OAuth2Error = OAuth2Error("custom_code", "Custom error message", null)
+
+    override fun validate(jwt: Jwt): OAuth2TokenValidatorResult {
+        return if (jwt.audience.contains("messaging")) {
+            OAuth2TokenValidatorResult.success()
+        } else {
+            OAuth2TokenValidatorResult.failure(error)
+        }
+    }
+}
+
+// ...
+
+fun audienceValidator(): OAuth2TokenValidator<Jwt> {
+    return AudienceValidator()
+}
+----
+======
+
+然后，要将其添加到资源服务器，只需指定 <<oauth2resourceserver-jwt-architecture-jwtdecoder,`JwtDecoder`>> 实例即可：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+JwtDecoder jwtDecoder() {
+    NimbusJwtDecoder jwtDecoder = (NimbusJwtDecoder)
+        JwtDecoders.fromIssuerLocation(issuerUri);
+
+    OAuth2TokenValidator<Jwt> audienceValidator = audienceValidator();
+    OAuth2TokenValidator<Jwt> withIssuer = JwtValidators.createDefaultWithIssuer(issuerUri);
+    OAuth2TokenValidator<Jwt> withAudience = new DelegatingOAuth2TokenValidator<>(withIssuer, audienceValidator);
+
+    jwtDecoder.setJwtValidator(withAudience);
+
+    return jwtDecoder;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    val jwtDecoder: NimbusJwtDecoder = JwtDecoders.fromIssuerLocation(issuerUri) as NimbusJwtDecoder
+
+    val audienceValidator = audienceValidator()
+    val withIssuer: OAuth2TokenValidator<Jwt> = JwtValidators.createDefaultWithIssuer(issuerUri)
+    val withAudience: OAuth2TokenValidator<Jwt> = DelegatingOAuth2TokenValidator(withIssuer, audienceValidator)
+
+    jwtDecoder.setJwtValidator(withAudience)
+
+    return jwtDecoder
+}
+----
+======
+
+[TIP]
+如前所述，您也可以 <<_supplying_audiences,在 Boot 中配置 `aud` 验证>>。
+
+[[oauth2resourceserver-jwt-claimsetmapping]]
+== 配置声明集映射
+
+Spring Security 使用 https://bitbucket.org/connect2id/nimbus-jose-jwt/wiki/Home[Nimbus] 库解析 JWT 并验证其签名。因此，Spring Security 受限于 Nimbus 对每个字段值的解释以及如何将其强制转换为 Java 类型。
+
+例如，由于 Nimbus 保持与 Java 7 兼容，它不使用 `Instant` 表示时间戳字段。
+
+完全有可能使用不同的库进行 JWT 处理，这可能会做出自己的强制转换决策，需要调整。
+
+或者，简单地说，资源服务器可能希望出于特定领域的原因向 JWT 添加或删除声明。
+
+为此，资源服务器支持使用 `MappedJwtClaimSetConverter` 映射 JWT 声明集。
+
+[[oauth2resourceserver-jwt-claimsetmapping-singleclaim]]
+=== 自定义单个声明的转换
+
+默认情况下，`MappedJwtClaimSetConverter` 将尝试将声明强制转换为以下类型：
+
+|============
+| 声明 | Java 类型
+| `aud` | `Collection<String>`
+| `exp` | `Instant`
+| `iat` | `Instant`
+| `iss` | `String`
+| `jti` | `String`
+| `nbf` | `Instant`
+| `sub` | `String`
+|============
+
+可以使用 `MappedJwtClaimSetConverter.withDefaults` 配置单个声明的转换策略：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+JwtDecoder jwtDecoder() {
+    NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withIssuerLocation(issuer).build();
+
+    MappedJwtClaimSetConverter converter = MappedJwtClaimSetConverter
+            .withDefaults(Collections.singletonMap("sub", this::lookupUserIdBySub));
+    jwtDecoder.setClaimSetConverter(converter);
+
+    return jwtDecoder;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    val jwtDecoder = NimbusJwtDecoder.withIssuerLocation(issuer).build()
+
+    val converter = MappedJwtClaimSetConverter
+            .withDefaults(mapOf("sub" to this::lookupUserIdBySub))
+    jwtDecoder.setClaimSetConverter(converter)
+
+    return jwtDecoder
+}
+----
+======
+这将保留所有默认值，但会覆盖 `sub` 的默认声明转换器。
+
+[[oauth2resourceserver-jwt-claimsetmapping-add]]
+=== 添加声明
+
+`MappedJwtClaimSetConverter` 也可用于添加自定义声明，例如，以适应现有系统：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+MappedJwtClaimSetConverter.withDefaults(Collections.singletonMap("custom", custom -> "value"));
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+MappedJwtClaimSetConverter.withDefaults(mapOf("custom" to Converter<Any, String> { "value" }))
+----
+======
+
+[[oauth2resourceserver-jwt-claimsetmapping-remove]]
+=== 删除声明
+
+使用相同的 API 删除声明也很简单：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+MappedJwtClaimSetConverter.withDefaults(Collections.singletonMap("legacyclaim", legacy -> null));
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+MappedJwtClaimSetConverter.withDefaults(mapOf("legacyclaim" to Converter<Any, Any> { null }))
+----
+======
+
+[[oauth2resourceserver-jwt-claimsetmapping-rename]]
+=== 重命名声明
+
+在更复杂的情况下，比如同时咨询多个声明或重命名声明，资源服务器接受任何实现 `Converter<Map<String, Object>, Map<String,Object>>` 的类：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class UsernameSubClaimAdapter implements Converter<Map<String, Object>, Map<String, Object>> {
+    private final MappedJwtClaimSetConverter delegate =
+            MappedJwtClaimSetConverter.withDefaults(Collections.emptyMap());
+
+    public Map<String, Object> convert(Map<String, Object> claims) {
+        Map<String, Object> convertedClaims = this.delegate.convert(claims);
+
+        String username = (String) convertedClaims.get("user_name");
+        convertedClaims.put("sub", username);
+
+        return convertedClaims;
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class UsernameSubClaimAdapter : Converter<Map<String, Any?>, Map<String, Any?>> {
+    private val delegate = MappedJwtClaimSetConverter.withDefaults(Collections.emptyMap())
+    override fun convert(claims: Map<String, Any?>): Map<String, Any?> {
+        val convertedClaims = delegate.convert(claims)
+        val username = convertedClaims["user_name"] as String
+        convertedClaims["sub"] = username
+        return convertedClaims
+    }
+}
+----
+======
+
+然后，实例可以像正常一样提供：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+JwtDecoder jwtDecoder() {
+    NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withIssuerLocation(issuer).build();
+    jwtDecoder.setClaimSetConverter(new UsernameSubClaimAdapter());
+    return jwtDecoder;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(): JwtDecoder {
+    val jwtDecoder: NimbusJwtDecoder = NimbusJwtDecoder.withIssuerLocation(issuer).build()
+    jwtDecoder.setClaimSetConverter(UsernameSubClaimAdapter())
+    return jwtDecoder
+}
+----
+======
+
+[[oauth2resourceserver-jwt-timeouts]]
+== 配置超时
+
+默认情况下，资源服务器与授权服务器协调时使用 30 秒的连接和套接字超时。
+
+在某些情况下，这可能太短。此外，它不考虑更复杂的模式，如退避和发现。
+
+要调整资源服务器连接到授权服务器的方式，`NimbusJwtDecoder` 接受一个 `RestOperations` 实例：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtDecoder jwtDecoder(RestTemplateBuilder builder) {
+    RestOperations rest = builder
+            .setConnectTimeout(Duration.ofSeconds(60))
+            .setReadTimeout(Duration.ofSeconds(60))
+            .build();
+
+    NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withIssuerLocation(issuer).restOperations(rest).build();
+    return jwtDecoder;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(builder: RestTemplateBuilder): JwtDecoder {
+    val rest: RestOperations = builder
+            .setConnectTimeout(Duration.ofSeconds(60))
+            .setReadTimeout(Duration.ofSeconds(60))
+            .build()
+    return NimbusJwtDecoder.withIssuerLocation(issuer).restOperations(rest).build()
+}
+----
+======
+
+此外，默认情况下，资源服务器会在内存中缓存授权服务器的 JWK 集合 5 分钟，您可能希望调整此时间。此外，它不考虑更复杂的缓存模式，如驱逐或使用共享缓存。
+
+要调整资源服务器缓存 JWK 集合的方式，`NimbusJwtDecoder` 接受一个 `Cache` 实例：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public JwtDecoder jwtDecoder(CacheManager cacheManager) {
+    return NimbusJwtDecoder.withIssuerLocation(issuer)
+            .cache(cacheManager.getCache("jwks"))
+            .build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun jwtDecoder(cacheManager: CacheManager): JwtDecoder {
+    return NimbusJwtDecoder.withIssuerLocation(issuer)
+            .cache(cacheManager.getCache("jwks"))
+            .build()
+}
+----
+======
+
+当提供 `Cache` 时，资源服务器将使用 JWK Set Uri 作为键，JWK Set JSON 作为值。
+
+NOTE: Spring 不是缓存提供者，因此您需要确保包含适当的依赖项，如 `spring-boot-starter-cache` 和您最喜欢的缓存提供者。
+
+NOTE: 无论是套接字还是缓存超时，您可能反而想直接与 Nimbus 合作。为此，请记住 `NimbusJwtDecoder` 提供了一个构造函数，接受 Nimbus 的 `JWTProcessor`。

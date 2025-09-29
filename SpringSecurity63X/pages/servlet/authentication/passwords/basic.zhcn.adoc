@@ -1,0 +1,100 @@
+[[servlet-authentication-basic]]
+= 基本认证（Basic Authentication）
+:figures: servlet/authentication/unpwd
+
+本节详细介绍 Spring Security 如何为基于 Servlet 的应用程序提供对 https://tools.ietf.org/html/rfc7617[HTTP Basic 认证] 的支持。
+// FIXME: 描述 authenticationentrypoint, authenticationfailurehandler, authenticationsuccesshandler
+
+本节描述了 HTTP Basic 认证在 Spring Security 中的工作机制。  
+首先，当未认证的客户端访问资源时，服务器会返回一个 https://tools.ietf.org/html/rfc7235#section-4.1[WWW-Authenticate] 响应头：
+
+.发送 WWW-Authenticate 头部
+[.invert-dark]
+image::{figures}/basicauthenticationentrypoint.png[]
+
+上图基于我们 xref:servlet/architecture.adoc#servlet-securityfilterchain[`SecurityFilterChain`] 的结构图。
+
+image:{icondir}/number_1.png[] 首先，用户向 `/private` 资源发起一个未经身份验证的请求，而该用户没有访问此资源的权限。
+
+image:{icondir}/number_2.png[] Spring Security 的 xref:servlet/authorization/authorize-http-requests.adoc[`AuthorizationFilter`] 判断该未认证请求为 __拒绝访问__，并抛出 `AccessDeniedException` 异常。
+
+image:{icondir}/number_3.png[] 由于用户尚未认证，xref:servlet/architecture.adoc#servlet-exceptiontranslationfilter[`ExceptionTranslationFilter`] 启动 __认证流程__。  
+此时配置的 xref:servlet/authentication/architecture.adoc#servlet-authentication-authenticationentrypoint[`AuthenticationEntryPoint`] 是 {security-api-url}org/springframework/security/web/authentication/www/BasicAuthenticationEntryPoint.html[`BasicAuthenticationEntryPoint`] 实例，它负责发送 WWW-Authenticate 响应头。  
+`RequestCache` 通常是一个 `NullRequestCache`，不会缓存原始请求，因为客户端有能力重放其原始请求。
+
+当客户端收到 `WWW-Authenticate` 头部后，便知道需要使用用户名和密码重新尝试请求。  
+下图展示了用户名和密码处理的流程：
+
+[[servlet-authentication-basicauthenticationfilter]]
+.认证用户名和密码
+[.invert-dark]
+image::{figures}/basicauthenticationfilter.png[]
+
+上图同样基于我们的 xref:servlet/architecture.adoc#servlet-securityfilterchain[`SecurityFilterChain`] 结构图。
+
+image:{icondir}/number_1.png[] 当用户提交用户名和密码后，`BasicAuthenticationFilter` 从 `HttpServletRequest` 中提取用户名和密码，并创建一个 `UsernamePasswordAuthenticationToken`，这是 xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[`Authentication`] 接口的一种实现。
+
+image:{icondir}/number_2.png[] 接着，`UsernamePasswordAuthenticationToken` 被传递给 `AuthenticationManager` 进行认证。  
+`AuthenticationManager` 的具体实现取决于 xref:servlet/authentication/passwords/index.adoc#servlet-authentication-unpwd-storage[用户信息的存储方式]。
+
+image:{icondir}/number_3.png[] 如果认证失败，则进入 __失败流程__：
+
+. 清除 xref:servlet/authentication/architecture.adoc#servlet-authentication-securitycontextholder[SecurityContextHolder] 中的内容；
+. 调用 `RememberMeServices.loginFail` 方法；如果未配置“记住我”功能，则此操作无效；  
+  参见 Javadoc 中的 {security-api-url}org/springframework/security/web/authentication/RememberMeServices.html[`RememberMeServices`] 接口；
+. 调用 `AuthenticationEntryPoint`，触发再次发送 WWW-Authenticate 头；  
+  参见 Javadoc 中的 {security-api-url}org/springframework/security/web/AuthenticationEntryPoint.html[`AuthenticationEntryPoint`] 接口。
+
+image:{icondir}/number_4.png[] 如果认证成功，则进入 __成功流程__：
+
+. 将认证成功的 xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[Authentication] 对象设置到 xref:servlet/authentication/architecture.adoc#servlet-authentication-securitycontextholder[SecurityContextHolder] 中；
+. 调用 `RememberMeServices.loginSuccess` 方法；如果未配置“记住我”，则此操作无效；  
+  参见 Javadoc 中的 {security-api-url}org/springframework/security/web/authentication/RememberMeServices.html[`RememberMeServices`] 接口；
+. `BasicAuthenticationFilter` 调用 `FilterChain.doFilter(request, response)`，继续执行应用的其余逻辑；  
+  参见 Javadoc 中的 {security-api-url}org/springframework/security/web/authentication/www/BasicAuthenticationFilter.html[`BasicAuthenticationFilter`] 类。
+
+默认情况下，Spring Security 的 HTTP Basic 认证是启用的。  
+但是，一旦提供了任何基于 Servlet 的安全配置，就必须显式地启用 HTTP Basic 认证。
+
+以下示例展示了一个最小化的显式配置：
+
+.显式的 HTTP Basic 配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) {
+	http
+		// ...
+		.httpBasic(withDefaults());
+	return http.build();
+}
+----
+
+XML::
++
+[source,xml,role="secondary"]
+----
+<http>
+	<!-- ... -->
+	<http-basic />
+</http>
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+	http {
+		// ...
+		httpBasic { }
+	}
+	return http.build()
+}
+----
+======

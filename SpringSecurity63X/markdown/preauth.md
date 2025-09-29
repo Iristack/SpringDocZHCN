@@ -1,0 +1,181 @@
+例如 X.509 证书、Siteminder，以及由应用程序所运行的 Java EE
+容器进行的身份认证都属于此类情况。 使用预认证时，Spring Security
+必须完成以下任务：
+
+- 识别发出请求的用户。
+
+- 获取该用户的权限信息（authorities）。
+
+具体实现细节取决于所使用的外部认证机制。 例如，在使用 X.509
+的情况下，用户通过其证书信息来识别；而在 Siteminder 中，则是通过 HTTP
+请求头中的信息来识别。 如果依赖容器认证，则通过调用传入的 HTTP 请求上的
+`getUserPrincipal()` 方法来识别用户。
+在某些情况下，外部机制可能会提供用户的角色和权限信息。但在其他情况下，你必须从另一个来源（例如
+`UserDetailsService`）获取这些权限。
+
+# 预认证框架类 {#_预认证框架类}
+
+由于大多数预认证机制遵循相似的模式，Spring Security
+提供了一组类，用于构建实现预认证身份验证提供者的内部框架。
+这避免了代码重复，并允许以结构化的方式添加新的实现，而无需从头编写所有内容。
+如果你只是想使用类似 [X.509
+认证](servlet/authentication/x509.xml#servlet-x509)
+的功能，则无需了解这些类，因为已有命名空间配置选项可供使用，更简单易上手。
+但如果你需要使用显式的 Bean
+配置，或计划开发自己的实现，则需要理解这些提供的实现是如何工作的。
+这些类位于 `org.springframework.security.web.authentication.preauth`
+包下。 这里仅做简要介绍，建议结合 Javadoc 和源码进一步查阅。
+
+## AbstractPreAuthenticatedProcessingFilter {#_abstractpreauthenticatedprocessingfilter}
+
+该类检查当前安全上下文的内容，如果上下文为空，则尝试从 HTTP
+请求中提取用户信息，并将其提交给 `AuthenticationManager`。
+子类需重写以下方法以获取这些信息。
+
+:::: example
+::: title
+重写 AbstractPreAuthenticatedProcessingFilter
+:::
+
+Java
+
+:   ``` java
+    protected abstract Object getPreAuthenticatedPrincipal(HttpServletRequest request);
+
+    protected abstract Object getPreAuthenticatedCredentials(HttpServletRequest request);
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    protected abstract fun getPreAuthenticatedPrincipal(request: HttpServletRequest): Any?
+
+    protected abstract fun getPreAuthenticatedCredentials(request: HttpServletRequest): Any?
+    ```
+::::
+
+调用这两个方法后，过滤器会创建一个包含返回数据的
+`PreAuthenticatedAuthenticationToken`，并将其提交进行认证。
+这里的"认证"实际上只是进一步处理，比如加载用户的权限信息，但仍遵循标准的
+Spring Security 认证架构。
+
+与其他 Spring Security 认证过滤器一样，预认证过滤器也有一个
+`authenticationDetailsSource` 属性，默认情况下它会创建一个
+`WebAuthenticationDetails` 对象，用于在 `Authentication` 对象的
+`details` 属性中存储额外信息，例如会话 ID 和原始 IP 地址。
+在某些情况下，若能从预认证机制中获得用户角色信息，这些数据也会存储在此处，且
+details 实现了 `GrantedAuthoritiesContainer` 接口。
+这使得认证提供者可以读取外部分配给用户的所有权限。
+接下来我们来看一个具体的例子。
+
+### J2eeBasedPreAuthenticatedWebAuthenticationDetailsSource {#j2ee-preauth-details}
+
+如果将过滤器配置为使用 `authenticationDetailsSource`，且该 source
+是此类的一个实例，则通过为一组预定义的"可映射角色"（mappable
+roles）逐个调用 `isUserInRole(String role)` 方法来获取权限信息。
+该类通过配置的 `MappableAttributesRetriever` 获取这些角色。
+可能的实现包括：在应用上下文中硬编码角色列表，或者从 `web.xml` 文件中的
+`<security-role>` 信息中读取角色。 预认证示例应用程序采用了后一种方式。
+
+还有一个附加阶段：使用配置的 `Attributes2GrantedAuthoritiesMapper`
+将这些角色（或属性）映射为 Spring Security 的 `GrantedAuthority` 对象。
+默认行为只是在名称前加上常见的 `ROLE_`
+前缀，但你可以完全自定义此映射行为。
+
+## PreAuthenticatedAuthenticationProvider {#_preauthenticatedauthenticationprovider}
+
+预认证提供者的主要职责仅仅是加载用户的 `UserDetails` 对象。
+它是通过委托给一个 `AuthenticationUserDetailsService` 来完成的。
+后者与标准的 `UserDetailsService` 类似，但它接收的是一个
+`Authentication` 对象，而不是仅仅用户名：
+
+``` java
+public interface AuthenticationUserDetailsService {
+    UserDetails loadUserDetails(Authentication token) throws UsernameNotFoundException;
+}
+```
+
+这个接口可能还有其他用途，但在预认证场景中，它允许访问之前打包在
+`Authentication` 对象中的权限信息，正如我们在上一节中看到的那样。
+`PreAuthenticatedGrantedAuthoritiesUserDetailsService`
+类就实现了这一点。 另一种选择是通过 `UserDetailsByNameServiceWrapper`
+实现类委托给一个标准的 `UserDetailsService`。
+
+## Http403ForbiddenEntryPoint {#_http403forbiddenentrypoint}
+
+[`AuthenticationEntryPoint`](servlet/authentication/architecture.xml#servlet-authentication-authenticationentrypoint)
+负责启动未认证用户的认证流程（当他们试图访问受保护资源时）。
+然而，在预认证的情况下，这一机制并不适用。
+只有当你没有将预认证与其他认证机制结合使用时，才应将
+`ExceptionTranslationFilter` 配置为此类的实例。 当用户被
+`AbstractPreAuthenticatedProcessingFilter`
+拒绝而导致认证为空时，就会调用它。 一旦被调用，它总是返回
+`403 - Forbidden` 响应状态码。
+
+# 具体实现 {#_具体实现}
+
+X.509 认证已在其
+[独立章节](servlet/authentication/x509.xml#servlet-x509) 中详细介绍。
+此处我们介绍一些支持其他预认证场景的类。
+
+## 请求头认证（Siteminder） {#_请求头认证siteminder}
+
+外部认证系统可以通过在 HTTP 请求中设置特定头部字段向应用程序传递信息。
+一个著名的例子是 Siteminder，它通过名为 `SM_USER` 的请求头传递用户名。
+这种机制由 `RequestHeaderAuthenticationFilter`
+类支持，该类仅从请求头中提取用户名。 默认情况下，该过滤器使用 `SM_USER`
+作为请求头名称。 更多详情请参见 Javadoc。
+
+:::: tip
+::: title
+:::
+
+使用此类系统时，框架本身不会执行任何认证检查，因此**极其重要**的是确保外部系统已正确配置，并对所有对应用程序的访问进行了保护。
+如果攻击者能够伪造原始请求中的请求头且不被检测到，他们就可能任意选择用户名进行登录。
+::::
+
+### Siteminder 示例配置 {#_siteminder_示例配置}
+
+以下示例展示了使用此过滤器的典型配置：
+
+``` xml
+<security:http>
+<!-- 其他 http 配置省略 -->
+<security:custom-filter position="PRE_AUTH_FILTER" ref="siteminderFilter" />
+</security:http>
+
+<bean id="siteminderFilter" class="org.springframework.security.web.authentication.preauth.RequestHeaderAuthenticationFilter">
+<property name="principalRequestHeader" value="SM_USER"/>
+<property name="authenticationManager" ref="authenticationManager" />
+</bean>
+
+<bean id="preauthAuthProvider" class="org.springframework.security.web.authentication.preauth.PreAuthenticatedAuthenticationProvider">
+<property name="preAuthenticatedUserDetailsService">
+    <bean id="userDetailsServiceWrapper"
+        class="org.springframework.security.core.userdetails.UserDetailsByNameServiceWrapper">
+    <property name="userDetailsService" ref="userDetailsService"/>
+    </bean>
+</property>
+</bean>
+
+<security:authentication-manager alias="authenticationManager">
+<security:authentication-provider ref="preauthAuthProvider" />
+</security:authentication-manager>
+```
+
+这里假设你正在使用
+[安全命名空间](servlet/configuration/xml-namespace.xml#ns-config)
+进行配置。 同时也假定你已经在配置中添加了一个名为 \"userDetailsService\"
+的 `UserDetailsService`，用于加载用户的角色信息。
+
+## Java EE 容器认证 {#_java_ee_容器认证}
+
+`J2eePreAuthenticatedProcessingFilter` 类从 `HttpServletRequest` 的
+`userPrincipal` 属性中提取用户名。 通常会结合使用 Java EE
+角色来进行此过滤器的配置，如前面
+[J2eeBasedPreAuthenticatedWebAuthenticationDetailsSource](#j2ee-preauth-details)
+所述。
+
+代码库中有一个 {gh-old-samples-url}/xml/preauth\[示例应用\]
+使用了这种方法，感兴趣的话可以从 GitHub
+获取代码，并查看其应用上下文文件。

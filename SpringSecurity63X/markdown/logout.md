@@ -1,0 +1,41 @@
+虽然使用标准的 Spring MVC Test 已经相当简单，但你可以借助 Spring
+Security 的测试支持让登出测试变得更加容易。 例如，以下 `logout`
+[`RequestPostProcessor`](servlet/test/mockmvc/request-post-processors.xml)
+将会向 \"/logout\" 发送一个带有有效 CSRF 令牌的 POST 请求：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    mvc
+        .perform(logout())
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    mvc
+        .perform(logout())
+    ```
+:::
+
+你也可以自定义要提交的 URL。 例如，下面的代码片段将向 \"/signout\"
+发送一个带有有效 CSRF 令牌的 POST 请求：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    mvc
+        .perform(logout("/signout"))
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    mvc
+        .perform(logout("/signout"))
+    ```
+:::

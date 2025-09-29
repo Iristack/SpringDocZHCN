@@ -1,0 +1,540 @@
+[[jc-erms]]
+= 启用响应式方法安全（EnableReactiveMethodSecurity）
+
+Spring Security 通过使用 https://projectreactor.io/docs/core/release/reference/#context[Reactor 的上下文（Context）] 来支持方法级别的安全性，该上下文由 `ReactiveSecurityContextHolder` 设置。  
+以下示例展示了如何获取当前登录用户的消息：
+
+[NOTE]
+====
+要使此示例正常工作，方法的返回类型必须是 `org.reactivestreams.Publisher`（即 `Mono` 或 `Flux`）。  
+这是为了与 Reactor 的 `Context` 进行集成所必需的。
+====
+
+[[jc-enable-reactive-method-security-authorization-manager]]
+== 使用 AuthorizationManager 启用响应式方法安全
+
+从 Spring Security 5.8 开始，我们可以在任意 `@Configuration` 类上使用 `@EnableReactiveMethodSecurity(useAuthorizationManager=true)` 注解来启用基于注解的安全性。
+
+这在多个方面改进了传统的 `@EnableReactiveMethodSecurity`。`@EnableReactiveMethodSecurity(useAuthorizationManager=true)` 具有以下优势：
+
+1. 使用简化的 `AuthorizationManager` API，取代了元数据源、配置属性、决策管理器和投票器，简化了重用和自定义过程。
+2. 支持响应式返回类型，包括 Kotlin 协程。
+3. 基于原生 Spring AOP 构建，移除了额外抽象层，允许你使用 Spring AOP 的构建模块进行自定义。
+4. 检查冲突的注解以确保安全配置的明确性。
+5. 遵循 JSR-250 规范。
+
+[NOTE]
+====
+对于更早版本，请参阅 <<jc-enable-reactive-method-security, @EnableReactiveMethodSecurity>> 的类似支持。
+====
+
+例如，以下代码将启用 Spring Security 的 `@PreAuthorize` 注解：
+
+方法安全配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableReactiveMethodSecurity(useAuthorizationManager=true)
+public class MethodSecurityConfig {
+	// ...
+}
+----
+======
+
+将注解添加到方法（类或接口上）后，即可相应地限制对该方法的访问。  
+Spring Security 的原生注解支持为方法定义了一组属性，这些属性会被传递给各种方法拦截器（如 `AuthorizationManagerBeforeReactiveMethodInterceptor`），由其做出实际的授权决策：
+
+方法安全注解用法
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public interface BankService {
+	@PreAuthorize("hasRole('USER')")
+	Mono<Account> readAccount(Long id);
+
+	@PreAuthorize("hasRole('USER')")
+	Flux<Account> findAccounts();
+
+	@PreAuthorize("@func.apply(#account)")
+	Mono<Account> post(Account account, Double amount);
+}
+----
+======
+
+在此情况下，`hasRole` 引用了 `SecurityExpressionRoot` 中的方法，并由 SpEL 表达式求值引擎调用。
+
+`@func` 指向你自己定义的自定义组件，其中 `apply` 方法可以返回 `Boolean` 或 `Mono<Boolean>` 来表示授权决策。这样的 Bean 可能如下所示：
+
+方法安全响应式布尔表达式
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public Function<Account, Mono<Boolean>> func() {
+    return (account) -> Mono.defer(() -> Mono.just(account.getId().equals(12)));
+}
+----
+======
+
+=== 自定义授权
+
+Spring Security 的 `@PreAuthorize`、`@PostAuthorize`、`@PreFilter` 和 `@PostFilter` 提供了丰富的基于表达式的支持。
+
+[[jc-reactive-method-security-custom-granted-authority-defaults]]
+此外，在基于角色的授权中，Spring Security 默认会添加 `ROLE_` 前缀，用于评估类似 `hasRole` 的表达式。你可以通过暴露一个 `GrantedAuthorityDefaults` Bean 来配置使用不同的前缀，如下所示：
+
+自定义 MethodSecurityExpressionHandler
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+static GrantedAuthorityDefaults grantedAuthorityDefaults() {
+	return new GrantedAuthorityDefaults("MYPREFIX_");
+}
+----
+======
+
+[TIP]
+====
+我们将 `GrantedAuthorityDefaults` 通过静态方法暴露，以确保 Spring 在初始化 Spring Security 的方法安全 `@Configuration` 类之前发布它。由于 `GrantedAuthorityDefaults` 是 Spring Security 内部机制的一部分，我们也应将其声明为基础设施 Bean，从而有效避免与 Bean 后处理器相关的某些警告（见 https://github.com/spring-projects/spring-security/issues/14751[gh-14751]）。
+====
+
+[[jc-reactive-method-security-custom-authorization-manager]]
+=== 自定义授权管理器
+
+方法授权包含方法调用前和调用后的两个阶段。
+
+[NOTE]
+====
+- **方法前授权**：在方法被调用之前执行。如果授权拒绝访问，则不会调用该方法，并抛出 `AccessDeniedException`。
+- **方法后授权**：在方法调用之后、返回给调用者之前执行。如果授权拒绝访问，则不会返回结果，并抛出 `AccessDeniedException`。
+====
+
+要手动重建 `@EnableReactiveMethodSecurity(useAuthorizationManager=true)` 默认提供的功能，你可以发布如下配置：
+
+完整预/后置方法安全配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+class MethodSecurityConfig {
+	@Bean
+	BeanDefinitionRegistryPostProcessor aopConfig() {
+		return AopConfigUtils::registerAutoProxyCreatorIfNecessary;
+	}
+
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	PreFilterAuthorizationReactiveMethodInterceptor preFilterInterceptor() {
+		return new PreFilterAuthorizationReactiveMethodInterceptor();
+	}
+
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	AuthorizationManagerBeforeReactiveMethodInterceptor preAuthorizeInterceptor() {
+		return AuthorizationManagerBeforeReactiveMethodInterceptor.preAuthorize();
+	}
+
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	AuthorizationManagerAfterReactiveMethodInterceptor postAuthorizeInterceptor() {
+		return AuthorizationManagerAfterReactiveMethodInterceptor.postAuthorize();
+	}
+
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	PostFilterAuthorizationReactiveMethodInterceptor postFilterInterceptor() {
+		return new PostFilterAuthorizationReactiveMethodInterceptor();
+	}
+}
+----
+======
+
+请注意，Spring Security 的方法安全是基于 Spring AOP 构建的。因此，拦截器的调用顺序取决于指定的顺序。可以通过对拦截器实例调用 `setOrder` 方法来自定义顺序，例如：
+
+发布自定义 Advisor
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+Advisor postFilterAuthorizationMethodInterceptor() {
+	PostFilterAuthorizationMethodInterceptor interceptor = new PostFilterAuthorizationReactiveMethodInterceptor();
+	interceptor.setOrder(AuthorizationInterceptorOrders.POST_AUTHORIZE.getOrder() - 1);
+	return interceptor;
+}
+----
+======
+
+如果你只想在应用中支持 `@PreAuthorize`，可以这样做：
+
+仅支持 @PreAuthorize 的配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+class MethodSecurityConfig {
+	@Bean
+	BeanDefinitionRegistryPostProcessor aopConfig() {
+		return AopConfigUtils::registerAutoProxyCreatorIfNecessary;
+	}
+
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	Advisor preAuthorize() {
+		return AuthorizationManagerBeforeMethodInterceptor.preAuthorize();
+	}
+}
+----
+======
+
+或者，你可能有一个自定义的 `ReactiveAuthorizationManager`（用于方法调用前），希望将其加入拦截链中。
+
+在这种情况下，你需要告诉 Spring Security 两个信息：
+1. 使用哪个 `ReactiveAuthorizationManager`
+2. 该授权管理器适用于哪些方法和类
+
+因此，你可以配置 Spring Security 在 `@PreAuthorize` 和 `@PostAuthorize` 之间调用你的 `ReactiveAuthorizationManager`，如下所示：
+
+自定义方法前 Advisor
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableReactiveMethodSecurity(useAuthorizationManager=true)
+class MethodSecurityConfig {
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	public Advisor customAuthorize() {
+		JdkRegexpMethodPointcut pattern = new JdkRegexpMethodPointcut();
+		pattern.setPattern("org.mycompany.myapp.service.*");
+		ReactiveAuthorizationManager<MethodInvocation> rule = AuthorityAuthorizationManager.isAuthenticated();
+		AuthorizationManagerBeforeReactiveMethodInterceptor interceptor = new AuthorizationManagerBeforeReactiveMethodInterceptor(pattern, rule);
+		interceptor.setOrder(AuthorizationInterceptorsOrder.PRE_AUTHORIZE_ADVISOR_ORDER.getOrder() + 1);
+		return interceptor;
+    }
+}
+----
+======
+
+[TIP]
+====
+你可以使用 `AuthorizationInterceptorsOrder` 中定义的顺序常量，将你的拦截器插入到 Spring Security 方法拦截器之间。
+====
+
+同样的方式也适用于方法调用后的授权。方法后授权通常关注分析返回值以验证访问权限。
+
+例如，你可能有一个方法需要确认请求的账户确实属于当前登录用户，如下所示：
+
+@PostAuthorize 示例
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public interface BankService {
+
+	@PreAuthorize("hasRole('USER')")
+	@PostAuthorize("returnObject.owner == authentication.name")
+	Mono<Account> readAccount(Long id);
+}
+----
+======
+
+你可以提供自己的 `AuthorizationMethodInterceptor` 来定制如何评估返回值的访问控制。
+
+例如，如果你有自己的自定义注解，可以这样配置：
+
+自定义方法后 Advisor
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableReactiveMethodSecurity(useAuthorizationManager=true)
+class MethodSecurityConfig {
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	public Advisor customAuthorize(ReactiveAuthorizationManager<MethodInvocationResult> rules) {
+		AnnotationMethodMatcher pattern = new AnnotationMethodMatcher(MySecurityAnnotation.class);
+		AuthorizationManagerAfterReactiveMethodInterceptor interceptor = new AuthorizationManagerAfterReactiveMethodInterceptor(pattern, rules);
+		interceptor.setOrder(AuthorizationInterceptorsOrder.POST_AUTHORIZE_ADVISOR_ORDER.getOrder() + 1);
+		return interceptor;
+	}
+}
+----
+======
+
+该拦截器将在 `@PostAuthorize` 拦截器之后被调用。
+
+== 启用响应式方法安全（EnableReactiveMethodSecurity）
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+Authentication authentication = new TestingAuthenticationToken("user", "password", "ROLE_USER");
+
+Mono<String> messageByUsername = ReactiveSecurityContextHolder.getContext()
+	.map(SecurityContext::getAuthentication)
+	.map(Authentication::getName)
+	.flatMap(this::findMessageByUsername)
+	// 在 WebFlux 应用中，`subscriberContext` 会自动通过 `ReactorContextWebFilter` 设置
+	.contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication));
+
+StepVerifier.create(messageByUsername)
+	.expectNext("Hi user")
+	.verifyComplete();
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val authentication: Authentication = TestingAuthenticationToken("user", "password", "ROLE_USER")
+
+val messageByUsername: Mono<String> = ReactiveSecurityContextHolder.getContext()
+	.map(SecurityContext::getAuthentication)
+	.map(Authentication::getName)
+	.flatMap(this::findMessageByUsername) // 在 WebFlux 应用中，`subscriberContext` 会自动通过 `ReactorContextWebFilter` 设置
+	.contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication))
+
+StepVerifier.create(messageByUsername)
+	.expectNext("Hi user")
+	.verifyComplete()
+----
+======
+
+其中 `this::findMessageByUsername` 定义如下：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+Mono<String> findMessageByUsername(String username) {
+	return Mono.just("Hi " + username);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+fun findMessageByUsername(username: String): Mono<String> {
+	return Mono.just("Hi $username")
+}
+----
+======
+
+以下是最小化的方法安全配置，用于在响应式应用中启用方法级安全：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableReactiveMethodSecurity
+public class SecurityConfig {
+	@Bean
+	public MapReactiveUserDetailsService userDetailsService() {
+		User.UserBuilder userBuilder = User.withDefaultPasswordEncoder();
+		UserDetails rob = userBuilder.username("rob")
+			.password("rob")
+			.roles("USER")
+			.build();
+		UserDetails admin = userBuilder.username("admin")
+			.password("admin")
+			.roles("USER","ADMIN")
+			.build();
+		return new MapReactiveUserDetailsService(rob, admin);
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableReactiveMethodSecurity
+class SecurityConfig {
+	@Bean
+	fun userDetailsService(): MapReactiveUserDetailsService {
+		val userBuilder: User.UserBuilder = User.withDefaultPasswordEncoder()
+		val rob = userBuilder.username("rob")
+			.password("rob")
+			.roles("USER")
+			.build()
+		val admin = userBuilder.username("admin")
+			.password("admin")
+			.roles("USER", "ADMIN")
+			.build()
+		return MapReactiveUserDetailsService(rob, admin)
+	}
+}
+----
+======
+
+考虑以下类：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class HelloWorldMessageService {
+	@PreAuthorize("hasRole('ADMIN')")
+	public Mono<String> findMessage() {
+		return Mono.just("Hello World!");
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+class HelloWorldMessageService {
+	@PreAuthorize("hasRole('ADMIN')")
+	fun findMessage(): Mono<String> {
+		return Mono.just("Hello World!")
+	}
+}
+----
+======
+
+或者，以下类使用了 Kotlin 协程：
+
+[tabs]
+======
+Kotlin::
++
+[source,kotlin,role="primary"]
+----
+@Component
+class HelloWorldMessageService {
+    @PreAuthorize("hasRole('ADMIN')")
+    suspend fun findMessage(): String {
+        delay(10)
+        return "Hello World!"
+    }
+}
+----
+======
+
+结合上述配置，`@PreAuthorize("hasRole('ADMIN')")` 确保只有拥有 `ADMIN` 角色的用户才能调用 `findMessage` 方法。  
+注意：标准方法安全中的所有表达式都可用于 `@EnableReactiveMethodSecurity`。然而目前我们只支持表达式返回 `Boolean` 或 `boolean` 类型，这意味着表达式不能阻塞。
+
+当与 xref:reactive/configuration/webflux.adoc#jc-webflux[WebFlux 安全] 集成时，Spring Security 会根据已认证的用户自动建立 Reactor 上下文：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+@EnableReactiveMethodSecurity
+public class SecurityConfig {
+
+	@Bean
+	SecurityWebFilterChain springWebFilterChain(ServerHttpSecurity http) throws Exception {
+		return http
+			// 展示方法安全有效
+			// 最佳实践是同时使用两者以实现纵深防御
+			.authorizeExchange(exchanges -> exchanges
+				.anyExchange().permitAll()
+			)
+			.httpBasic(withDefaults())
+			.build();
+	}
+
+	@Bean
+	MapReactiveUserDetailsService userDetailsService() {
+		User.UserBuilder userBuilder = User.withDefaultPasswordEncoder();
+		UserDetails rob = userBuilder.username("rob")
+			.password("rob")
+			.roles("USER")
+			.build();
+		UserDetails admin = userBuilder.username("admin")
+			.password("admin")
+			.roles("USER","ADMIN")
+			.build();
+		return new MapReactiveUserDetailsService(rob, admin);
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+@EnableReactiveMethodSecurity
+class SecurityConfig {
+	@Bean
+	open fun springWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+		return http {
+			authorizeExchange {
+				authorize(anyExchange, permitAll)
+			}
+			httpBasic { }
+		}
+	}
+
+	@Bean
+	fun userDetailsService(): MapReactiveUserDetailsService {
+		val userBuilder: User.UserBuilder = User.withDefaultPasswordEncoder()
+		val rob = userBuilder.username("rob")
+			.password("rob")
+			.roles("USER")
+			.build()
+		val admin = userBuilder.username("admin")
+			.password("admin")
+			.roles("USER", "ADMIN")
+			.build()
+		return MapReactiveUserDetailsService(rob, admin)
+	}
+}
+----
+======
+
+完整的示例可以在 {gh-samples-url}/reactive/webflux/java/method[hellowebflux-method] 中找到。

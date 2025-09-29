@@ -1,0 +1,11 @@
+[[authentication]]
+= 认证
+
+Spring Security 为 https://en.wikipedia.org/wiki/Authentication[认证] 提供了全面的支持。  
+认证是指我们如何验证试图访问特定资源的用户身份的过程。  
+一种常见的用户认证方式是要求用户输入用户名和密码。  
+一旦完成认证，我们就能够确认其身份，并进而执行授权操作。
+
+Spring Security 内置了对用户认证的支持。  
+本节重点介绍适用于 Servlet 和 WebFlux 环境的通用认证功能。  
+有关每种技术栈所支持的具体内容，请参阅 xref:servlet/authentication/index.adoc[Servlet 认证] 和 xref:reactive/authentication/index.adoc[WebFlux 认证] 相关章节。

@@ -1,0 +1,11 @@
+[[webflux-oauth2-login]]
+= OAuth 2.0 登录
+:page-section-summary-toc: 1
+
+OAuth 2.0 登录功能使应用程序能够允许用户使用其在 OAuth 2.0 提供商（例如 GitHub）或 OpenID Connect 1.0 提供商（例如 Google）上已有的账户登录。  
+OAuth 2.0 登录实现了“使用 Google 登录”或“使用 GitHub 登录”这类典型场景。
+
+[NOTE]
+====
+OAuth 2.0 登录是基于 *授权码模式*（Authorization Code Grant）实现的，该规范定义于 https://tools.ietf.org/html/rfc6749#section-4.1[OAuth 2.0 授权框架] 和 https://openid.net/specs/openid-connect-core-1_0.html#CodeFlowAuth[OpenID Connect Core 1.0]。
+====

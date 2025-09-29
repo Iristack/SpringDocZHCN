@@ -1,0 +1,233 @@
+[[servlet-authentication-form]]
+= 表单登录
+:figures: servlet/authentication/unpwd
+
+Spring Security 支持通过 HTML 表单提供用户名和密码。  
+本节详细介绍基于表单的认证在 Spring Security 中的工作机制。  
+// FIXME: 描述 authenticationentrypoint, authenticationfailurehandler, authenticationsuccesshandler
+
+本节探讨基于表单的登录在 Spring Security 中如何工作。  
+首先，我们来看用户是如何被重定向到登录表单的：
+
+.重定向到登录页面
+[.invert-dark]
+image::{figures}/loginurlauthenticationentrypoint.png[]
+
+上述图示是在 xref:servlet/architecture.adoc#servlet-securityfilterchain[`SecurityFilterChain`] 结构图的基础上构建的。
+
+image:{icondir}/number_1.png[] 首先，用户向其未授权的资源（`/private`）发起未经身份验证的请求。
+
+image:{icondir}/number_2.png[] Spring Security 的 xref:servlet/authorization/authorize-http-requests.adoc[`AuthorizationFilter`] 判断该未认证请求为 __拒绝访问__，并抛出 `AccessDeniedException` 异常。
+
+image:{icondir}/number_3.png[] 由于用户尚未认证，xref:servlet/architecture.adoc#servlet-exceptiontranslationfilter[`ExceptionTranslationFilter`] 启动 __认证流程__，并通过配置的 xref:servlet/authentication/architecture.adoc#servlet-authentication-authenticationentrypoint[`AuthenticationEntryPoint`] 将请求重定向到登录页面。  
+大多数情况下，`AuthenticationEntryPoint` 是 {security-api-url}org/springframework/security/web/authentication/LoginUrlAuthenticationEntryPoint.html[`LoginUrlAuthenticationEntryPoint`] 的实例。
+
+image:{icondir}/number_4.png[] 浏览器请求被重定向到的登录页面。
+
+image:{icondir}/number_5.png[] 应用程序内部必须 <<servlet-authentication-form-custom,渲染登录页面>>。
+
+[[servlet-authentication-usernamepasswordauthenticationfilter]]
+当用户名和密码提交后，`UsernamePasswordAuthenticationFilter` 负责对用户名和密码进行认证。  
+`UsernamePasswordAuthenticationFilter` 继承自 xref:servlet/authentication/architecture.adoc#servlet-authentication-abstractprocessingfilter[AbstractAuthenticationProcessingFilter]，因此以下图示看起来非常相似：
+
+.认证用户名和密码
+[.invert-dark]
+image::{figures}/usernamepasswordauthenticationfilter.png[]
+
+该图示同样基于我们的 xref:servlet/architecture.adoc#servlet-securityfilterchain[`SecurityFilterChain`] 结构图。
+
+image:{icondir}/number_1.png[] 当用户提交用户名和密码时，`UsernamePasswordAuthenticationFilter` 从 `HttpServletRequest` 实例中提取用户名和密码，并创建一个 `UsernamePasswordAuthenticationToken`，这是一种 xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[`Authentication`] 类型的对象。
+
+image:{icondir}/number_2.png[] 接着，`UsernamePasswordAuthenticationToken` 被传递给 `AuthenticationManager` 实例以完成认证。  
+`AuthenticationManager` 的具体实现取决于 xref:servlet/authentication/passwords/index.adoc#servlet-authentication-unpwd-storage[用户信息的存储方式]。
+
+image:{icondir}/number_3.png[] 如果认证失败，则进入 __失败处理__ 流程：
+
+. xref:servlet/authentication/architecture.adoc#servlet-authentication-securitycontextholder[SecurityContextHolder] 被清除。
+. 调用 `RememberMeServices.loginFail` 方法。  
+如果未配置“记住我”功能，此操作为空（no-op）。  
+参见 Javadoc 中的 {security-api-url}org/springframework/security/web/authentication/RememberMeServices.html[`RememberMeServices`] 接口。
+. 调用 `AuthenticationFailureHandler`。  
+参见 Javadoc 中的 {security-api-url}org/springframework/security/web/authentication/AuthenticationFailureHandler.html[`AuthenticationFailureHandler`] 类。
+
+image:{icondir}/number_4.png[] 如果认证成功，则进入 __成功处理__ 流程：
+
+. `SessionAuthenticationStrategy` 被通知新登录事件。  
+参见 Javadoc 中的 {security-api-url}org/springframework/security/web/authentication/session/SessionAuthenticationStrategy.html[`SessionAuthenticationStrategy`] 接口。
+. 将 xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[Authentication] 对象设置到 xref:servlet/authentication/architecture.adoc#servlet-authentication-securitycontextholder[SecurityContextHolder] 中。  
+参见 Javadoc 中的 {security-api-url}org/springframework/security/web/context/SecurityContextPersistenceFilter.html[`SecurityContextPersistenceFilter`] 类。
+. 调用 `RememberMeServices.loginSuccess` 方法。  
+如果未配置“记住我”功能，此操作为空（no-op）。  
+参见 Javadoc 中的 {security-api-url}org/springframework/security/web/authentication/RememberMeServices.html[`RememberMeServices`] 接口。
+. `ApplicationEventPublisher` 发布一个 `InteractiveAuthenticationSuccessEvent` 事件。
+. 调用 `AuthenticationSuccessHandler`。通常这是一个 `SimpleUrlAuthenticationSuccessHandler`，它会将用户重定向至之前由 xref:servlet/architecture.adoc#servlet-exceptiontranslationfilter[`ExceptionTranslationFilter`] 在跳转到登录页时保存的原始请求地址。
+
+[[servlet-authentication-form-min]]
+默认情况下，Spring Security 的表单登录功能是启用的。  
+然而，一旦提供了任何基于 Servlet 的配置，就必须显式地启用表单登录。  
+以下示例展示了一个最小化的显式 Java 配置：
+
+.表单登录
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public SecurityFilterChain filterChain(HttpSecurity http) {
+	http
+		.formLogin(withDefaults());
+	// ...
+}
+----
+
+XML::
++
+[source,xml,role="secondary"]
+----
+<http>
+	<!-- ... -->
+	<form-login />
+</http>
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+	http {
+		formLogin { }
+	}
+	// ...
+}
+----
+======
+
+在上述配置中，Spring Security 会自动渲染一个默认的登录页面。  
+大多数生产级应用需要自定义登录表单。
+
+[[servlet-authentication-form-custom]]
+以下配置演示了如何提供一个自定义的登录表单。
+
+.自定义登录表单配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public SecurityFilterChain filterChain(HttpSecurity http) {
+	http
+		.formLogin(form -> form
+			.loginPage("/login")
+			.permitAll()
+		);
+	// ...
+}
+----
+
+XML::
++
+[source,xml,role="secondary"]
+----
+<http>
+	<!-- ... -->
+	<intercept-url pattern="/login" access="permitAll" />
+	<form-login login-page="/login" />
+</http>
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+	http {
+		formLogin {
+			loginPage = "/login"
+			permitAll()
+		}
+	}
+	// ...
+}
+----
+======
+
+[[servlet-authentication-form-custom-html]]
+当在 Spring Security 配置中指定了登录页面时，你需要负责渲染该页面。  
+// FIXME: Spring Security 渲染的默认登录页面  
+以下是一个 https://www.thymeleaf.org/[Thymeleaf] 模板，生成符合 `/login` 登录页面要求的 HTML 表单：
+
+.登录表单 - src/main/resources/templates/login.html
+[source,xml]
+----
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:th="https://www.thymeleaf.org">
+	<head>
+		<title>请登录</title>
+	</head>
+	<body>
+		<h1>请登录</h1>
+		<div th:if="${param.error}">
+			用户名或密码无效。</div>
+		<div th:if="${param.logout}">
+			您已成功退出登录。</div>
+		<form th:action="@{/login}" method="post">
+			<div>
+				<input type="text" name="username" placeholder="用户名"/>
+			</div>
+			<div>
+				<input type="password" name="password" placeholder="密码"/>
+			</div>
+			<input type="submit" value="登录" />
+		</form>
+	</body>
+</html>
+----
+
+关于默认 HTML 表单有几个关键点：
+
+* 表单应使用 `POST` 方法提交到 `/login`。
+* 表单需要包含一个 xref:servlet/exploits/csrf.adoc#servlet-csrf[CSRF Token]，Thymeleaf 会自动将其包含在内（xref:servlet/exploits/csrf.adoc#csrf-integration-form[自动包含]）。
+* 表单中用户名字段的参数名应为 `username`。
+* 表单中密码字段的参数名应为 `password`。
+* 如果 URL 中存在名为 `error` 的 HTTP 参数，则表示用户提供的用户名或密码无效。
+* 如果 URL 中存在名为 `logout` 的 HTTP 参数，则表示用户已成功登出。
+
+许多用户的需求仅限于自定义登录页面。  
+但如有需要，您可以通过额外的配置来自定义上述所有行为。
+
+[[servlet-authentication-form-custom-controller]]
+如果您使用的是 Spring MVC，您需要一个控制器来将 `GET /login` 请求映射到我们创建的登录模板。  
+以下示例展示了一个最简化的 `LoginController`：
+
+.LoginController
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Controller
+class LoginController {
+	@GetMapping("/login")
+	String login() {
+		return "login";
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Controller
+class LoginController {
+    @GetMapping("/login")
+    fun login(): String {
+        return "login"
+    }
+}
+----
+======

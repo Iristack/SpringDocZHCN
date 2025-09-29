@@ -1,0 +1,1693 @@
+= OAuth2
+
+Spring Security 提供了全面的 OAuth 2.0 支持。  
+本节讨论如何将 OAuth 2.0 集成到基于 Servlet 的应用程序中。
+
+[[oauth2-overview]]
+== 概述
+
+Spring Security 的 OAuth 2.0 支持包含两个主要功能集：
+
+* <<oauth2-resource-server>>
+* <<oauth2-client>>
+
+[NOTE]
+====
+<<oauth2-client-log-users-in,OAuth2 登录>> 是一个非常强大的 OAuth2 客户端功能，在参考文档中有其独立章节。  
+但它并非独立的功能，而是依赖于 OAuth2 客户端才能正常工作。
+====
+
+这些功能集涵盖了 https://tools.ietf.org/html/rfc6749#section-1.1[OAuth 2.0 授权框架] 中定义的 _资源服务器_ 和 _客户端_ 角色，而 _授权服务器_ 角色由 https://docs.spring.io/spring-authorization-server/reference/index.html[Spring Authorization Server] 负责，这是一个建立在 xref:index.adoc[Spring Security] 基础上的独立项目。
+
+OAuth2 中的 _资源服务器_ 和 _客户端_ 角色通常由一个或多个服务端应用程序表示。此外，_授权服务器_ 角色可以由一个或多个第三方提供（例如，在组织内集中身份管理和/或认证时），也可以由某个应用自身实现（如 Spring Authorization Server 所示）。
+
+例如，典型的基于 OAuth2 的微服务架构可能包括：一个面向用户的客户端应用、多个提供 REST API 的后端资源服务器，以及一个用于管理用户和认证的第三方授权服务器。也常见的是单个应用仅代表其中一种角色，并需要与一个或多个提供其他角色的第三方进行集成。
+
+Spring Security 可以处理这些场景以及其他更多情况。以下部分介绍了 Spring Security 提供的角色，并包含常见场景的示例。
+
+[[oauth2-resource-server]]
+== OAuth2 资源服务器
+
+[NOTE]
+====
+本节总结了 OAuth2 资源服务器功能并提供了示例。  
+有关完整参考文档，请参阅 xref:servlet/oauth2/resource-server/index.adoc[OAuth 2.0 资源服务器]。
+====
+
+要开始使用，请将 `spring-security-oauth2-resource-server` 依赖添加到项目中。  
+当使用 Spring Boot 时，添加以下 starter：
+
+.OAuth2 客户端与 Spring Boot
+[tabs]
+======
+Gradle::
++
+[source,gradle,role="primary"]
+----
+implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+----
+
+Maven::
++
+[source,maven,role="secondary"]
+----
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+</dependency>
+----
+======
+
+[TIP]
+====
+如果未使用 Spring Boot，请参见 xref:getting-spring-security.adoc[] 获取其他选项。
+====
+
+考虑以下 OAuth2 资源服务器的用例：
+
+* <<oauth2-resource-server-access-token,我想使用 OAuth2 保护对 API 的访问>> （授权服务器提供 JWT 或不透明访问令牌）
+* <<oauth2-resource-server-custom-jwt,我想使用 JWT 保护对 API 的访问>> （自定义令牌）
+
+[[oauth2-resource-server-access-token]]
+=== 使用 OAuth2 访问令牌保护访问
+
+使用 OAuth2 访问令牌来保护 API 访问是非常常见的做法。大多数情况下，Spring Security 只需极少配置即可使用 OAuth2 保护应用程序。
+
+Spring Security 支持两种类型的 `Bearer` 令牌，每种类型使用不同的组件进行验证：
+
+* <<oauth2-resource-server-access-token-jwt,JWT 支持>> 使用 `JwtDecoder` bean 来验证签名并解码令牌
+* <<oauth2-resource-server-access-token-opaque,不透明令牌支持>> 使用 `OpaqueTokenIntrospector` bean 来检查令牌
+
+[[oauth2-resource-server-access-token-jwt]]
+==== JWT 支持
+
+以下示例使用 Spring Boot 配置属性配置 `JwtDecoder` bean：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://my-auth-server.com
+----
+
+使用 Spring Boot 时，这已足够。Spring Boot 提供的默认配置等价于以下内容：
+
+.使用 JWT 配置资源服务器
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			.authorizeHttpRequests((authorize) -> authorize
+				.anyRequest().authenticated()
+			)
+			.oauth2ResourceServer((oauth2) -> oauth2
+				.jwt(Customizer.withDefaults())
+			);
+		return http.build();
+	}
+
+	@Bean
+	public JwtDecoder jwtDecoder() {
+		return JwtDecoders.fromIssuerLocation("https://my-auth-server.com");
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		http {
+			authorizeHttpRequests {
+				authorize(anyRequest, authenticated)
+			}
+			oauth2ResourceServer {
+				jwt { }
+			}
+		}
+
+		return http.build()
+	}
+
+	@Bean
+	fun jwtDecoder(): JwtDecoder {
+		return JwtDecoders.fromIssuerLocation("https://my-auth-server.com")
+	}
+
+}
+----
+=====
+
+[[oauth2-resource-server-access-token-opaque]]
+==== 不透明令牌支持
+
+以下示例使用 Spring Boot 配置属性配置 `OpaqueTokenIntrospector` bean：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        opaquetoken:
+          introspection-uri: https://my-auth-server.com/oauth2/introspect
+          client-id: my-client-id
+          client-secret: my-client-secret
+----
+
+使用 Spring Boot 时，这已足够。Spring Boot 提供的默认配置等价于以下内容：
+
+.使用不透明令牌配置资源服务器
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			.authorizeHttpRequests((authorize) -> authorize
+				.anyRequest().authenticated()
+			)
+			.oauth2ResourceServer((oauth2) -> oauth2
+				.opaqueToken(Customizer.withDefaults())
+			);
+		return http.build();
+	}
+
+	@Bean
+	public OpaqueTokenIntrospector opaqueTokenIntrospector() {
+		return new SpringOpaqueTokenIntrospector(
+			"https://my-auth-server.com/oauth2/introspect", "my-client-id", "my-client-secret");
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		http {
+			authorizeHttpRequests {
+				authorize(anyRequest, authenticated)
+			}
+			oauth2ResourceServer {
+				opaqueToken { }
+			}
+		}
+
+		return http.build()
+	}
+
+	@Bean
+	fun opaqueTokenIntrospector(): OpaqueTokenIntrospector {
+		return SpringOpaqueTokenIntrospector(
+			"https://my-auth-server.com/oauth2/introspect", "my-client-id", "my-client-secret"
+		)
+	}
+
+}
+----
+=====
+
+[[oauth2-resource-server-custom-jwt]]
+=== 使用自定义 JWT 保护访问
+
+使用 JWT 保护 API 访问是一种相当常见的需求，尤其是在前端为单页应用的情况下。Spring Security 的 OAuth2 资源服务器支持可用于任何类型的 `Bearer` 令牌，包括自定义 JWT。
+
+使用 JWT 保护 API 所需的只是一个 `JwtDecoder` bean，该 bean 用于验证签名并解码令牌。Spring Security 将自动使用提供的 bean 在 `SecurityFilterChain` 中配置保护机制。
+
+以下示例使用 Spring Boot 配置属性配置 `JwtDecoder` bean：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          public-key-location: classpath:my-public-key.pub
+----
+
+[NOTE]
+====
+你可以将公钥作为类路径资源提供（在此示例中称为 `my-public-key.pub`）。
+====
+
+使用 Spring Boot 时，这已足够。Spring Boot 提供的默认配置等价于以下内容：
+
+.使用自定义 JWT 配置资源服务器
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			.authorizeHttpRequests((authorize) -> authorize
+				.anyRequest().authenticated()
+			)
+			.oauth2ResourceServer((oauth2) -> oauth2
+				.jwt(Customizer.withDefaults())
+			);
+		return http.build();
+	}
+
+	@Bean
+	public JwtDecoder jwtDecoder() {
+		return NimbusJwtDecoder.withPublicKey(publicKey()).build();
+	}
+
+	private RSAPublicKey publicKey() {
+		// ...
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		http {
+			authorizeHttpRequests {
+				authorize(anyRequest, authenticated)
+			}
+			oauth2ResourceServer {
+				jwt { }
+			}
+		}
+
+		return http.build()
+	}
+
+	@Bean
+	fun jwtDecoder(): JwtDecoder {
+		return NimbusJwtDecoder.withPublicKey(publicKey()).build()
+	}
+
+	private fun publicKey(): RSAPublicKey {
+		// ...
+	}
+
+}
+----
+=====
+
+[NOTE]
+====
+Spring Security 不提供生成令牌的端点。  
+但 Spring Security 提供了 `JwtEncoder` 接口及其一个实现 `NimbusJwtEncoder`。
+====
+
+[[oauth2-client]]
+== OAuth2 客户端
+
+[NOTE]
+====
+本节总结了 OAuth2 客户端功能并提供了示例。  
+请参阅 xref:servlet/oauth2/client/index.adoc[OAuth 2.0 客户端] 和 xref:servlet/oauth2/login/index.adoc[OAuth 2.0 登录] 以获取完整的参考文档。
+====
+
+要开始使用，请将 `spring-security-oauth2-client` 依赖添加到项目中。  
+当使用 Spring Boot 时，添加以下 starter：
+
+.OAuth2 客户端与 Spring Boot
+[tabs]
+======
+Gradle::
++
+[source,gradle,role="primary"]
+----
+implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+----
+
+Maven::
++
+[source,maven,role="secondary"]
+----
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-starter-oauth2-client</artifactId>
+</dependency>
+----
+======
+
+[TIP]
+====
+如果未使用 Spring Boot，请参见 xref:getting-spring-security.adoc[] 获取其他选项。
+====
+
+考虑以下 OAuth2 客户端的用例：
+
+* <<oauth2-client-log-users-in,我想使用 OAuth 2.0 或 OpenID Connect 1.0 登录用户>>
+* <<oauth2-client-access-protected-resources,我想为用户获取访问令牌以访问第三方 API>>
+* <<oauth2-client-access-protected-resources-current-user,我想同时完成上述两项操作>> （登录用户 _并_ 访问第三方 API）
+* <<oauth2-client-enable-extension-grant-type,我想启用扩展授权类型>>
+* <<oauth2-client-customize-existing-grant-type,我想自定义现有授权类型>>
+* <<oauth2-client-customize-request-parameters,我想自定义令牌请求参数>>
+* <<oauth2-client-customize-rest-operations,我想自定义 OAuth2 客户端组件使用的 `RestOperations`>>
+
+[[oauth2-client-log-users-in]]
+=== 使用 OAuth2 登录用户
+
+要求用户通过 OAuth2 登录是很常见的需求。  
+https://openid.net/specs/openid-connect-core-1_0.html[OpenID Connect 1.0] 提供了一种特殊的令牌 `id_token`，它旨在让 OAuth2 客户端能够验证用户身份并登录用户。在某些情况下，也可直接使用 OAuth2 登录用户（如 GitHub 和 Facebook 等流行的社交登录提供商，尽管它们未实现 OpenID Connect）。
+
+以下示例配置应用程序作为 OAuth2 客户端，使其能够使用 OAuth2 或 OpenID Connect 登录用户：
+
+.配置 OAuth2 登录
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			// ...
+			.oauth2Login(Customizer.withDefaults());
+		return http.build();
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		http {
+			// ...
+			oauth2Login { }
+		}
+
+		return http.build()
+	}
+
+}
+----
+=====
+
+除了以上配置外，应用程序还需要至少配置一个 `ClientRegistration`，通过 `ClientRegistrationRepository` bean 实现。以下示例使用 Spring Boot 配置属性配置 `InMemoryClientRegistrationRepository` bean：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          my-oidc-client:
+            provider: my-oidc-provider
+            client-id: my-client-id
+            client-secret: my-client-secret
+            authorization-grant-type: authorization_code
+            scope: openid,profile
+        provider:
+          my-oidc-provider:
+            issuer-uri: https://my-oidc-provider.com
+----
+
+有了上述配置，应用程序现在支持两个额外的端点：
+
+1. 登录端点（例如 `/oauth2/authorization/my-oidc-client`）用于启动登录流程，并重定向到第三方授权服务器。
+2. 重定向端点（例如 `/login/oauth2/code/my-oidc-client`）被授权服务器用来回调客户端应用，其中包含一个 `code` 参数，用于通过访问令牌请求获取 `id_token` 和/或 `access_token`。
+
+[NOTE]
+====
+上述配置中 `scope` 包含 `openid` 表明应使用 OpenID Connect 1.0。这会指示 Spring Security 在请求处理期间使用特定于 OIDC 的组件（如 `OidcUserService`）。如果没有此作用域，Spring Security 将改用特定于 OAuth2 的组件（如 `DefaultOAuth2UserService`）。
+====
+
+[[oauth2-client-access-protected-resources]]
+=== 访问受保护资源
+
+向受 OAuth2 保护的第三方 API 发起请求是 OAuth2 客户端的核心用例。这是通过授权客户端（在 Spring Security 中由 `OAuth2AuthorizedClient` 类表示）并在出站请求的 `Authorization` 头中放置 `Bearer` 令牌来实现的。
+
+以下示例配置应用程序作为 OAuth2 客户端，使其能够从第三方 API 请求受保护资源：
+
+.配置 OAuth2 客户端
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			// ...
+			.oauth2Client(Customizer.withDefaults());
+		return http.build();
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		http {
+			// ...
+			oauth2Client { }
+		}
+
+		return http.build()
+	}
+
+}
+----
+=====
+
+[NOTE]
+====
+上述示例并未提供用户登录方式。你可以使用其他任意登录机制（如 `formLogin()`）。  
+请参见下一节 <<oauth2-client-access-protected-resources-current-user>>，了解结合 `oauth2Client()` 和 `oauth2Login()` 的示例。
+====
+
+除了以上配置外，应用程序还需要至少配置一个 `ClientRegistration`，通过 `ClientRegistrationRepository` bean 实现。以下示例使用 Spring Boot 配置属性配置 `InMemoryClientRegistrationRepository` bean：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          my-oauth2-client:
+            provider: my-auth-server
+            client-id: my-client-id
+            client-secret: my-client-secret
+            authorization-grant-type: authorization_code
+            scope: message.read,message.write
+        provider:
+          my-auth-server:
+            issuer-uri: https://my-auth-server.com
+----
+
+除了配置 Spring Security 支持 OAuth2 客户端功能外，你还需要决定如何访问受保护资源，并相应地配置应用程序。Spring Security 提供了 `OAuth2AuthorizedClientManager` 的实现，用于获取可用于访问受保护资源的访问令牌。
+
+[TIP]
+====
+当不存在 `OAuth2AuthorizedClientManager` 时，Spring Security 会为你注册一个默认的 bean。
+====
+
+使用 `OAuth2AuthorizedClientManager` 最简单的方式是通过 `ExchangeFilterFunction` 拦截 `WebClient` 的请求。要使用 `WebClient`，你需要添加 `spring-webflux` 依赖以及一个响应式客户端实现：
+
+.添加 Spring WebFlux 依赖
+[tabs]
+======
+Gradle::
++
+[source,gradle,role="primary"]
+----
+implementation 'org.springframework:spring-webflux'
+implementation 'io.projectreactor.netty:reactor-netty'
+----
+
+Maven::
++
+[source,maven,role="secondary"]
+----
+<dependency>
+	<groupId>org.springframework</groupId>
+	<artifactId>spring-webflux</artifactId>
+</dependency>
+<dependency>
+	<groupId>io.projectreactor.netty</groupId>
+	<artifactId>reactor-netty</artifactId>
+</dependency>
+----
+======
+
+以下示例使用默认的 `OAuth2AuthorizedClientManager` 配置 `WebClient`，使其能够在每个请求的 `Authorization` 头中插入 `Bearer` 令牌来访问受保护资源：
+
+.使用 `ExchangeFilterFunction` 配置 `WebClient`
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+public class WebClientConfig {
+
+	@Bean
+	public WebClient webClient(OAuth2AuthorizedClientManager authorizedClientManager) {
+		ServletOAuth2AuthorizedClientExchangeFilterFunction filter =
+				new ServletOAuth2AuthorizedClientExchangeFilterFunction(authorizedClientManager);
+		return WebClient.builder()
+				.apply(filter.oauth2Configuration())
+				.build();
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+class WebClientConfig {
+
+	@Bean
+	fun webClient(authorizedClientManager: OAuth2AuthorizedClientManager): WebClient {
+		val filter = ServletOAuth2AuthorizedClientExchangeFilterFunction(authorizedClientManager)
+		return WebClient.builder()
+			.apply(filter.oauth2Configuration())
+			.build()
+	}
+
+}
+----
+=====
+
+此配置好的 `WebClient` 可按如下示例使用：
+
+[[oauth2-client-accessing-protected-resources-example]]
+.使用 `WebClient` 访问受保护资源
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+import static org.springframework.security.oauth2.client.web.reactive.function.client.ServletOAuth2AuthorizedClientExchangeFilterFunction.clientRegistrationId;
+
+@RestController
+public class MessagesController {
+
+	private final WebClient webClient;
+
+	public MessagesController(WebClient webClient) {
+		this.webClient = webClient;
+	}
+
+	@GetMapping("/messages")
+	public ResponseEntity<List<Message>> messages() {
+		return this.webClient.get()
+				.uri("http://localhost:8090/messages")
+				.attributes(clientRegistrationId("my-oauth2-client"))
+				.retrieve()
+				.toEntityList(Message.class)
+				.block();
+	}
+
+	public record Message(String message) {
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.oauth2.client.web.reactive.function.client.ServletOAuth2AuthorizedClientExchangeFilterFunction.clientRegistrationId
+
+@RestController
+class MessagesController(private val webClient: WebClient) {
+
+	@GetMapping("/messages")
+	fun messages(): ResponseEntity<List<Message>> {
+		return webClient.get()
+			.uri("http://localhost:8090/messages")
+			.attributes(clientRegistrationId("my-oauth2-client"))
+			.retrieve()
+			.toEntityList<Message>()
+			.block()!!
+	}
+
+	data class Message(val message: String)
+
+}
+----
+=====
+
+[[oauth2-client-access-protected-resources-current-user]]
+=== 为当前用户访问受保护资源
+
+当用户通过 OAuth2 或 OpenID Connect 登录时，授权服务器可能会提供一个可直接用于访问受保护资源的访问令牌。这很方便，因为它只需要配置一个 `ClientRegistration` 即可同时满足两个用途。
+
+[NOTE]
+====
+本节将 <<oauth2-client-log-users-in>> 和 <<oauth2-client-access-protected-resources>> 合并为单一配置。  
+还存在其他高级场景，例如为登录配置一个 `ClientRegistration`，为访问资源配置另一个。所有此类场景都使用相同的基本配置。
+====
+
+以下示例配置应用程序作为 OAuth2 客户端，使其能够登录用户 _并_ 从第三方 API 请求受保护资源：
+
+.配置 OAuth2 登录和 OAuth2 客户端
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			// ...
+			.oauth2Login(Customizer.withDefaults())
+			.oauth2Client(Customizer.withDefaults());
+		return http.build();
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		http {
+			// ...
+			oauth2Login { }
+			oauth2Client { }
+		}
+
+		return http.build()
+	}
+
+}
+----
+=====
+
+除了以上配置外，应用程序还需要至少配置一个 `ClientRegistration`，通过 `ClientRegistrationRepository` bean 实现。以下示例使用 Spring Boot 配置属性配置 `InMemoryClientRegistrationRepository` bean：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          my-combined-client:
+            provider: my-auth-server
+            client-id: my-client-id
+            client-secret: my-client-secret
+            authorization-grant-type: authorization_code
+            scope: openid,profile,message.read,message.write
+        provider:
+          my-auth-server:
+            issuer-uri: https://my-auth-server.com
+----
+
+[NOTE]
+====
+与前面的示例（<<oauth2-client-log-users-in>>, <<oauth2-client-access-protected-resources>>）相比，主要区别在于 `scope` 属性的配置，这里将标准作用域 `openid` 和 `profile` 与自定义作用域 `message.read` 和 `message.write` 结合在一起。
+====
+
+除了配置 Spring Security 支持 OAuth2 客户端功能外，你还需要决定如何访问受保护资源，并相应地配置应用程序。Spring Security 提供了 `OAuth2AuthorizedClientManager` 的实现，用于获取可用于访问受保护资源的访问令牌。
+
+[TIP]
+====
+当不存在 `OAuth2AuthorizedClientManager` 时，Spring Security 会为你注册一个默认的 bean。
+====
+
+使用 `OAuth2AuthorizedClientManager` 最简单的方式是通过 `ExchangeFilterFunction` 拦截 `WebClient` 的请求。要使用 `WebClient`，你需要添加 `spring-webflux` 依赖以及一个响应式客户端实现：
+
+.添加 Spring WebFlux 依赖
+[tabs]
+======
+Gradle::
++
+[source,gradle,role="primary"]
+----
+implementation 'org.springframework:spring-webflux'
+implementation 'io.projectreactor.netty:reactor-netty'
+----
+
+Maven::
++
+[source,maven,role="secondary"]
+----
+<dependency>
+	<groupId>org.springframework</groupId>
+	<artifactId>spring-webflux</artifactId>
+</dependency>
+<dependency>
+	<groupId>io.projectreactor.netty</groupId>
+	<artifactId>reactor-netty</artifactId>
+</dependency>
+----
+======
+
+以下示例使用默认的 `OAuth2AuthorizedClientManager` 配置 `WebClient`，使其能够在每个请求的 `Authorization` 头中插入 `Bearer` 令牌来访问受保护资源：
+
+.使用 `ExchangeFilterFunction` 配置 `WebClient`
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+public class WebClientConfig {
+
+	@Bean
+	public WebClient webClient(OAuth2AuthorizedClientManager authorizedClientManager) {
+		ServletOAuth2AuthorizedClientExchangeFilterFunction filter =
+				new ServletOAuth2AuthorizedClientExchangeFilterFunction(authorizedClientManager);
+		return WebClient.builder()
+				.apply(filter.oauth2Configuration())
+				.build();
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+class WebClientConfig {
+
+	@Bean
+	fun webClient(authorizedClientManager: OAuth2AuthorizedClientManager): WebClient {
+		val filter = ServletOAuth2AuthorizedClientExchangeFilterFunction(authorizedClientManager)
+		return WebClient.builder()
+			.apply(filter.oauth2Configuration())
+			.build()
+	}
+
+}
+----
+=====
+
+此配置好的 `WebClient` 可按如下示例使用：
+
+[[oauth2-client-accessing-protected-resources-current-user-example]]
+.使用 `WebClient` 访问受保护资源（当前用户）
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@RestController
+public class MessagesController {
+
+	private final WebClient webClient;
+
+	public MessagesController(WebClient webClient) {
+		this.webClient = webClient;
+	}
+
+	@GetMapping("/messages")
+	public ResponseEntity<List<Message>> messages() {
+		return this.webClient.get()
+				.uri("http://localhost:8090/messages")
+				.retrieve()
+				.toEntityList(Message.class)
+				.block();
+	}
+
+	public record Message(String message) {
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@RestController
+class MessagesController(private val webClient: WebClient) {
+
+	@GetMapping("/messages")
+	fun messages(): ResponseEntity<List<Message>> {
+		return webClient.get()
+			.uri("http://localhost:8090/messages")
+			.retrieve()
+			.toEntityList<Message>()
+			.block()!!
+	}
+
+	data class Message(val message: String)
+
+}
+----
+=====
+
+[NOTE]
+====
+与 <<oauth2-client-accessing-protected-resources-example,之前的示例>> 不同，注意我们不再需要告诉 Spring Security 使用哪个 `clientRegistrationId`。  
+这是因为可以从当前登录用户推导出来。
+====
+
+[[oauth2-client-enable-extension-grant-type]]
+=== 启用扩展授权类型
+
+一个常见用例是启用和/或配置扩展授权类型。例如，Spring Security 提供了对 `jwt-bearer` 和 `token-exchange` 授权类型的支持，但由于它们不属于核心 OAuth 2.0 规范，因此默认未启用。
+
+从 Spring Security 6.2 开始，我们只需发布一个或多个 `OAuth2AuthorizedClientProvider` bean，它们就会被自动识别。以下示例仅启用了 `jwt-bearer` 授权类型：
+
+.启用 `jwt-bearer` 授权类型
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+public class SecurityConfig {
+
+	@Bean
+	public OAuth2AuthorizedClientProvider jwtBearer() {
+		return new JwtBearerOAuth2AuthorizedClientProvider();
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+class SecurityConfig {
+
+	@Bean
+	fun jwtBearer(): OAuth2AuthorizedClientProvider {
+		return JwtBearerOAuth2AuthorizedClientProvider()
+	}
+
+}
+----
+=====
+
+如果未手动提供，则 Spring Security 会自动发布一个默认的 `OAuth2AuthorizedClientManager`。
+
+[TIP]
+====
+任何自定义的 `OAuth2AuthorizedClientProvider` bean 都会被自动识别，并在默认授权类型之后应用于所提供的 `OAuth2AuthorizedClientManager`。
+====
+
+在 Spring Security 6.2 之前，我们需要自己发布这个 bean 并确保重新启用默认授权类型。为了理解幕后配置的内容，以下是旧版本可能的配置方式：
+
+.启用 `jwt-bearer` 授权类型（6.2 之前）
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+public class SecurityConfig {
+
+	@Bean
+	public OAuth2AuthorizedClientManager authorizedClientManager(
+			ClientRegistrationRepository clientRegistrationRepository,
+			OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+		OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+				.authorizationCode()
+				.refreshToken()
+				.clientCredentials()
+				.password()
+				.provider(new JwtBearerOAuth2AuthorizedClientProvider())
+				.build();
+
+		DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultOAuth2AuthorizedClientManager(
+				clientRegistrationRepository, authorizedClientRepository);
+		authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+		return authorizedClientManager;
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+class SecurityConfig {
+
+	@Bean
+	fun authorizedClientManager(
+		clientRegistrationRepository: ClientRegistrationRepository,
+		authorizedClientRepository: OAuth2AuthorizedClientRepository
+	): OAuth2AuthorizedClientManager {
+		val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+			.authorizationCode()
+			.refreshToken()
+			.clientCredentials()
+			.password()
+			.provider(JwtBearerOAuth2AuthorizedClientProvider())
+			.build()
+
+		val authorizedClientManager = DefaultOAuth2AuthorizedClientManager(
+			clientRegistrationRepository, authorizedClientRepository
+		)
+		authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+
+		return authorizedClientManager
+	}
+
+}
+----
+=====
+
+[[oauth2-client-customize-existing-grant-type]]
+=== 自定义现有授权类型
+
+通过发布 bean 来 <<oauth2-client-enable-extension-grant-type,启用扩展授权类型>> 的能力也为自定义现有授权类型提供了机会，无需重新定义默认值。例如，如果我们想自定义 `client_credentials` 授权类型的 `OAuth2AuthorizedClientProvider` 的时钟偏移，我们可以简单地发布如下 bean：
+
+.自定义客户端凭据授权类型
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+public class SecurityConfig {
+
+	@Bean
+	public OAuth2AuthorizedClientProvider clientCredentials() {
+		ClientCredentialsOAuth2AuthorizedClientProvider authorizedClientProvider =
+				new ClientCredentialsOAuth2AuthorizedClientProvider();
+		authorizedClientProvider.setClockSkew(Duration.ofMinutes(5));
+
+		return authorizedClientProvider;
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+class SecurityConfig {
+
+	@Bean
+	fun clientCredentials(): OAuth2AuthorizedClientProvider {
+		val authorizedClientProvider = ClientCredentialsOAuth2AuthorizedClientProvider()
+		authorizedClientProvider.setClockSkew(Duration.ofMinutes(5))
+		return authorizedClientProvider
+	}
+
+}
+----
+=====
+
+[[oauth2-client-customize-request-parameters]]
+=== 自定义令牌请求参数
+
+在获取访问令牌时自定义请求参数的需求很常见。例如，假设我们希望在令牌请求中添加自定义的 `audience` 参数，因为授权服务器对此参数有要求（针对 `authorization_code` 授权）。
+
+从 Spring Security 6.2 开始，我们只需发布一个类型为 `OAuth2AccessTokenResponseClient` 且泛型为 `OAuth2AuthorizationCodeGrantRequest` 的 bean，Spring Security 就会使用它来配置 OAuth2 客户端组件。
+
+以下示例在不使用 DSL 的情况下为 `authorization_code` 授权自定义令牌请求参数：
+
+.为授权码授权自定义令牌请求参数
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+public class SecurityConfig {
+
+	@Bean
+	public OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> authorizationCodeAccessTokenResponseClient() {
+		OAuth2AuthorizationCodeGrantRequestEntityConverter requestEntityConverter =
+			new OAuth2AuthorizationCodeGrantRequestEntityConverter();
+		requestEntityConverter.addParametersConverter(parametersConverter());
+
+		DefaultAuthorizationCodeTokenResponseClient accessTokenResponseClient =
+			new DefaultAuthorizationCodeTokenResponseClient();
+		accessTokenResponseClient.setRequestEntityConverter(requestEntityConverter);
+
+		return accessTokenResponseClient;
+	}
+
+	private static Converter<OAuth2AuthorizationCodeGrantRequest, MultiValueMap<String, String>> parametersConverter() {
+		return (grantRequest) -> {
+			MultiValueMap<String, String> parameters = new LinkedMultiValueMap<>();
+			parameters.set("audience", "xyz_value");
+
+			return parameters;
+		};
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+class SecurityConfig {
+
+	@Bean
+	fun authorizationCodeAccessTokenResponseClient(): OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> {
+		val requestEntityConverter = OAuth2AuthorizationCodeGrantRequestEntityConverter()
+		requestEntityConverter.addParametersConverter(parametersConverter())
+
+		val accessTokenResponseClient = DefaultAuthorizationCodeTokenResponseClient()
+		accessTokenResponseClient.setRequestEntityConverter(requestEntityConverter)
+
+		return accessTokenResponseClient
+	}
+
+	private fun parametersConverter(): Converter<OAuth2AuthorizationCodeGrantRequest, MultiValueMap<String, String>> {
+		return Converter<OAuth2AuthorizationCodeGrantRequest, MultiValueMap<String, String>> { grantRequest ->
+			LinkedMultiValueMap<String, String>().also { parameters ->
+				parameters["audience"] = "xyz_value"
+			}
+		}
+	}
+
+}
+----
+=====
+
+[TIP]
+====
+请注意，在这种情况下我们不需要自定义 `SecurityFilterChain` bean，可以直接使用默认配置。  
+如果使用 Spring Boot 且无其他自定义，则实际上可以完全省略 `SecurityFilterChain` bean。
+====
+
+在 Spring Security 6.2 之前，我们必须确保此自定义同时应用于 OAuth2 登录（如果使用此功能）和 OAuth2 客户端组件（使用 Spring Security DSL）。为了理解幕后配置的内容，以下是旧版本可能的配置方式：
+
+.为授权码授权自定义令牌请求参数（6.2 之前）
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		OAuth2AuthorizationCodeGrantRequestEntityConverter requestEntityConverter =
+			new OAuth2AuthorizationCodeGrantRequestEntityConverter();
+		requestEntityConverter.addParametersConverter(parametersConverter());
+
+		DefaultAuthorizationCodeTokenResponseClient accessTokenResponseClient =
+			new DefaultAuthorizationCodeTokenResponseClient();
+		accessTokenResponseClient.setRequestEntityConverter(requestEntityConverter);
+
+		http
+			.authorizeHttpRequests((authorize) -> authorize
+				.anyRequest().authenticated()
+			)
+			.oauth2Login((oauth2Login) -> oauth2Login
+				.tokenEndpoint((tokenEndpoint) -> tokenEndpoint
+					.accessTokenResponseClient(accessTokenResponseClient)
+				)
+			)
+			.oauth2Client((oauth2Client) -> oauth2Client
+				.authorizationCodeGrant((authorizationCode) -> authorizationCode
+					.accessTokenResponseClient(accessTokenResponseClient)
+				)
+			);
+
+		return http.build();
+	}
+
+	private static Converter<OAuth2AuthorizationCodeGrantRequest, MultiValueMap<String, String>> parametersConverter() {
+		// ...
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		val requestEntityConverter = OAuth2AuthorizationCodeGrantRequestEntityConverter()
+		requestEntityConverter.addParametersConverter(parametersConverter())
+
+		val tokenResponseClient = DefaultAuthorizationCodeTokenResponseClient()
+		tokenResponseClient.setRequestEntityConverter(requestEntityConverter)
+
+		http {
+			authorizeHttpRequests {
+				authorize(anyRequest, authenticated)
+			}
+			oauth2Login {
+				tokenEndpoint {
+					accessTokenResponseClient = tokenResponseClient
+				}
+			}
+			oauth2Client {
+				authorizationCodeGrant {
+					accessTokenResponseClient = tokenResponseClient
+				}
+			}
+		}
+
+		return http.build()
+	}
+
+	private fun parametersConverter(): Converter<OAuth2AuthorizationCodeGrantRequest, MultiValueMap<String, String>> {
+		// ...
+	}
+
+}
+----
+=====
+
+对于其他授权类型，我们可以发布额外的 `OAuth2AccessTokenResponseClient` bean 来覆盖默认行为。例如，要为 `client_credentials` 授权自定义令牌请求，可以发布以下 bean：
+
+.为客户凭据授权自定义令牌请求参数
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+public class SecurityConfig {
+
+	@Bean
+	public OAuth2AccessTokenResponseClient<OAuth2ClientCredentialsGrantRequest> clientCredentialsAccessTokenResponseClient() {
+		OAuth2ClientCredentialsGrantRequestEntityConverter requestEntityConverter =
+			new OAuth2ClientCredentialsGrantRequestEntityConverter();
+		requestEntityConverter.addParametersConverter(parametersConverter());
+
+		DefaultClientCredentialsTokenResponseClient accessTokenResponseClient =
+				new DefaultClientCredentialsTokenResponseClient();
+		accessTokenResponseClient.setRequestEntityConverter(requestEntityConverter);
+
+		return accessTokenResponseClient;
+	}
+
+	private static Converter<OAuth2ClientCredentialsGrantRequest, MultiValueMap<String, String>> parametersConverter() {
+		// ...
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+class SecurityConfig {
+
+	@Bean
+	fun clientCredentialsAccessTokenResponseClient(): OAuth2AccessTokenResponseClient<OAuth2ClientCredentialsGrantRequest> {
+		val requestEntityConverter = OAuth2ClientCredentialsGrantRequestEntityConverter()
+		requestEntityConverter.addParametersConverter(parametersConverter())
+
+		val accessTokenResponseClient = DefaultClientCredentialsTokenResponseClient()
+		accessTokenResponseClient.setRequestEntityConverter(requestEntityConverter)
+
+		return accessTokenResponseClient
+	}
+
+	private fun parametersConverter(): Converter<OAuth2ClientCredentialsGrantRequest, MultiValueMap<String, String>> {
+		// ...
+	}
+
+}
+----
+=====
+
+Spring Security 会自动解析以下 `OAuth2AccessTokenResponseClient` bean 的泛型类型：
+
+* `OAuth2AuthorizationCodeGrantRequest` （见 `DefaultAuthorizationCodeTokenResponseClient`）
+* `OAuth2RefreshTokenGrantRequest` （见 `DefaultRefreshTokenTokenResponseClient`）
+* `OAuth2ClientCredentialsGrantRequest` （见 `DefaultClientCredentialsTokenResponseClient`）
+* `OAuth2PasswordGrantRequest` （见 `DefaultPasswordTokenResponseClient`）
+* `JwtBearerGrantRequest` （见 `DefaultJwtBearerTokenResponseClient`）
+* `TokenExchangeGrantRequest` （见 `DefaultTokenExchangeTokenResponseClient`）
+
+[TIP]
+====
+发布类型为 `OAuth2AccessTokenResponseClient<JwtBearerGrantRequest>` 的 bean 将自动启用 `jwt-bearer` 授权类型，无需单独<<oauth2-client-enable-extension-grant-type,配置>>。
+====
+
+[TIP]
+====
+发布类型为 `OAuth2AccessTokenResponseClient<TokenExchangeGrantRequest>` 的 bean 将自动启用 `token-exchange` 授权类型，无需单独<<oauth2-client-enable-extension-grant-type,配置>>。
+====
+
+[[oauth2-client-customize-rest-operations]]
+=== 自定义 OAuth2 客户端组件使用的 `RestOperations`
+
+另一个常见需求是自定义获取访问令牌时使用的 `RestOperations`。我们可能需要这样做以自定义响应处理（通过自定义 `HttpMessageConverter`）或为公司网络应用代理设置（通过自定义 `ClientHttpRequestFactory`）。
+
+从 Spring Security 6.2 开始，我们只需发布 `OAuth2AccessTokenResponseClient` 类型的 bean，Spring Security 就会为我们配置并发布一个 `OAuth2AuthorizedClientManager` bean。
+
+以下示例为所有支持的授权类型自定义 `RestOperations`：
+
+.为 OAuth2 客户端自定义 `RestOperations`
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+public class SecurityConfig {
+
+	@Bean
+	public OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> authorizationCodeAccessTokenResponseClient() {
+		DefaultAuthorizationCodeTokenResponseClient accessTokenResponseClient =
+			new DefaultAuthorizationCodeTokenResponseClient();
+		accessTokenResponseClient.setRestOperations(restTemplate());
+
+		return accessTokenResponseClient;
+	}
+
+	@Bean
+	public OAuth2AccessTokenResponseClient<OAuth2RefreshTokenGrantRequest> refreshTokenAccessTokenResponseClient() {
+		DefaultRefreshTokenTokenResponseClient accessTokenResponseClient =
+			new DefaultRefreshTokenTokenResponseClient();
+		accessTokenResponseClient.setRestOperations(restTemplate());
+
+		return accessTokenResponseClient;
+	}
+
+	@Bean
+	public OAuth2AccessTokenResponseClient<OAuth2ClientCredentialsGrantRequest> clientCredentialsAccessTokenResponseClient() {
+		DefaultClientCredentialsTokenResponseClient accessTokenResponseClient =
+			new DefaultClientCredentialsTokenResponseClient();
+		accessTokenResponseClient.setRestOperations(restTemplate());
+
+		return accessTokenResponseClient;
+	}
+
+	@Bean
+	public OAuth2AccessTokenResponseClient<OAuth2PasswordGrantRequest> passwordAccessTokenResponseClient() {
+		DefaultPasswordTokenResponseClient accessTokenResponseClient =
+			new DefaultPasswordTokenResponseClient();
+		accessTokenResponseClient.setRestOperations(restTemplate());
+
+		return accessTokenResponseClient;
+	}
+
+	@Bean
+	public OAuth2AccessTokenResponseClient<JwtBearerGrantRequest> jwtBearerAccessTokenResponseClient() {
+		DefaultJwtBearerTokenResponseClient accessTokenResponseClient =
+			new DefaultJwtBearerTokenResponseClient();
+		accessTokenResponseClient.setRestOperations(restTemplate());
+
+		return accessTokenResponseClient;
+	}
+
+	@Bean
+	public OAuth2AccessTokenResponseClient<TokenExchangeGrantRequest> tokenExchangeAccessTokenResponseClient() {
+		DefaultTokenExchangeTokenResponseClient accessTokenResponseClient =
+			new DefaultTokenExchangeTokenResponseClient();
+		accessTokenResponseClient.setRestOperations(restTemplate());
+
+		return accessTokenResponseClient;
+	}
+
+	@Bean
+	public RestTemplate restTemplate() {
+		// ...
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+class SecurityConfig {
+
+	@Bean
+	fun authorizationCodeAccessTokenResponseClient(): OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> {
+		val accessTokenResponseClient = DefaultAuthorizationCodeTokenResponseClient()
+		accessTokenResponseClient.setRestOperations(restTemplate())
+
+		return accessTokenResponseClient
+	}
+
+	@Bean
+	fun refreshTokenAccessTokenResponseClient(): OAuth2AccessTokenResponseClient<OAuth2RefreshTokenGrantRequest> {
+		val accessTokenResponseClient = DefaultRefreshTokenTokenResponseClient()
+		accessTokenResponseClient.setRestOperations(restTemplate())
+
+		return accessTokenResponseClient
+	}
+
+	@Bean
+	fun clientCredentialsAccessTokenResponseClient(): OAuth2AccessTokenResponseClient<OAuth2ClientCredentialsGrantRequest> {
+		val accessTokenResponseClient = DefaultClientCredentialsTokenResponseClient()
+		accessTokenResponseClient.setRestOperations(restTemplate())
+
+		return accessTokenResponseClient
+	}
+
+	@Bean
+	fun passwordAccessTokenResponseClient(): OAuth2AccessTokenResponseClient<OAuth2PasswordGrantRequest> {
+		val accessTokenResponseClient = DefaultPasswordTokenResponseClient()
+		accessTokenResponseClient.setRestOperations(restTemplate())
+
+		return accessTokenResponseClient
+	}
+
+	@Bean
+	fun jwtBearerAccessTokenResponseClient(): OAuth2AccessTokenResponseClient<JwtBearerGrantRequest> {
+		val accessTokenResponseClient = DefaultJwtBearerTokenResponseClient()
+		accessTokenResponseClient.setRestOperations(restTemplate())
+
+		return accessTokenResponseClient
+	}
+
+	@Bean
+	fun tokenExchangeAccessTokenResponseClient(): OAuth2AccessTokenResponseClient<TokenExchangeGrantRequest> {
+		val accessTokenResponseClient = DefaultTokenExchangeTokenResponseClient()
+		accessTokenResponseClient.setRestOperations(restTemplate())
+
+		return accessTokenResponseClient
+	}
+
+	@Bean
+	fun restTemplate(): RestTemplate {
+		// ...
+	}
+
+}
+----
+=====
+
+如果未手动提供，则 Spring Security 会自动发布一个默认的 `OAuth2AuthorizedClientManager`。
+
+[TIP]
+====
+请注意，在这种情况下我们不需要自定义 `SecurityFilterChain` bean，可以直接使用默认配置。  
+如果使用 Spring Boot 且无其他自定义，则实际上可以完全省略 `SecurityFilterChain` bean。
+====
+
+在 Spring Security 6.2 之前，我们必须确保此自定义同时应用于 OAuth2 登录（如果使用此功能）和 OAuth2 客户端组件。我们必须同时使用 Spring Security DSL（用于 `authorization_code` 授权）并为其他授权类型发布 `OAuth2AuthorizedClientManager` 类型的 bean。为了理解幕后配置的内容，以下是旧版本可能的配置方式：
+
+.为 OAuth2 客户端自定义 `RestOperations`（6.2 之前）
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		DefaultAuthorizationCodeTokenResponseClient accessTokenResponseClient =
+			new DefaultAuthorizationCodeTokenResponseClient();
+		accessTokenResponseClient.setRestOperations(restTemplate());
+
+		http
+			// ...
+			.oauth2Login((oauth2Login) -> oauth2Login
+				.tokenEndpoint((tokenEndpoint) -> tokenEndpoint
+					.accessTokenResponseClient(accessTokenResponseClient)
+				)
+			)
+			.oauth2Client((oauth2Client) -> oauth2Client
+				.authorizationCodeGrant((authorizationCode) -> authorizationCode
+					.accessTokenResponseClient(accessTokenResponseClient)
+				)
+			);
+
+		return http.build();
+	}
+
+	@Bean
+	public OAuth2AuthorizedClientManager authorizedClientManager(
+			ClientRegistrationRepository clientRegistrationRepository,
+			OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+		DefaultRefreshTokenTokenResponseClient refreshTokenAccessTokenResponseClient =
+			new DefaultRefreshTokenTokenResponseClient();
+		refreshTokenAccessTokenResponseClient.setRestOperations(restTemplate());
+
+		DefaultClientCredentialsTokenResponseClient clientCredentialsAccessTokenResponseClient =
+			new DefaultClientCredentialsTokenResponseClient();
+		clientCredentialsAccessTokenResponseClient.setRestOperations(restTemplate());
+
+		DefaultPasswordTokenResponseClient passwordAccessTokenResponseClient =
+			new DefaultPasswordTokenResponseClient();
+		passwordAccessTokenResponseClient.setRestOperations(restTemplate());
+
+		DefaultJwtBearerTokenResponseClient jwtBearerAccessTokenResponseClient =
+			new DefaultJwtBearerTokenResponseClient();
+		jwtBearerAccessTokenResponseClient.setRestOperations(restTemplate());
+
+		JwtBearerOAuth2AuthorizedClientProvider jwtBearerAuthorizedClientProvider =
+			new JwtBearerOAuth2AuthorizedClientProvider();
+		jwtBearerAuthorizedClientProvider.setAccessTokenResponseClient(jwtBearerAccessTokenResponseClient);
+
+		DefaultTokenExchangeTokenResponseClient tokenExchangeAccessTokenResponseClient =
+			new DefaultTokenExchangeTokenResponseClient();
+		tokenExchangeAccessTokenResponseClient.setRestOperations(restTemplate());
+
+		TokenExchangeOAuth2AuthorizedClientProvider tokenExchangeAuthorizedClientProvider =
+			new TokenExchangeOAuth2AuthorizedClientProvider();
+		tokenExchangeAuthorizedClientProvider.setAccessTokenResponseClient(tokenExchangeAccessTokenResponseClient);
+
+		OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+				.authorizationCode()
+				.refreshToken((refreshToken) -> refreshToken
+					.accessTokenResponseClient(refreshTokenAccessTokenResponseClient)
+				)
+				.clientCredentials((clientCredentials) -> clientCredentials
+					.accessTokenResponseClient(clientCredentialsAccessTokenResponseClient)
+				)
+				.password((password) -> password
+					.accessTokenResponseClient(passwordAccessTokenResponseClient)
+				)
+				.provider(jwtBearerAuthorizedClientProvider)
+				.provider(tokenExchangeAuthorizedClientProvider)
+				.build();
+
+		DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultOAuth2AuthorizedClientManager(
+				clientRegistrationRepository, authorizedClientRepository);
+		authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+		return authorizedClientManager;
+	}
+
+	@Bean
+	public RestTemplate restTemplate() {
+		// ...
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		val tokenResponseClient = DefaultAuthorizationCodeTokenResponseClient()
+		tokenResponseClient.setRestOperations(restTemplate())
+
+		http {
+			// ...
+			oauth2Login {
+				tokenEndpoint {
+					accessTokenResponseClient = tokenResponseClient
+				}
+			}
+			oauth2Client {
+				authorizationCodeGrant {
+					accessTokenResponseClient = tokenResponseClient
+				}
+			}
+		}
+
+		return http.build()
+	}
+
+	@Bean
+	fun authorizedClientManager(
+		clientRegistrationRepository: ClientRegistrationRepository?,
+		authorizedClientRepository: OAuth2AuthorizedClientRepository?
+	): OAuth2AuthorizedClientManager {
+		val refreshTokenAccessTokenResponseClient = DefaultRefreshTokenTokenResponseClient()
+		refreshTokenAccessTokenResponseClient.setRestOperations(restTemplate())
+
+		val clientCredentialsAccessTokenResponseClient = DefaultClientCredentialsTokenResponseClient()
+		clientCredentialsAccessTokenResponseClient.setRestOperations(restTemplate())
+
+		val passwordAccessTokenResponseClient = DefaultPasswordTokenResponseClient()
+		passwordAccessTokenResponseClient.setRestOperations(restTemplate())
+
+		val jwtBearerAccessTokenResponseClient = DefaultJwtBearerTokenResponseClient()
+		jwtBearerAccessTokenResponseClient.setRestOperations(restTemplate())
+
+		val jwtBearerAuthorizedClientProvider = JwtBearerOAuth2AuthorizedClientProvider()
+		jwtBearerAuthorizedClientProvider.setAccessTokenResponseClient(jwtBearerAccessTokenResponseClient)
+
+		val tokenExchangeAccessTokenResponseClient = DefaultTokenExchangeTokenResponseClient()
+		tokenExchangeAccessTokenResponseClient.setRestOperations(restTemplate())
+
+		val tokenExchangeAuthorizedClientProvider = TokenExchangeOAuth2AuthorizedClientProvider()
+		tokenExchangeAuthorizedClientProvider.setAccessTokenResponseClient(tokenExchangeAccessTokenResponseClient)
+
+		val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+			.authorizationCode()
+			.refreshToken { refreshToken ->
+				refreshToken.accessTokenResponseClient(refreshTokenAccessTokenResponseClient)
+			}
+			.clientCredentials { clientCredentials ->
+				clientCredentials.accessTokenResponseClient(clientCredentialsAccessTokenResponseClient)
+			}
+			.password { password ->
+				password.accessTokenResponseClient(passwordAccessTokenResponseClient)
+			}
+			.provider(jwtBearerAuthorizedClientProvider)
+			.provider(tokenExchangeAuthorizedClientProvider)
+			.build()
+
+		val authorizedClientManager = DefaultOAuth2AuthorizedClientManager(
+			clientRegistrationRepository, authorizedClientRepository
+		)
+		authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+
+		return authorizedClientManager
+	}
+
+	@Bean
+	fun restTemplate(): RestTemplate {
+		// ...
+	}
+
+}
+----
+=====
+
+
+[[further-reading]]
+== 进一步阅读
+
+前述部分介绍了 Spring Security 对 OAuth2 的支持及常见场景的示例。  
+你可以在参考文档的以下章节中进一步了解 OAuth2 客户端和资源服务器：
+
+* xref:servlet/oauth2/login/index.adoc[]
+* xref:servlet/oauth2/client/index.adoc[]
+* xref:servlet/oauth2/resource-server/index.adoc[]

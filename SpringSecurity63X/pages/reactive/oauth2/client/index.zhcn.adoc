@@ -1,0 +1,134 @@
+[[webflux-oauth2-client]]
+= OAuth 2.0 客户端
+:page-section-summary-toc: 1
+
+OAuth 2.0 客户端功能提供了对 https://tools.ietf.org/html/rfc6749#section-1.1[OAuth 2.0 授权框架] 中定义的客户端角色的支持。
+
+总体而言，主要提供的核心功能包括：
+
+.授权许可（Authorization Grant）支持
+* https://tools.ietf.org/html/rfc6749#section-1.3.1[授权码模式（Authorization Code）]
+* https://tools.ietf.org/html/rfc6749#section-6[刷新令牌（Refresh Token）]
+* https://tools.ietf.org/html/rfc6749#section-1.3.4[客户端凭据（Client Credentials）]
+* https://tools.ietf.org/html/rfc6749#section-1.3.3[资源所有者密码凭证（Resource Owner Password Credentials）]
+* https://datatracker.ietf.org/doc/html/rfc7523#section-2.1[JWT Bearer]
+* https://datatracker.ietf.org/doc/html/rfc8693#section-2.1[令牌交换（Token Exchange）]
+
+.客户端认证支持
+* https://datatracker.ietf.org/doc/html/rfc7523#section-2.2[JWT Bearer]
+
+.HTTP 客户端支持
+* xref:reactive/oauth2/client/authorized-clients.adoc#oauth2Client-webclient-webflux[`WebClient` 与响应式环境集成]（用于请求受保护资源）
+
+`ServerHttpSecurity.oauth2Client()` DSL 提供了多种配置选项，用于自定义 OAuth 2.0 客户端所使用的核心组件。
+
+以下代码展示了 `ServerHttpSecurity.oauth2Client()` DSL 提供的完整配置选项：
+
+.OAuth2 客户端配置选项
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+public class OAuth2ClientSecurityConfig {
+
+	@Bean
+	public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
+		http
+			.oauth2Client(oauth2 -> oauth2
+				.clientRegistrationRepository(this.clientRegistrationRepository())
+				.authorizedClientRepository(this.authorizedClientRepository())
+				.authorizationRequestRepository(this.authorizationRequestRepository())
+				.authorizationRequestResolver(this.authorizationRequestResolver())
+				.authenticationConverter(this.authenticationConverter())
+				.authenticationManager(this.authenticationManager())
+			);
+
+		return http.build();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+class OAuth2ClientSecurityConfig {
+
+    @Bean
+    fun securityFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+        http {
+            oauth2Client {
+                clientRegistrationRepository = clientRegistrationRepository()
+                authorizedClientRepository = authorizedClientRepository()
+                authorizationRequestRepository = authorizedRequestRepository()
+                authorizationRequestResolver = authorizationRequestResolver()
+                authenticationConverter = authenticationConverter()
+                authenticationManager = authenticationManager()
+            }
+        }
+
+        return http.build()
+    }
+}
+----
+======
+
+`ReactiveOAuth2AuthorizedClientManager` 负责管理 OAuth 2.0 客户端的授权（或重新授权），并与一个或多个 `ReactiveOAuth2AuthorizedClientProvider` 协同工作。
+
+以下代码展示了一个如何注册 `ReactiveOAuth2AuthorizedClientManager` `@Bean` 的示例，并将其与一个 `ReactiveOAuth2AuthorizedClientProvider` 组合对象关联，该组合对象支持 `authorization_code`、`refresh_token`、`client_credentials` 和 `password` 四种授权许可类型：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public ReactiveOAuth2AuthorizedClientManager authorizedClientManager(
+		ReactiveClientRegistrationRepository clientRegistrationRepository,
+		ServerOAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+	ReactiveOAuth2AuthorizedClientProvider authorizedClientProvider =
+			ReactiveOAuth2AuthorizedClientProviderBuilder.builder()
+					.authorizationCode()
+					.refreshToken()
+					.clientCredentials()
+					.password()
+					.build();
+
+	DefaultReactiveOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultReactiveOAuth2AuthorizedClientManager(
+					clientRegistrationRepository, authorizedClientRepository);
+	authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+	return authorizedClientManager;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun authorizedClientManager(
+        clientRegistrationRepository: ReactiveClientRegistrationRepository,
+        authorizedClientRepository: ServerOAuth2AuthorizedClientRepository): ReactiveOAuth2AuthorizedClientManager {
+    val authorizedClientProvider: ReactiveOAuth2AuthorizedClientProvider = ReactiveOAuth2AuthorizedClientProviderBuilder.builder()
+            .authorizationCode()
+            .refreshToken()
+            .clientCredentials()
+            .password()
+            .build()
+    val authorizedClientManager = DefaultReactiveOAuth2AuthorizedClientManager(
+            clientRegistrationRepository, authorizedClientRepository)
+    authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+    return authorizedClientManager
+}
+----
+======

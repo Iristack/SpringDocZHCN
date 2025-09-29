@@ -1,0 +1,123 @@
+= OAuth 2.0 资源服务器多租户支持
+
+[[webflux-oauth2resourceserver-multitenancy]]
+== 多租户（Multi-tenancy）
+
+当存在多种用于验证承载令牌（bearer token）的策略，并通过某个租户标识符进行区分时，该资源服务器即被视为**多租户**。
+
+例如，你的资源服务器可以接受来自两个不同授权服务器的承载令牌。  
+或者，你的授权服务器本身可能代表多个不同的签发方（issuer）。
+
+在这两种情况下，都需要完成两件事，而你选择实现方式的不同会带来相应的权衡：
+
+. 解析租户（Resolve the tenant）。
+. 传播租户信息（Propagate the tenant）。
+
+=== 通过声明（Claim）解析租户
+
+区分租户的一种方法是使用 **签发者声明（issuer claim）**。由于签发者声明通常随签名的 JWT 一起提供，你可以使用 `JwtIssuerReactiveAuthenticationManagerResolver` 来实现：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+JwtIssuerReactiveAuthenticationManagerResolver authenticationManagerResolver = JwtIssuerReactiveAuthenticationManagerResolver
+    .fromTrustedIssuers("https://idp.example.org/issuerOne", "https://idp.example.org/issuerTwo");
+
+http
+    .authorizeExchange(exchanges -> exchanges
+        .anyExchange().authenticated()
+    )
+    .oauth2ResourceServer(oauth2 -> oauth2
+        .authenticationManagerResolver(authenticationManagerResolver)
+    );
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val customAuthenticationManagerResolver = JwtIssuerReactiveAuthenticationManagerResolver
+    .fromTrustedIssuers("https://idp.example.org/issuerOne", "https://idp.example.org/issuerTwo")
+
+return http {
+    authorizeExchange {
+        authorize(anyExchange, authenticated)
+    }
+    oauth2ResourceServer {
+        authenticationManagerResolver = customAuthenticationManagerResolver
+    }
+}
+----
+======
+
+这种方式的优点在于：签发者端点是**延迟加载**的。实际上，对应的 `JwtReactiveAuthenticationManager` 实例只有在收到对应签发者的第一个请求时才会被创建。这使得应用程序可以在不依赖这些授权服务器是否启动或可用的情况下正常启动。
+
+==== 动态租户管理
+
+你可能不希望每次新增一个租户时都重启应用。在这种情况下，你可以将 `JwtIssuerReactiveAuthenticationManagerResolver` 配置为使用一个包含 `ReactiveAuthenticationManager` 实例的仓库（repository），并在运行时动态修改它：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+private Mono<ReactiveAuthenticationManager> addManager(
+		Map<String, ReactiveAuthenticationManager> authenticationManagers, String issuer) {
+
+	return Mono.fromCallable(() -> ReactiveJwtDecoders.fromIssuerLocation(issuer))
+            .subscribeOn(Schedulers.boundedElastic())
+            .map(JwtReactiveAuthenticationManager::new)
+            .doOnNext(authenticationManager -> authenticationManagers.put(issuer, authenticationManager));
+}
+
+// ...
+
+JwtIssuerReactiveAuthenticationManagerResolver authenticationManagerResolver =
+        new JwtIssuerReactiveAuthenticationManagerResolver(authenticationManagers::get);
+
+http
+    .authorizeExchange(exchanges -> exchanges
+        .anyExchange().authenticated()
+    )
+    .oauth2ResourceServer(oauth2 -> oauth2
+        .authenticationManagerResolver(authenticationManagerResolver)
+    );
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+private fun addManager(
+        authenticationManagers: MutableMap<String, ReactiveAuthenticationManager>, issuer: String): Mono<JwtReactiveAuthenticationManager> {
+    return Mono.fromCallable { ReactiveJwtDecoders.fromIssuerLocation(issuer) }
+            .subscribeOn(Schedulers.boundedElastic())
+            .map { jwtDecoder: ReactiveJwtDecoder -> JwtReactiveAuthenticationManager(jwtDecoder) }
+            .doOnNext { authenticationManager: JwtReactiveAuthenticationManager -> authenticationManagers[issuer] = authenticationManager }
+}
+
+// ...
+
+var customAuthenticationManagerResolver = JwtIssuerReactiveAuthenticationManagerResolver(authenticationManagers::get)
+return http {
+    authorizeExchange {
+        authorize(anyExchange, authenticated)
+    }
+    oauth2ResourceServer {
+        authenticationManagerResolver = customAuthenticationManagerResolver
+    }
+}
+----
+======
+
+在此场景中，你通过传入一个根据签发者获取 `ReactiveAuthenticationManager` 的策略来构造 `JwtIssuerReactiveAuthenticationManagerResolver`。这种方法允许我们在运行时向仓库（如上述代码中的 `Map`）添加或移除元素。
+
+[NOTE]
+====
+直接接受任意签发者并据此创建 `ReactiveAuthenticationManager` 是不安全的。  
+签发者必须来自可信来源（例如预定义的允许列表），才能被信任和使用。
+====

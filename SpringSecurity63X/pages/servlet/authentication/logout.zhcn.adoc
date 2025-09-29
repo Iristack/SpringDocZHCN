@@ -1,0 +1,441 @@
+[[jc-logout]]
+= 处理登出
+
+在一个允许最终用户 xref:servlet/authentication/index.adoc[登录] 的应用程序中，他们也应该能够登出。
+
+默认情况下，Spring Security 会创建一个 `/logout` 端点，因此无需额外代码。
+
+本节的其余部分涵盖了一些需要考虑的使用场景：
+
+* 我想 <<logout-java-configuration,了解登出的架构>>
+* 我想 <<customizing-logout-uris,自定义登出或登出成功后的 URI>>
+* 我想知道何时需要 <<permit-logout-endpoints,显式允许 `/logout` 端点>>
+* 我想在用户登出时 <<clear-all-site-data,清除 cookie、存储和/或缓存>>
+* 我正在使用 OAuth 2.0，并希望 xref:servlet/oauth2/login/advanced.adoc#oauth2login-advanced-oidc-logout[与授权服务器协调登出]
+* 我正在使用 SAML 2.0，并希望 xref:servlet/saml2/logout.adoc[与身份提供者协调登出]
+* 我正在使用 CAS，并希望 xref:servlet/authentication/cas.adoc#cas-singlelogout[与身份提供者协调登出]
+
+[[logout-architecture]]
+[[logout-java-configuration]]
+== 理解登出的架构
+
+当你包含 {spring-boot-reference-url}using.html#using.build-systems.starters[`spring-boot-starter-security` 依赖项] 或使用 `@EnableWebSecurity` 注解时，Spring Security 将添加其登出支持，默认响应 `GET /logout` 和 `POST /logout`。
+
+如果你请求 `GET /logout`，Spring Security 将显示一个登出确认页面。  
+除了为用户提供有价值的双重检查机制外，它还提供了一种简单的方法，将所需的 xref:servlet/exploits/csrf.adoc[CSRF token] 发送给 `POST /logout`。
+
+请注意，如果在配置中禁用了 xref:servlet/exploits/csrf.adoc[CSRF 保护]，则不会向用户显示登出确认页面，而是直接执行登出操作。
+
+[TIP]
+你的应用程序不需要使用 `GET /logout` 来执行登出操作。  
+只要请求中包含所需的 xref:servlet/exploits/csrf.adoc[CSRF token]，你的应用就可以直接 `POST /logout` 来触发登出。
+
+如果请求 `POST /logout`，它将通过一系列 {security-api-url}org/springframework/security/web/authentication/logout/LogoutHandler.html[``LogoutHandler``] 执行以下默认操作：
+
+- 使 HTTP 会话失效 ({security-api-url}org/springframework/security/web/authentication/logout/SecurityContextLogoutHandler.html[`SecurityContextLogoutHandler`])
+- 清除 xref:servlet/authentication/session-management.adoc#use-securitycontextholderstrategy[`SecurityContextHolderStrategy`] ({security-api-url}org/springframework/security/web/authentication/logout/SecurityContextLogoutHandler.html[`SecurityContextLogoutHandler`])
+- 清除 xref:servlet/authentication/persistence.adoc#securitycontextrepository[`SecurityContextRepository`] ({security-api-url}org/springframework/security/web/authentication/logout/SecurityContextLogoutHandler.html[`SecurityContextLogoutHandler`])
+- 清理任何 xref:servlet/authentication/rememberme.adoc[“记住我”认证] (`TokenRememberMeServices` / `PersistentTokenRememberMeServices`)
+- 清除任何保存的 xref:servlet/exploits/csrf.adoc[CSRF token] ({security-api-url}org/springframework/security/web/csrf/CsrfLogoutHandler.html[`CsrfLogoutHandler`])
+- xref:servlet/authentication/events.adoc[触发] `LogoutSuccessEvent` ({security-api-url}org/springframework/security/web/authentication/logout/LogoutSuccessEventPublishingLogoutHandler.html[`LogoutSuccessEventPublishingLogoutHandler`])
+
+完成后，它将调用其默认的 {security-api-url}org/springframework/security/web/authentication/logout/LogoutSuccessHandler.html[`LogoutSuccessHandler`]，重定向到 `/login?logout`。
+
+[[customizing-logout-uris]]
+== 自定义登出 URI
+
+由于 `LogoutFilter` 在 xref:servlet/architecture.adoc#servlet-filterchain-figure[过滤器链] 中位于 xref:servlet/authorization/authorize-http-requests.adoc[`AuthorizationFilter`] 之前，默认情况下通常不需要显式允许 `/logout` 端点。  
+因此，只有你自己创建的自定义登出端点才通常需要配置 `permitAll` 才能访问。
+
+例如，如果你想更改 Spring Security 匹配的 URI，可以在 `logout` DSL 中这样设置：
+
+.自定义登出 URI
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .logout((logout) -> logout.logoutUrl("/my/logout/uri"))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    logout {
+        logoutUrl = "/my/logout/uri"
+    }
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<logout logout-url="/my/logout/uri"/>
+----
+======
+
+因为这只是调整了 `LogoutFilter`，所以不需要进行授权更改。
+
+[[permit-logout-endpoints]]
+然而，如果你自己搭建了一个登出成功端点（或者在极少数情况下，<<creating-custom-logout-endpoint,自己的登出端点>>），比如使用 {spring-framework-reference-url}web.html#spring-web[Spring MVC]，那么你需要在 Spring Security 中允许该端点。  
+这是因为 Spring MVC 在 Spring Security 之后处理你的请求。
+
+你可以使用 `authorizeHttpRequests` 或 `<intercept-url>` 实现这一点，如下所示：
+
+.自定义登出端点
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .authorizeHttpRequests((authorize) -> authorize
+        .requestMatchers("/my/success/endpoint").permitAll()
+        // ...
+    )
+    .logout((logout) -> logout.logoutSuccessUrl("/my/success/endpoint"))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    authorizeHttpRequests {
+        authorize("/my/success/endpoint", permitAll)
+    }
+    logout {
+        logoutSuccessUrl = "/my/success/endpoint"
+    }
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<http>
+    <filter-url pattern="/my/success/endpoint" access="permitAll"/>
+    <logout logout-success-url="/my/success/endpoint"/>
+</http>
+----
+======
+
+在此示例中，你告诉 `LogoutFilter` 在完成时重定向到 `/my/success/endpoint`，并且你在 xref:servlet/authorization/authorize-http-requests.adoc[`AuthorizationFilter`] 中显式允许了 `/my/success/endpoint` 端点。
+
+不过，指定两次可能会很繁琐。  
+如果你使用的是 Java 配置，可以改为在 `logout` DSL 中设置 `permitAll` 属性，如下所示：
+
+.允许自定义登出端点
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .authorizeHttpRequests((authorize) -> authorize
+        // ...
+    )
+    .logout((logout) -> logout
+        .logoutSuccessUrl("/my/success/endpoint")
+        .permitAll()
+    )
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http
+    authorizeHttpRequests {
+        // ...
+    }
+    logout {
+        logoutSuccessUrl = "/my/success/endpoint"
+        permitAll = true
+    }
+----
+======
+
+这将自动将所有登出 URI 添加到允许列表中。
+
+[[add-logout-handler]]
+== 添加清理操作
+
+如果你使用 Java 配置，可以通过调用 `logout` DSL 中的 `addLogoutHandler` 方法来添加自己的清理操作，如下所示：
+
+.自定义登出处理器
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+CookieClearingLogoutHandler cookies = new CookieClearingLogoutHandler("our-custom-cookie");
+http
+    .logout((logout) -> logout.addLogoutHandler(cookies))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    logout {
+        addLogoutHandler(CookieClearingLogoutHandler("our-custom-cookie"))
+    }
+}
+----
+======
+
+[NOTE]
+由于 {security-api-url}org/springframework/security/web/authentication/logout/LogoutHandler.html[``LogoutHandler``] 用于清理目的，它们不应抛出异常。
+
+[TIP]
+由于 {security-api-url}org/springframework/security/web/authentication/logout/LogoutHandler.html[`LogoutHandler`] 是一个函数式接口，你可以将其作为 lambda 提供自定义实现。
+
+某些登出处理器配置非常常见，因此可以直接在 `logout` DSL 和 `<logout>` 元素中暴露出来。  
+例如配置会话失效，以及应删除哪些其他 cookie。
+
+例如，你可以像上面那样配置 {security-api-url}org/springframework/security/web/authentication/logout/CookieClearingLogoutHandler.html[`CookieClearingLogoutHandler`]。
+
+[[delete-cookies]]
+或者你可以设置相应的配置值，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .logout((logout) -> logout.deleteCookies("our-custom-cookie"))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    logout {
+        deleteCookies = "our-custom-cookie"
+    }
+}
+----
+
+Xml::
++
+[source,kotlin,role="secondary"]
+----
+<http>
+    <logout delete-cookies="our-custom-cookie"/>
+</http>
+----
+======
+
+[NOTE]
+指定 `JSESSIONID` cookie 并非必要，因为 {security-api-url}/org/springframework/security/web/authentication/logout/SecurityContextLogoutHandler.html[`SecurityContextLogoutHandler`] 会通过使会话失效而自动移除它。
+
+[[clear-all-site-data]]
+=== 使用 Clear-Site-Data 登出用户
+
+`Clear-Site-Data` HTTP 响应头是浏览器支持的一种指令，用于清除属于当前网站的 cookie、存储和缓存。  
+这是一种方便且安全的方式，确保包括会话 cookie 在内的所有内容在登出时都被清理。
+
+你可以配置 Spring Security 在登出时写入 `Clear-Site-Data` 响应头，如下所示：
+
+.使用 Clear-Site-Data
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+HeaderWriterLogoutHandler clearSiteData = new HeaderWriterLogoutHandler(new ClearSiteDataHeaderWriter(Directives.ALL));
+http
+    .logout((logout) -> logout.addLogoutHandler(clearSiteData))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val clearSiteData = HeaderWriterLogoutHandler(ClearSiteDataHeaderWriter(Directives.ALL))
+http {
+    logout {
+        addLogoutHandler(clearSiteData)
+    }
+}
+----
+======
+
+你可以向 `ClearSiteDataHeaderWriter` 构造函数传递想要清除的内容列表。
+
+上述配置清除了所有站点数据，但你也可以配置为仅清除 cookie，如下所示：
+
+.使用 Clear-Site-Data 清除 cookie
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+HeaderWriterLogoutHandler clearSiteData = new HeaderWriterLogoutHandler(new ClearSiteDataHeaderWriter(Directive.COOKIES));
+http
+    .logout((logout) -> logout.addLogoutHandler(clearSiteData))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val clearSiteData = HeaderWriterLogoutHandler(ClearSiteDataHeaderWriter(Directive.COOKIES))
+http {
+    logout {
+        addLogoutHandler(clearSiteData)
+    }
+}
+----
+======
+
+[[customizing-logout-success]]
+== 自定义登出成功行为
+
+虽然大多数情况下使用 `logoutSuccessUrl` 已经足够，但在登出完成后你可能需要执行不同于重定向的操作。  
+{security-api-url}org/springframework/security/web/authentication/logout/LogoutSuccessHandler.html[`LogoutSuccessHandler`] 是 Spring Security 中用于自定义登出成功行为的组件。
+
+例如，你可能不想重定向，而是只想返回一个状态码。在这种情况下，你可以提供一个成功处理器实例，如下所示：
+
+.使用 HttpStatusReturningLogoutSuccessHandler 返回状态码
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .logout((logout) -> logout.logoutSuccessHandler(new HttpStatusReturningLogoutSuccessHandler()))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    logout {
+        logoutSuccessHandler = HttpStatusReturningLogoutSuccessHandler()
+    }
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<bean name="mySuccessHandlerBean" class="org.springframework.security.web.authentication.logout.HttpStatusReturningLogoutSuccessHandler"/>
+<http>
+    <logout success-handler-ref="mySuccessHandlerBean"/>
+</http>
+----
+======
+
+[TIP]
+由于 {security-api-url}org/springframework/security/web/authentication/logout/LogoutSuccessHandler.html[`LogoutSuccessHandler`] 是一个函数式接口，你可以将其作为 lambda 提供自定义实现。
+
+[[creating-custom-logout-endpoint]]
+== 创建自定义登出端点
+
+强烈建议你使用提供的 `logout` DSL 来配置登出。原因之一是很容易忘记调用必要的 Spring Security 组件，从而无法保证正确且完整的登出。
+
+事实上，<<add-logout-handler,注册自定义 `LogoutHandler`>> 往往比创建一个用于登出的 {spring-framework-reference-url}web.html#spring-web[Spring MVC] 端点更简单。
+
+尽管如此，如果你确实需要一个自定义登出端点，比如下面这个：
+
+.自定义登出端点
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@PostMapping("/my/logout")
+public String performLogout() {
+    // .. 执行登出
+    return "redirect:/home";
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@PostMapping("/my/logout")
+fun performLogout(): String {
+    // .. 执行登出
+    return "redirect:/home"
+}
+----
+======
+
+那么你需要让该端点调用 Spring Security 的 {security-api-url}/org/springframework/security/web/authentication/logout/SecurityContextLogoutHandler.html[`SecurityContextLogoutHandler`]，以确保安全且完整的登出。  
+至少需要如下代码：
+
+.自定义登出端点
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+SecurityContextLogoutHandler logoutHandler = new SecurityContextLogoutHandler();
+
+@PostMapping("/my/logout")
+public String performLogout(Authentication authentication, HttpServletRequest request, HttpServletResponse response) {
+    // .. 执行登出
+    this.logoutHandler.logout(request, response, authentication);
+    return "redirect:/home";
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val logoutHandler = SecurityContextLogoutHandler()
+
+@PostMapping("/my/logout")
+fun performLogout(val authentication: Authentication, val request: HttpServletRequest, val response: HttpServletResponse): String {
+    // .. 执行登出
+    this.logoutHandler.logout(request, response, authentication)
+    return "redirect:/home"
+}
+----
+======
+
+这样可以按需清除 {security-api-url}/org/springframework/security/core/context/SecurityContextHolderStrategy.html[`SecurityContextHolderStrategy`] 和 {security-api-url}/org/springframework/security/web/context/SecurityContextRepository.html[`SecurityContextRepository`]。
+
+此外，你还需要 <<permit-logout-endpoints,显式允许该端点>。
+
+[WARNING]
+如果不调用 {security-api-url}/org/springframework/security/web/authentication/logout/SecurityContextLogoutHandler.html[`SecurityContextLogoutHandler`]，xref:servlet/authentication/architecture.adoc#servlet-authentication-securitycontext[`SecurityContext`] 可能在后续请求中仍然可用，这意味着用户实际上并未登出。
+
+[[testing-logout]]
+== 测试登出
+一旦你配置好了登出功能，就可以使用 xref:servlet/test/mockmvc/logout.adoc[Spring Security 的 MockMvc 支持] 来测试它。
+
+[[jc-logout-references]]
+== 更多相关的登出参考资料
+
+- xref:servlet/test/mockmvc/logout.adoc#test-logout[测试登出]
+- xref:servlet/integrations/servlet-api.adoc#servletapi-logout[HttpServletRequest.logout()]
+- xref:servlet/authentication/rememberme.adoc#remember-me-impls[“记住我”接口和实现]
+- xref:servlet/exploits/csrf.adoc#csrf-considerations-logout[登出]（CSRF 注意事项部分）
+- xref:servlet/authentication/cas.adoc#cas-singlelogout[单点登出]（CAS 协议）
+- Spring Security XML 命名空间部分中的 xref:servlet/appendix/namespace/http.adoc#nsa-logout[logout 元素] 文档

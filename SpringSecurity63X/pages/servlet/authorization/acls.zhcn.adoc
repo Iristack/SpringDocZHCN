@@ -1,0 +1,163 @@
+[[domain-acls]]
+= 领域对象安全（ACLs）
+
+本节介绍 Spring Security 如何通过访问控制列表（Access Control Lists, ACLs）提供领域对象级别的安全性。
+
+[[domain-acls-overview]]
+复杂的应用程序通常需要定义超出 Web 请求或方法调用级别之外的访问权限。  
+授权决策应包含三个要素：谁（`Authentication`）、在何处（`MethodInvocation`）、对什么（`SomeDomainObject`）。换句话说，授权判断还需考虑被方法调用所操作的具体领域对象实例。
+
+假设你正在为一家宠物诊所设计一个基于 Spring 的应用程序。你的应用中有两类主要用户：宠物诊所的员工和客户。员工应当可以访问所有数据，而客户只能查看自己的客户记录。为了使场景更复杂一些，客户还可以允许其他用户查看他们的信息，例如他们的“幼犬学前班”导师或当地“马术俱乐部”的主席。
+
+当你使用 Spring Security 作为安全基础时，有以下几种可能的实现方式：
+
+* 在业务方法中强制执行安全检查。你可以检查 `Customer` 领域对象实例中的某个集合，以确定哪些用户有权访问，并通过 `SecurityContextHolder.getContext().getAuthentication()` 获取当前的 `Authentication` 对象。
+* 编写一个 `AccessDecisionVoter`，从 `Authentication` 对象中的 `GrantedAuthority[]` 实例来实施安全控制。这意味着你的 `AuthenticationManager` 必须将自定义的 `GrantedAuthority[]` 对象填充到 `Authentication` 中，每个对象代表该主体可访问的一个 `Customer` 实例。
+* 编写一个 `AccessDecisionVoter` 并直接打开目标 `Customer` 领域对象进行检查。这要求 voter 能访问 DAO 来获取 `Customer` 对象，然后读取其授权用户列表并做出相应决策。
+
+上述每种方法都是合理的，但各有缺点：
+
+- 第一种方式将授权逻辑耦合到了业务代码中，导致单元测试困难，且难以在其他地方复用 `Customer` 的授权逻辑。
+- 第二种方式依赖于从 `Authentication` 中获取大量 `GrantedAuthority[]`，当用户可访问数千个 `Customer` 对象时（比如一位服务于大型马术俱乐部的受欢迎兽医），会消耗过多内存并在认证构建阶段耗费大量时间，不具备可扩展性。
+- 第三种方式虽然实现了关注点分离且不会滥用资源，但仍存在效率问题：`AccessDecisionVoter` 和后续业务方法都需要调用一次 DAO 来加载同一个 `Customer` 对象，造成每次方法调用两次数据库访问，显然不理想。
+
+此外，无论采用哪种方式，你都必须从零开始编写自己的访问控制列表（ACL）持久化机制和相关业务逻辑。
+
+幸运的是，还有另一种更好的替代方案，我们将在后文讨论。
+
+[[domain-acls-key-concepts]]
+== 核心概念
+Spring Security 的 ACL 功能模块打包在 `spring-security-acl-xxx.jar` 文件中。要使用 Spring Security 的领域对象实例安全功能，你需要将此 JAR 添加到类路径中。
+
+Spring Security 的领域对象实例安全机制围绕“访问控制列表”（ACL）这一核心概念展开。系统中的每一个领域对象实例都有其专属的 ACL，ACL 记录了谁可以或不可以操作该对象的详细信息。基于这一理念，Spring Security 为应用程序提供了三大主要 ACL 相关能力：
+
+* 高效地检索所有领域对象的 ACL 条目，并支持修改这些 ACL；
+* 在方法调用前确保指定主体被允许操作对应对象；
+* 在方法调用后确保指定主体被允许操作返回的对象或结果。
+
+正如第一条所述，Spring Security ACL 模块的主要优势之一是能够高效地检索 ACL。这种 ACL 存储库能力至关重要，因为系统中每个领域对象实例可能包含多个访问控制条目（ACE），并且每个 ACL 可能以树状结构继承自其他 ACL（Spring Security 支持这一点，且实际中非常常见）。为此，Spring Security 的 ACL 模块经过精心设计，具备以下特性：
+
+- 高性能的 ACL 检索；
+- 可插拔的缓存机制；
+- 最小化死锁的数据库更新策略；
+- 不依赖 ORM 框架（直接使用 JDBC）；
+- 良好的封装性和透明的数据库同步更新。
+
+由于数据库在 ACL 模块中处于核心地位，我们需要了解其实现中默认使用的四张主要数据表。这些表按典型部署中的数据量从小到大排列，行数最多的表列在最后：
+
+[[acl_tables]]
+* `ACL_SID`：用于唯一标识系统中的任意主体（principal）或权限（authority）（“SID” 表示 “Security IDentity”，即安全身份）。该表仅包含三列：ID、SID 的文本表示形式，以及一个标志位，指示该文本是指向用户名还是 `GrantedAuthority`。因此，每个唯一的 principal 或 `GrantedAuthority` 对应一行记录。在权限授予上下文中，SID 通常被称为“接收者”（recipient）。
+
+* `ACL_CLASS`：用于唯一标识系统中的任意领域对象类。该表仅包含两列：ID 和 Java 类名。因此，每个希望存储 ACL 权限的 Class 对应一行记录。
+
+* `ACL_OBJECT_IDENTITY`：存储系统中每个唯一领域对象实例的信息。字段包括 ID、指向 `ACL_CLASS` 表的外键、用于标识具体对象实例的唯一标识符、父级 ACL 的引用、指向 `ACL_SID` 表的外键（表示该对象的所有者），以及是否允许 ACE 继承自父级 ACL 的布尔值。每个需要存储 ACL 权限的领域对象实例对应一行记录。
+
+* `ACL_ENTRY`：存储分配给每个接收者的具体权限。字段包括指向 `ACL_OBJECT_IDENTITY` 的外键、接收者（即指向 `ACL_SID` 的外键）、是否启用审计、以及表示实际授予权限或拒绝权限的整型位掩码。每个接收者对某个领域对象拥有的每一项权限都对应一行记录。
+
+如上所述，ACL 系统使用整数位掩码（bit masking）来表示权限。不过你无需深入了解位运算即可使用该系统。简而言之，我们有 32 个可用的位（bit），每一位代表一种权限。默认情况下，这些权限如下：
+
+| 位 | 权限       |
+|----|------------|
+| 0  | 读取 (read)     |
+| 1  | 写入 (write)    |
+| 2  | 创建 (create)   |
+| 3  | 删除 (delete)   |
+| 4  | 管理 (administer) |
+
+如果你需要更多权限，可以自定义 `Permission` 实现类，其余 ACL 框架组件无需感知你的扩展即可正常工作。
+
+请注意：系统中领域对象的数量与我们使用整数位掩码无关。尽管只有 32 个权限位可用，但你可以拥有数十亿个领域对象实例（意味着 `ACL_OBJECT_IDENTITY` 和 `ACL_ENTRY` 表中会有数十亿行记录）。我们强调这一点是因为有些人误以为每个领域对象都需要一个独立的 bit，这是错误的理解。
+
+现在我们已经概述了 ACL 系统的功能及其表结构，接下来介绍关键接口：
+
+* `Acl`：每个领域对象有且仅有一个 `Acl` 对象，它内部持有多个 `AccessControlEntry`（ACE），并知道该 ACL 的所有者是谁。`Acl` 并不直接引用领域对象本身，而是引用一个 `ObjectIdentity`。该对象对应数据库中的 `ACL_OBJECT_IDENTITY` 表。
+
+* `AccessControlEntry`（ACE）：一个 `Acl` 包含多个 ACE，它们是框架中的基本权限单元。每个 ACE 关联一个特定的三元组：`Permission`、`Sid` 和 `Acl`。ACE 可以是“允许”或“拒绝”类型，并可配置审计行为。ACE 存储在 `ACL_ENTRY` 表中。
+
+* `Permission`：表示一个不可变的位掩码，提供便捷的方法用于位运算和信息输出。前述的基本权限（第 0 到第 4 位）定义在 `BasePermission` 类中。
+
+* `Sid`：ACL 模块需要引用 principal 和 `GrantedAuthority[]` 实例，`Sid` 接口提供了这一层抽象（“SID” 是 “Security IDentity” 的缩写）。常用实现包括 `PrincipalSid`（表示 `Authentication` 中的主体）和 `GrantedAuthoritySid`。安全身份信息存储在 `ACL_SID` 表中。
+
+* `ObjectIdentity`：每个领域对象在 ACL 模块内部由一个 `ObjectIdentity` 表示。默认实现为 `ObjectIdentityImpl`。
+
+* `AclService`：根据给定的 `ObjectIdentity` 获取对应的 `Acl`。内置实现 `JdbcAclService` 将查询操作委托给 `LookupStrategy`。后者提供高度优化的 ACL 查询策略，支持批量检索（`BasicLookupStrategy`），也支持使用物化视图、层次化查询等非 ANSI SQL 特性的自定义高性能实现。
+
+* `MutableAclService`：允许将修改后的 `Acl` 持久化。该接口的使用是可选的。
+
+注意：我们的 `AclService` 及相关数据库类均使用 ANSI SQL，因此可在主流数据库上运行。目前该系统已在 HSQL、PostgreSQL、Microsoft SQL Server 和 Oracle 上成功测试。
+
+Spring Security 提供了两个演示 ACL 模块的示例项目：
+- {gh-samples-url}/servlet/xml/java/contacts[联系人管理示例]
+- {gh-samples-url}/servlet/xml/java/dms[文档管理系统（DMS）示例]
+
+建议参考这两个示例以加深理解。
+
+[[domain-acls-getting-started]]
+== 快速入门
+要开始使用 Spring Security 的 ACL 功能，首先需要将 ACL 数据存储在某处，这要求你在 Spring 中配置一个 `DataSource`。然后将该 `DataSource` 注入到 `JdbcMutableAclService` 和 `BasicLookupStrategy` 实例中。前者提供 ACL 修改功能，后者提供高性能的 ACL 查询能力。具体配置示例可参考 Spring Security 自带的 {gh-samples-url}[示例项目]。此外，还需要在数据库中创建前文提到的 <<acl_tables,四个 ACL 专用表>><<acl_tables>>（详见示例项目中的 SQL 脚本）。
+
+完成数据库模式创建并实例化 `JdbcMutableAclService` 后，需确保你的领域模型能与 Spring Security ACL 模块协同工作。大多数情况下，`ObjectIdentityImpl` 已足够使用，因为它支持多种使用方式。如果你的领域对象包含一个 `public Serializable getId()` 方法，且返回类型为 `long` 或兼容类型（如 `int`），那么你可能无需额外处理 `ObjectIdentity` 相关问题。ACL 模块的许多部分都依赖 `long` 类型的 ID。若你不使用 `long`（或 `int`、`byte` 等），则可能需要重写多个类。**Spring Security 的 ACL 模块不计划支持非 long 类型的 ID**，因为 long 类型已兼容所有数据库序列，是最常见的主键类型，且长度足以满足绝大多数应用场景。
+
+以下代码片段展示了如何创建或修改一个 `Acl`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+// 准备要在访问控制条目（ACE）中使用的数据
+ObjectIdentity oi = new ObjectIdentityImpl(Foo.class, new Long(44));
+Sid sid = new PrincipalSid("Samantha");
+Permission p = BasePermission.ADMINISTRATION;
+
+// 创建或更新相应的 ACL
+MutableAcl acl = null;
+try {
+    acl = (MutableAcl) aclService.readAclById(oi);
+} catch (NotFoundException nfe) {
+    acl = aclService.createAcl(oi);
+}
+
+// 通过添加 ACE 授予权限
+acl.insertAce(acl.getEntries().length, p, sid, true);
+aclService.updateAcl(acl);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val oi: ObjectIdentity = ObjectIdentityImpl(Foo::class.java, 44)
+val sid: Sid = PrincipalSid("Samantha")
+val p: Permission = BasePermission.ADMINISTRATION
+
+// 创建或更新相应的 ACL
+var acl: MutableAcl? = null
+acl = try {
+    aclService.readAclById(oi) as MutableAcl
+} catch (nfe: NotFoundException) {
+    aclService.createAcl(oi)
+}
+
+// 通过添加 ACE 授予权限
+acl!!.insertAce(acl.entries.size, p, sid, true)
+aclService.updateAcl(acl)
+----
+======
+
+在上面的例子中，我们获取了 ID 为 44 的 `Foo` 领域对象对应的 ACL，并添加了一条 ACE，使得名为 "Samantha" 的用户可以“管理”该对象。
+
+代码逻辑较为直观，但需注意 `insertAce` 方法的参数含义：
+
+- 第一个参数指定新 ACE 插入的位置。示例中将其插入到最后（`acl.getEntries().length`）。
+- 最后一个参数是布尔值，表示该 ACE 是“允许”（`true`）还是“拒绝”（`false`）。大多数情况设为 `true`；若设为 `false`，则表示明确阻止该权限。
+
+**Spring Security 不会自动集成 DAO 或 Repository 操作来创建、更新或删除 ACL**。你必须为每个领域对象手动编写类似上述的代码。建议在服务层使用 AOP（面向切面编程）来自动生成或同步 ACL 信息，这种方式已被证明非常有效。
+
+一旦你通过上述技术将 ACL 数据存储到数据库中，下一步就是在授权决策中实际使用这些信息。你有多种选择：
+
+- 编写自定义的 `AccessDecisionVoter` 或 `AfterInvocationProvider`，分别在方法调用前或调用后触发，利用 `AclService` 获取 ACL 并调用 `Acl.isGranted(Permission[] permissions, Sid[] sids, boolean administrativeMode)` 判断是否授予权限。
+- 使用 Spring Security 提供的现成类：`AclEntryVoter`、`AclEntryAfterInvocationProvider` 或 `AclEntryAfterInvocationCollectionFilteringProvider`。这些类提供了声明式的方式来评估运行时的 ACL 信息，无需编写额外代码。
+
+有关这些类的具体用法，请参考 https://github.com/spring-projects/spring-security-samples[Spring Security 示例应用]。

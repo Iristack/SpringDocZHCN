@@ -1,0 +1,14 @@
+[[webflux-oauth2-resource-server]]
+= OAuth 2.0 资源服务器
+
+Spring Security 支持通过提供两种形式的 OAuth 2.0 https://tools.ietf.org/html/rfc6750.html[Bearer Token] 来保护端点：
+
+* https://tools.ietf.org/html/rfc7519[JWT]
+* 不透明令牌（Opaque Tokens）
+
+当应用程序将其权限管理委托给一个 https://tools.ietf.org/html/rfc6749[授权服务器]（例如 Okta 或 Ping Identity）时，这种机制非常有用。资源服务器可以访问该授权服务器以对请求进行鉴权。
+
+[NOTE]
+====
+在 {gh-samples-url}[Spring Security 仓库]中，提供了针对 {gh-samples-url}/reactive/webflux/java/oauth2/resource-server[JWT] 的完整可运行示例。
+====

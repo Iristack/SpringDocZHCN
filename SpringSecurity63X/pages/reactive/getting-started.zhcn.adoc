@@ -1,0 +1,84 @@
+[[getting-started]]
+= 开始使用 WebFlux 应用程序
+
+本节介绍在响应式应用程序中如何结合 Spring Boot 使用 Spring Security 的最基本配置。
+
+[NOTE]
+====
+完整的应用程序可以在我们的示例仓库中找到：{gh-samples-url}/reactive/webflux/java/hello-security。
+为方便起见，你可以通过点击 https://start.spring.io/starter.zip?type=maven-project&language=java&packaging=jar&jvmVersion=1.8&groupId=example&artifactId=hello-security&name=hello-security&description=Hello%20Security&packageName=example.hello-security&dependencies=webflux,security 此处 下载一个最小化的响应式 Spring Boot + Spring Security 应用程序。
+====
+
+[[dependencies]]
+== 更新依赖项
+
+你只需添加 `spring-boot-starter-security` 依赖即可将 Spring Security 集成到你的 Spring Boot 项目中。
+
+[tabs]
+======
+Maven::
++
+[source,xml,role="primary"]
+----
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-security</artifactId>
+</dependency>
+----
+
+Gradle::
++
+[source,groovy,role="secondary"]
+----
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+----
+======
+
+
+[[servlet-hello-starting]]
+== 启动 Hello Spring Security Boot 应用
+
+你现在可以通过使用 Maven 插件的 `run` 目标来 https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#using-boot-running-with-the-maven-plugin[运行 Spring Boot 应用程序]。  
+以下示例展示了如何操作（以及运行后输出的开头部分）：
+
+.运行 Spring Boot 应用程序
+[tabs]
+======
+Maven::
++
+[source,bash,role="primary"]
+----
+$ ./mvnw spring-boot:run
+...
+INFO 23689 --- [  restartedMain] .s.s.UserDetailsServiceAutoConfiguration :
+
+Using generated security password: 8e557245-73e2-4286-969a-ff57fe326336
+
+...
+----
+
+Gradle::
++
+[source,bash,role="secondary"]
+----
+$ ./gradlew bootRun
+...
+INFO 23689 --- [  restartedMain] .s.s.UserDetailsServiceAutoConfiguration :
+
+Using generated security password: 8e557245-73e2-4286-969a-ff57fe326336
+
+...
+----
+======
+
+[[authenticating]]
+== 认证用户
+
+现在可以访问 http://localhost:8080/ ，浏览器会被重定向到默认的登录页面。你可以使用默认用户名 `user` 和控制台日志中生成的随机密码进行登录。登录成功后，浏览器会跳转回最初请求的页面。
+
+要退出登录，可访问 http://localhost:8080/logout 并确认你要注销。
+
+[[auto-configuration]]
+== Spring Boot 自动配置
+
+Spring Boot 会自动集成 Spring Security，并要求所有请求都必须经过身份认证。同时，它还会创建一个用户，默认用户名为 `user`，并生成一个随机密码输出到控制台。该用户可用于表单登录或 HTTP Basic 认证方式的身份验证。

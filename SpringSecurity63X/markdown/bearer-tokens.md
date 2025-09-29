@@ -1,0 +1,320 @@
+# 持有者令牌的解析 {#oauth2resourceserver-bearertoken-resolver}
+
+默认情况下，资源服务器会从 `Authorization` 请求头中查找持有者令牌。
+然而，这可以通过多种方式进行自定义。
+
+## 从自定义请求头读取持有者令牌 {#_从自定义请求头读取持有者令牌}
+
+例如，你可能需要从一个自定义的请求头中读取持有者令牌。
+为此，你可以将一个 `DefaultBearerTokenResolver` 实例注册为
+Bean，或者将其注入到 DSL 配置中，如下示例所示：
+
+:::: example
+::: title
+自定义持有者令牌请求头
+:::
+
+Java
+
+:   ``` java
+    @Bean
+    BearerTokenResolver bearerTokenResolver() {
+        DefaultBearerTokenResolver bearerTokenResolver = new DefaultBearerTokenResolver();
+        bearerTokenResolver.setBearerTokenHeaderName(HttpHeaders.PROXY_AUTHORIZATION);
+        return bearerTokenResolver;
+    }
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    fun bearerTokenResolver(): BearerTokenResolver {
+        val bearerTokenResolver = DefaultBearerTokenResolver()
+        bearerTokenResolver.setBearerTokenHeaderName(HttpHeaders.PROXY_AUTHORIZATION)
+        return bearerTokenResolver
+    }
+    ```
+
+Xml
+
+:   ``` xml
+    <http>
+        <oauth2-resource-server bearer-token-resolver-ref="bearerTokenResolver"/>
+    </http>
+
+    <bean id="bearerTokenResolver"
+            class="org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver">
+        <property name="bearerTokenHeaderName" value="Proxy-Authorization"/>
+    </bean>
+    ```
+::::
+
+在某些场景下，如果提供方使用了自定义请求头和值，你可以改用
+`HeaderBearerTokenResolver`。
+
+## 从表单参数读取持有者令牌 {#_从表单参数读取持有者令牌}
+
+你也可能希望从表单参数中读取令牌，可以通过配置
+`DefaultBearerTokenResolver` 来实现，如下所示：
+
+:::: example
+::: title
+从表单参数获取持有者令牌
+:::
+
+Java
+
+:   ``` java
+    DefaultBearerTokenResolver resolver = new DefaultBearerTokenResolver();
+    resolver.setAllowFormEncodedBodyParameter(true);
+    http
+        .oauth2ResourceServer(oauth2 -> oauth2
+            .bearerTokenResolver(resolver)
+        );
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    val resolver = DefaultBearerTokenResolver()
+    resolver.setAllowFormEncodedBodyParameter(true)
+    http {
+        oauth2ResourceServer {
+            bearerTokenResolver = resolver
+        }
+    }
+    ```
+
+Xml
+
+:   ``` xml
+    <http>
+        <oauth2-resource-server bearer-token-resolver-ref="bearerTokenResolver"/>
+    </http>
+
+    <bean id="bearerTokenResolver"
+            class="org.springframework.security.oauth2.server.resource.web.HeaderBearerTokenResolver">
+        <property name="allowFormEncodedBodyParameter" value="true"/>
+    </bean>
+    ```
+::::
+
+# 持有者令牌的传播 {#_持有者令牌的传播}
+
+现在你的资源服务器已经验证了令牌，你可能希望将该令牌传递给下游服务。
+使用
+`{security-api-url}org/springframework/security/oauth2/server/resource/web/reactive/function/client/ServletBearerExchangeFilterFunction.html[ServletBearerExchangeFilterFunction]`
+可以轻松实现这一点，如下示例所示：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    @Bean
+    public WebClient rest() {
+        return WebClient.builder()
+                .filter(new ServletBearerExchangeFilterFunction())
+                .build();
+    }
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    fun rest(): WebClient {
+        return WebClient.builder()
+                .filter(ServletBearerExchangeFilterFunction())
+                .build()
+    }
+    ```
+:::
+
+当上述 `WebClient` 用于发起请求时，Spring Security 会查找当前的
+`Authentication` 对象，并提取其中任何
+`{security-api-url}org/springframework/security/oauth2/core/AbstractOAuth2Token.html[AbstractOAuth2Token]`
+类型的凭证，然后将其作为持有者令牌放入 `Authorization`
+请求头中进行传播。
+
+例如：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    this.rest.get()
+            .uri("https://other-service.example.com/endpoint")
+            .retrieve()
+            .bodyToMono(String.class)
+            .block()
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    this.rest.get()
+            .uri("https://other-service.example.com/endpoint")
+            .retrieve()
+            .bodyToMono<String>()
+            .block()
+    ```
+:::
+
+以上代码将调用
+`https://other-service.example.com/endpoint`，并自动添加带有持有者令牌的
+`Authorization` 请求头。
+
+如果你需要覆盖此行为，只需手动设置请求头即可，如下所示：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    this.rest.get()
+            .uri("https://other-service.example.com/endpoint")
+            .headers(headers -> headers.setBearerAuth(overridingToken))
+            .retrieve()
+            .bodyToMono(String.class)
+            .block()
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    this.rest.get()
+            .uri("https://other-service.example.com/endpoint")
+            .headers{ headers -> headers.setBearerAuth(overridingToken)}
+            .retrieve()
+            .bodyToMono<String>()
+            .block()
+    ```
+:::
+
+在这种情况下，过滤器将退化处理，直接将请求转发给后续的 Web 过滤器链。
+
+:::: note
+::: title
+:::
+
+与
+{security-api-url}org/springframework/security/oauth2/client/web/reactive/function/client/ServletOAuth2AuthorizedClientExchangeFilterFunction.html\[OAuth
+2.0 客户端过滤器函数\] 不同，该过滤器函数**不会**尝试刷新已过期的令牌。
+如需此类支持，请使用 OAuth 2.0 客户端过滤器。
+::::
+
+## `RestTemplate` 支持 {#_resttemplate_支持}
+
+目前尚无 `ServletBearerExchangeFilterFunction` 的 `RestTemplate`
+等效实现，但你可以通过自定义拦截器非常简单地传播请求中的持有者令牌：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    @Bean
+    RestTemplate rest() {
+        RestTemplate rest = new RestTemplate();
+        rest.getInterceptors().add((request, body, execution) -> {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication == null) {
+                return execution.execute(request, body);
+            }
+
+            if (!(authentication.getCredentials() instanceof AbstractOAuth2Token)) {
+                return execution.execute(request, body);
+            }
+
+            AbstractOAuth2Token token = (AbstractOAuth2Token) authentication.getCredentials();
+            request.getHeaders().setBearerAuth(token.getTokenValue());
+            return execution.execute(request, body);
+        });
+        return rest;
+    }
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    fun rest(): RestTemplate {
+        val rest = RestTemplate()
+        rest.interceptors.add(ClientHttpRequestInterceptor { request, body, execution ->
+            val authentication: Authentication? = SecurityContextHolder.getContext().authentication
+            if (authentication == null) {
+                return execution.execute(request, body)
+            }
+
+            if (authentication.credentials !is AbstractOAuth2Token) {
+                return execution.execute(request, body)
+            }
+
+            request.headers.setBearerAuth(authentication.credentials.tokenValue)
+            execution.execute(request, body)
+        })
+        return rest
+    }
+    ```
+:::
+
+:::: note
+::: title
+:::
+
+与
+{security-api-url}org/springframework/security/oauth2/client/OAuth2AuthorizedClientManager.html\[OAuth
+2.0 已授权客户端管理器\] 不同，此拦截器**不会**尝试刷新已过期的令牌。
+如需此类支持，请参考 [OAuth 2.0
+已授权客户端管理器](servlet/oauth2/client/index.xml#oauth2client)
+创建相应的拦截器。
+::::
+
+# 持有者令牌失败处理 {#oauth2resourceserver-bearertoken-failure}
+
+持有者令牌可能因多种原因而无效，例如令牌已失效或不再处于激活状态。
+
+在这种情况下，资源服务器会抛出 `InvalidBearerTokenException` 异常。
+与其他异常一样，这会导致返回一个 OAuth 2.0 持有者令牌错误响应：
+
+``` http request
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer error_code="invalid_token", error_description="Unsupported algorithm of none", error_uri="https://tools.ietf.org/html/rfc6750#section-3.1"
+```
+
+此外，该异常还会被发布为一个 `AuthenticationFailureBadCredentialsEvent`
+事件，你可以在应用中监听该事件，如下所示：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    @Component
+    public class FailureEvents {
+        @EventListener
+        public void onFailure(AuthenticationFailureBadCredentialsEvent badCredentials) {
+            if (badCredentials.getAuthentication() instanceof BearerTokenAuthenticationToken) {
+                // ... 处理逻辑
+            }
+        }
+    }
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Component
+    class FailureEvents {
+        @EventListener
+        fun onFailure(badCredentials: AuthenticationFailureBadCredentialsEvent) {
+            if (badCredentials.authentication is BearerTokenAuthenticationToken) {
+                // ... 处理逻辑
+            }
+        }
+    }
+    ```
+:::

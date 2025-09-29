@@ -1,0 +1,271 @@
+[[concurrency]]
+= 并发支持
+
+在大多数环境中，安全上下文（Security）是基于每个 `Thread` 存储的。  
+这意味着当在新的 `Thread` 上执行任务时，`SecurityContext` 将会丢失。  
+Spring Security 提供了一些基础设施来帮助用户更轻松地处理这一问题。  
+Spring Security 提供了用于在多线程环境中使用 Spring Security 的底层抽象。  
+事实上，这些抽象正是 Spring Security 实现与 xref:servlet/integrations/servlet-api.adoc#servletapi-start-runnable[AsyncContext.start(Runnable)] 和 xref:servlet/integrations/mvc.adoc#mvc-async[Spring MVC 异步集成] 所依赖的基础。
+
+== DelegatingSecurityContextRunnable
+
+Spring Security 并发支持中最基本的构建块之一就是 `DelegatingSecurityContextRunnable`。  
+它将一个目标 `Runnable` 进行包装，以便使用指定的 `SecurityContext` 初始化 `SecurityContextHolder`，然后调用该目标 `Runnable`，并在完成后清除 `SecurityContextHolder` 中的内容。  
+`DelegatingSecurityContextRunnable` 的实现大致如下：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public void run() {
+    try {
+        SecurityContextHolder.setContext(securityContext);
+        delegate.run();
+    } finally {
+        SecurityContextHolder.clearContext();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+fun run() {
+    try {
+        SecurityContextHolder.setContext(securityContext)
+        delegate.run()
+    } finally {
+        SecurityContextHolder.clearContext()
+    }
+}
+----
+======
+
+虽然非常简单，但它使得从一个线程向另一个线程无缝传递 `SecurityContext` 成为可能。  
+这一点非常重要，因为在大多数情况下，`SecurityContextHolder` 是以线程为单位进行操作的。  
+例如，你可能已经使用了 Spring Security 的 xref:servlet/appendix/namespace/method-security.adoc#nsa-global-method-security[<global-method-security>] 功能来保护你的某个服务。  
+现在你可以轻松地将当前线程的 `SecurityContext` 传递给调用受保护服务的那个线程。  
+以下是一个示例说明如何实现这一点：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+Runnable originalRunnable = new Runnable() {
+    public void run() {
+        // 调用受保护的服务
+    }
+};
+
+SecurityContext context = SecurityContextHolder.getContext();
+DelegatingSecurityContextRunnable wrappedRunnable =
+    new DelegatingSecurityContextRunnable(originalRunnable, context);
+
+new Thread(wrappedRunnable).start();
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val originalRunnable = Runnable {
+    // 调用受保护的服务
+}
+val context: SecurityContext = SecurityContextHolder.getContext()
+val wrappedRunnable = DelegatingSecurityContextRunnable(originalRunnable, context)
+
+Thread(wrappedRunnable).start()
+----
+======
+
+上述代码执行了以下步骤：
+
+* 创建一个 `Runnable`，用于调用我们的受保护服务。注意：这个 `Runnable` 本身并不知道 Spring Security 的存在。
+* 从 `SecurityContextHolder` 获取我们希望使用的 `SecurityContext`，并初始化 `DelegatingSecurityContextRunnable`。
+* 使用 `DelegatingSecurityContextRunnable` 创建一个新的线程。
+* 启动创建的线程。
+
+由于通常我们会使用来自 `SecurityContextHolder` 的 `SecurityContext` 来创建 `DelegatingSecurityContextRunnable`，因此提供了一个便捷的构造函数。下面的代码与上面的效果完全相同：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+Runnable originalRunnable = new Runnable() {
+    public void run() {
+        // 调用受保护的服务
+    }
+};
+
+DelegatingSecurityContextRunnable wrappedRunnable =
+    new DelegatingSecurityContextRunnable(originalRunnable);
+
+new Thread(wrappedRunnable).start();
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val originalRunnable = Runnable {
+    // 调用受保护的服务
+}
+
+val wrappedRunnable = DelegatingSecurityContextRunnable(originalRunnable)
+
+Thread(wrappedRunnable).start()
+----
+======
+
+我们目前的代码使用起来很简单，但仍需要了解我们在使用 Spring Security。  
+在下一节中，我们将探讨如何利用 `DelegatingSecurityContextExecutor` 来隐藏我们正在使用 Spring Security 的事实。
+
+== DelegatingSecurityContextExecutor
+
+在上一节中，我们发现使用 `DelegatingSecurityContextRunnable` 很容易，但并不理想，因为我们必须显式地意识到 Spring Security 的存在。  
+下面我们来看看 `DelegatingSecurityContextExecutor` 如何让我们的代码无需感知 Spring Security。
+
+`DelegatingSecurityContextExecutor` 的设计与 `DelegatingSecurityContextRunnable` 非常相似，不同之处在于它接收的是一个代理 `Executor`，而不是代理 `Runnable`。  
+下面是一个使用示例：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+SecurityContext context = SecurityContextHolder.createEmptyContext();
+Authentication authentication =
+    UsernamePasswordAuthenticationToken.authenticated("user", "doesnotmatter", AuthorityUtils.createAuthorityList("ROLE_USER"));
+context.setAuthentication(authentication);
+
+SimpleAsyncTaskExecutor delegateExecutor =
+    new SimpleAsyncTaskExecutor();
+DelegatingSecurityContextExecutor executor =
+    new DelegatingSecurityContextExecutor(delegateExecutor, context);
+
+Runnable originalRunnable = new Runnable() {
+    public void run() {
+        // 调用受保护的服务
+    }
+};
+
+executor.execute(originalRunnable);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val context: SecurityContext = SecurityContextHolder.createEmptyContext()
+val authentication: Authentication =
+    UsernamePasswordAuthenticationToken("user", "doesnotmatter", AuthorityUtils.createAuthorityList("ROLE_USER"))
+context.authentication = authentication
+
+val delegateExecutor = SimpleAsyncTaskExecutor()
+val executor = DelegatingSecurityContextExecutor(delegateExecutor, context)
+
+val originalRunnable = Runnable {
+    // 调用受保护的服务
+}
+
+executor.execute(originalRunnable)
+----
+======
+
+这段代码执行了以下步骤：
+
+* 创建将用于 `DelegatingSecurityContextExecutor` 的 `SecurityContext`。  
+  注意，在本例中我们手动创建了 `SecurityContext`，但实际上我们可以从任意位置获取它（比如也可以从 `SecurityContextHolder` 获取）。
+* 创建一个 `delegateExecutor`，负责执行提交的 `Runnable` 任务。
+* 最后创建一个 `DelegatingSecurityContextExecutor`，它负责将任何传入 `execute` 方法的 `Runnable` 包装成 `DelegatingSecurityContextRunnable`，然后再将包装后的 `Runnable` 交给 `delegateExecutor` 执行。  
+  在这种情况下，所有提交到 `DelegatingSecurityContextExecutor` 的 `Runnable` 都会使用相同的 `SecurityContext`。  
+  这对于需要以具有高权限的用户身份运行后台任务的场景非常有用。
+
+此时你可能会问：“这怎么就能让我的代码不感知 Spring Security 呢？”  
+答案是：我们不需要在自己的代码中创建 `SecurityContext` 或 `DelegatingSecurityContextExecutor`，而是可以通过依赖注入获得一个已配置好的 `DelegatingSecurityContextExecutor` 实例。
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Autowired
+private Executor executor; // 将被注入为 DelegatingSecurityContextExecutor 的实例
+
+public void submitRunnable() {
+    Runnable originalRunnable = new Runnable() {
+        public void run() {
+            // 调用受保护的服务
+        }
+    };
+    executor.execute(originalRunnable);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Autowired
+lateinit var executor: Executor // 将被注入为 DelegatingSecurityContextExecutor 的实例
+
+fun submitRunnable() {
+    val originalRunnable = Runnable {
+        // 调用受保护的服务
+    }
+    executor.execute(originalRunnable)
+}
+----
+======
+
+现在，我们的代码完全不知道 `SecurityContext` 正在被传播到新线程、`originalRunnable` 正在被执行，以及之后 `SecurityContextHolder` 被清空的过程。  
+在这个例子中，每个线程都使用同一个用户身份运行。  
+如果我们想使用调用 `executor.execute(Runnable)` 时刻的当前登录用户（即 `SecurityContextHolder` 中的用户）来处理 `originalRunnable`，该怎么办？  
+只需在创建 `DelegatingSecurityContextExecutor` 时不传入 `SecurityContext` 参数即可。例如：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+SimpleAsyncTaskExecutor delegateExecutor = new SimpleAsyncTaskExecutor();
+DelegatingSecurityContextExecutor executor =
+    new DelegatingSecurityContextExecutor(delegateExecutor);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val delegateExecutor = SimpleAsyncTaskExecutor()
+val executor = DelegatingSecurityContextExecutor(delegateExecutor)
+----
+======
+
+现在，每当调用 `executor.execute(Runnable)` 时，`DelegatingSecurityContextExecutor` 会首先从 `SecurityContextHolder` 获取当前的 `SecurityContext`，并使用该上下文创建 `DelegatingSecurityContextRunnable`。  
+这意味着我们的 `Runnable` 将以调用 `executor.execute(Runnable)` 时的当前用户身份运行。
+
+== Spring Security 并发相关类
+
+有关更多与 Java 并发 API 及 Spring Task 抽象集成的信息，请参考 Javadoc 文档。  
+一旦理解了前面的代码逻辑，这些类的作用就非常直观了。
+
+* `DelegatingSecurityContextCallable`
+* `DelegatingSecurityContextExecutor`
+* `DelegatingSecurityContextExecutorService`
+* `DelegatingSecurityContextRunnable`
+* `DelegatingSecurityContextScheduledExecutorService`
+* `DelegatingSecurityContextSchedulingTaskExecutor`
+* `DelegatingSecurityContextAsyncTaskExecutor`
+* `DelegatingSecurityContextTaskExecutor`
+* `DelegatingSecurityContextTaskScheduler`

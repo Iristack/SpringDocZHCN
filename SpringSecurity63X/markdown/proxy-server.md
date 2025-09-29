@@ -1,0 +1,19 @@
+使用代理服务器时，确保正确配置应用程序非常重要。
+例如，许多应用程序会使用负载均衡器，将客户端对 `https://example.com/`
+的请求转发到位于 `https://192.168.1:8080` 的应用服务器。
+如果未正确配置，应用服务器将无法感知负载均衡器的存在，并误认为客户端直接请求的是
+`https://192.168.1:8080`。
+
+为了解决此问题，可以使用 [RFC 7239](https://tools.ietf.org/html/rfc7239)
+来明确指示正在使用负载均衡器。
+为了让应用服务器识别这一点，你需要将其配置为支持 `X-Forwarded` 头信息。
+例如，Tomcat 使用
+[RemoteIpValve](https://tomcat.apache.org/tomcat-10.1-doc/api/org/apache/catalina/valves/RemoteIpValve.html)，而
+Jetty 使用
+[ForwardedRequestCustomizer](https://eclipse.dev/jetty/javadoc/jetty-11/org/eclipse/jetty/server/ForwardedRequestCustomizer.html)。
+此外，Spring 4.3 及以上版本的用户可以使用
+[ForwardedHeaderFilter](https://github.com/spring-projects/spring-framework/blob/v4.3.3.RELEASE/spring-web/src/main/java/org/springframework/web/filter/ForwardedHeaderFilter.java)。
+
+Spring Boot 用户可以通过设置 `server.use-forward-headers`
+属性来完成相关配置。 更多详细信息，请参阅 [Spring Boot
+官方文档](https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#howto.webserver.use-behind-a-proxy-server)。

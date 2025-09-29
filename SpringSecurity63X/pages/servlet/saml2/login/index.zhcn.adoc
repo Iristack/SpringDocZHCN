@@ -1,0 +1,21 @@
+[[servlet-saml2login]]
+= SAML 2.0 登录
+:page-section-summary-toc: 1
+
+SAML 2.0 登录功能使应用程序能够充当 SAML 2.0 依赖方（relying party），允许用户通过其在 SAML 2.0 断言方（Asserting Party，如 Okta、ADFS 等）已有的账户 https://wiki.shibboleth.net/confluence/display/CONCEPT/FlowsAndConfig[登录]到该应用程序。
+
+[NOTE]
+====
+SAML 2.0 登录基于 *Web 浏览器单点登录配置文件（Web Browser SSO Profile）* 实现，具体规范见  
+https://www.oasis-open.org/committees/download.php/35389/sstc-saml-profiles-errata-2.0-wd-06-diff.pdf#page=15[SAML 2 Profiles]。
+====
+
+[[servlet-saml2login-spring-security-history]]
+自 2009 年起，对依赖方的支持作为 https://github.com/spring-projects/spring-security-saml/tree/1e013b07a7772defd6a26fcfae187c9bf661ee8f#spring-saml[扩展项目] 存在。  
+2019 年，开始将该功能逐步迁移到 https://github.com/spring-projects/spring-security[Spring Security] 主体项目中。  
+这一过程类似于 2017 年启动的 xref:servlet/oauth2/index.adoc[Spring Security 对 OAuth 2.0 支持] 的整合方式。
+
+[NOTE]
+====
+在 {gh-samples-url}[Spring Security 示例仓库] 中，提供了 {gh-samples-url}/servlet/spring-boot/java/saml2/login[SAML 2.0 登录] 的可用示例。
+====

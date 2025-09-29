@@ -1,0 +1,103 @@
+[[servlet-authorization-authorizationfilter]]
+= 授权 ServerHttpRequest
+
+Spring Security 提供了对传入的 HTTP 请求进行授权的支持。  
+默认情况下，Spring Security 的授权机制要求所有请求都必须经过身份认证。  
+显式配置如下所示：
+
+.所有请求都需要经过认证的用户
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+    http
+        .authorizeExchange(exchanges -> exchanges
+            .anyExchange().authenticated()
+        )
+        .httpBasic(withDefaults())
+        .formLogin(withDefaults());
+    return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun springSecurityFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    return http {
+        authorizeExchange {
+            authorize(anyExchange, authenticated)
+        }
+        formLogin { }
+        httpBasic { }
+    }
+}
+----
+======
+
+
+我们可以通过按优先级顺序添加更多规则来配置 Spring Security 以实现不同的访问控制策略。
+
+.多个授权请求规则
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import static org.springframework.security.authorization.AuthorityReactiveAuthorizationManager.hasRole;
+// ...
+@Bean
+SecurityWebFilterChain springWebFilterChain(ServerHttpSecurity http) {
+	// @formatter:off
+	http
+		// ...
+		.authorizeExchange((authorize) -> authorize                          // <1>
+			.pathMatchers("/resources/**", "/signup", "/about").permitAll()  // <2>
+			.pathMatchers("/admin/**").hasRole("ADMIN")                      // <3>
+			.pathMatchers("/db/**").access((authentication, context) ->      // <4>
+				hasRole("ADMIN").check(authentication, context)
+					.filter(decision -> !decision.isGranted())
+					.switchIfEmpty(hasRole("DBA").check(authentication, context))
+			)
+			.anyExchange().denyAll()                                         // <5>
+		);
+	// @formatter:on
+	return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun springSecurityFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    return http {
+        authorizeExchange {                                                           // <1>
+            authorize(pathMatchers("/resources/**", "/signup", "/about"), permitAll)  // <2>
+            authorize("/admin/**", hasRole("ADMIN"))                                  // <3>
+            authorize("/db/**", { authentication, context ->                          // <4>
+                hasRole("ADMIN").check(authentication, context)
+                    .filter({ decision -> !decision.isGranted() })
+                    .switchIfEmpty(hasRole("DBA").check(authentication, context))
+            })
+            authorize(anyExchange, denyAll)                                           // <5>
+        }
+        // ...
+    }
+}
+----
+======
+
+<1> 指定了多条授权规则。每条规则按照声明的顺序依次进行判断。  
+<2> 指定多个 URL 模式允许任意用户访问。具体来说，如果请求的 URL 以 `/resources/` 开头，或等于 `/signup` 或 `/about`，则任何用户都可以访问。  
+<3> 所有以 `/admin/` 开头的 URL 只允许拥有 `ROLE_ADMIN` 权限的用户访问。注意，由于我们调用的是 `hasRole` 方法，因此不需要手动添加 `"ROLE_"` 前缀。  
+<4> 所有以 `/db/` 开头的 URL 要求用户同时具备 `ROLE_ADMIN` 和 `ROLE_DBA` 角色（通过组合逻辑实现）。这展示了通过自定义 `ReactiveAuthorizationManager` 实现任意授权逻辑的灵活性。为简化示例，此处使用 Lambda 表达式并委托给已有的 `AuthorityReactiveAuthorizationManager.hasRole` 实现。但在实际项目中，建议将此类逻辑封装在独立的类中，实现 `ReactiveAuthorizationManager` 接口。  
+<5> 所有没有被前面规则匹配到的请求都将被拒绝访问。这是一种良好的安全策略，可防止因遗漏更新授权规则而导致的安全漏洞。

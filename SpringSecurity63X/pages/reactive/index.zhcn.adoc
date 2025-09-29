@@ -1,0 +1,4 @@
+= 响应式应用
+
+响应式应用的工作方式与 xref:servlet/index.adoc#servlet-applications[Servlet 应用]大不相同。  
+本节将讨论 Spring Security 如何与响应式应用协同工作，这些应用通常使用 Spring 的 WebFlux 编写。

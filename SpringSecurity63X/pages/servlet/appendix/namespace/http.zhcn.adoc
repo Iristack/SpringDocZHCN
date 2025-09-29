@@ -1,0 +1,1942 @@
+[[nsa-web]]
+= Web 应用安全
+
+[[nsa-debug]]
+== <debug>
+启用 Spring Security 调试基础设施。
+这将提供人类可读的（多行）调试信息，以监控进入安全过滤器的请求。
+这可能包括敏感信息，例如请求参数或头信息，因此只能在开发环境中使用。
+
+[[nsa-http]]
+== <http>
+如果在应用程序中使用 `<http>` 元素，则会创建一个名为 "springSecurityFilterChain" 的 `FilterChainProxy` bean，并且该元素内的配置用于在 `FilterChainProxy` 中构建过滤器链。
+从 Spring Security 3.1 开始，可以使用额外的 `http` 元素来添加额外的过滤器链 footnote:[请参阅 pass:specialcharacters,macros[xref:servlet/configuration/xml-namespace.adoc#ns-web-xml[introductory chapter]] 了解如何设置 `web.xml` 中的映射]。
+某些核心过滤器始终在过滤器链中创建，而其他过滤器则根据存在的属性和子元素添加到堆栈中。
+标准过滤器的位置是固定的（见
+xref:servlet/configuration/xml-namespace.adoc#filter-stack[过滤器顺序表] 在命名空间介绍部分），消除了之前版本框架中的常见错误源，当时用户必须在 `FilterChainProxy` bean 中显式配置过滤器链。
+当然，如果您需要完全控制配置，仍然可以这样做。
+
+所有需要引用 xref:servlet/authentication/architecture.adoc#servlet-authentication-authenticationmanager[`AuthenticationManager`] 的过滤器都会自动注入由命名空间配置创建的内部实例。
+
+每个 `<http>` 命名空间块始终创建一个 `SecurityContextPersistenceFilter`、一个 `ExceptionTranslationFilter` 和一个 `FilterSecurityInterceptor`。
+这些是固定的，不能被替代。
+
+[[nsa-http-attributes]]
+=== <http> 属性
+`<http>` 元素上的属性控制核心过滤器的一些属性。
+
+[[nsa-http-use-authorization-manager]]
+* **use-authorization-manager**
+使用 AuthorizationManager API 而不是 SecurityMetadataSource（默认为 true）
+
+[[nsa-http-authorization-manager-ref]]
+* **use-authorization-manager**
+使用此 AuthorizationManager 而不是从 <intercept-url> 元素派生
+
+[[nsa-http-access-decision-manager-ref]]
+* **access-decision-manager-ref**
+可选属性，指定应用于授权 HTTP 请求的 `AccessDecisionManager` 实现的 ID。
+默认情况下，使用带有 `RoleVoter` 和 `AuthenticatedVoter` 的 `AffirmativeBased` 实现。
+
+[[nsa-http-authentication-manager-ref]]
+* **authentication-manager-ref**
+对由此 http 元素创建的 `FilterChain` 所使用的 `AuthenticationManager` 的引用。
+
+[[nsa-http-observation-registry-ref]]
+* **observation-registry-ref**
+对 `FilterChain` 及相关组件所使用的 `ObservationRegistry` 的引用
+
+[[nsa-http-auto-config]]
+* **auto-config**
+自动注册登录表单、BASIC 认证、注销服务。
+如果设置为 "true"，则会添加所有这些功能（尽管您仍可以通过提供相应的元素来自定义每个功能的配置）。
+如果未指定，默认值为 "false"。
+不建议使用此属性。
+请使用显式的配置元素以避免混淆。
+
+[[nsa-http-create-session]]
+* **create-session**
+控制 Spring Security 类创建 HTTP 会话的积极性。
+选项包括：
+
+** `always` - 如果不存在会话，Spring Security 将主动创建一个会话。
+** `ifRequired` - 仅在需要时，Spring Security 才会创建会话（默认值）。
+** `never` - Spring Security 永远不会创建会话，但如果应用程序创建了会话，则会利用它。
+** `stateless` - Spring Security 不会创建会话，并忽略会话以获取 Spring `Authentication`。
+
+[[nsa-http-disable-url-rewriting]]
+* **disable-url-rewriting**
+防止会话 ID 被附加到应用程序中的 URL 上。
+如果此属性设置为 `true`，客户端必须使用 cookie。
+默认值为 `true`。
+
+[[nsa-http-entry-point-ref]]
+* **entry-point-ref**
+通常，使用的 `AuthenticationEntryPoint` 将取决于已配置的身份验证机制。
+此属性允许通过定义自定义的 `AuthenticationEntryPoint` bean 来覆盖此行为，该 bean 将启动身份验证过程。
+
+[[nsa-http-jaas-api-provision]]
+* **jaas-api-provision**
+如果可用，将使用从 `JaasAuthenticationToken` 获取的 `Subject` 运行请求，这是通过向堆栈添加 `JaasApiIntegrationFilter` bean 实现的。
+默认值为 `false`。
+
+[[nsa-http-name]]
+* **name**
+一个 Bean 标识符，用于在上下文中引用该 Bean。
+
+[[nsa-http-once-per-request]]
+* **once-per-request**
+对应于 `FilterSecurityInterceptor` 的 `observeOncePerRequest` 属性。
+默认值为 `false`。
+
+[[nsa-http-filter-all-dispatcher-types]]
+* **filter-all-dispatcher-types**
+对应于 `AuthorizationFilter` 的 `shouldFilterAllDispatcherTypes` 属性。当 `use-authorization-manager=false` 时不工作。
+默认值为 `true`。
+
+[[nsa-http-pattern]]
+* **pattern**
+定义 <<nsa-http,http>> 元素的模式控制将通过其定义的过滤器列表进行过滤的请求。
+解释依赖于配置的 <<nsa-http-request-matcher,request-matcher>>。
+如果没有定义模式，则所有请求都将匹配，因此最具体的模式应该首先声明。
+
+[[nsa-http-realm]]
+* **realm**
+设置用于基本认证（如果启用）的领域名称。
+对应于 `BasicAuthenticationEntryPoint` 的 `realmName` 属性。
+
+[[nsa-http-request-matcher]]
+* **request-matcher**
+定义在 `FilterChainProxy` 和由 `intercept-url` 创建的 Bean 中用于匹配传入请求的 `RequestMatcher` 策略。
+当前选项为 `mvc`、`ant`、`regex` 和 `ciRegex`，分别对应 Spring MVC、ant、正则表达式和大小写不敏感的正则表达式。
+为每个 <<nsa-intercept-url,intercept-url>> 元素创建一个单独的实例，使用其 <<nsa-intercept-url-pattern,pattern>>、<<nsa-intercept-url-method,method>> 和 <<nsa-intercept-url-servlet-path,servlet-path>> 属性。
+Ant 路径使用 `AntPathRequestMatcher` 匹配，正则表达式使用 `RegexRequestMatcher` 匹配，对于 Spring MVC 路径匹配则使用 `MvcRequestMatcher`。
+有关匹配如何执行的更多详细信息，请参阅这些类的 Javadoc。
+如果类路径中存在 Spring MVC，则 MVC 是默认策略，否则使用 Ant 路径。
+
+[[nsa-http-request-matcher-ref]]
+* **request-matcher-ref**
+对实现 `RequestMatcher` 的 Bean 的引用，将决定是否使用此 `FilterChain`。
+这是比 <<nsa-http-pattern,pattern>> 更强大的替代方案。
+
+[[nsa-http-security]]
+* **security**
+通过将此属性设置为 `none`，可以将请求模式映射到空的过滤器链。
+不会应用任何安全性，也不会提供 Spring Security 的任何功能。
+
+[[nsa-http-security-context-holder-strategy-ref]]
+* **security-context-repository-ref**
+允许将自定义的 `SecurityContextHolderStrategy` 注入到 `SecurityContextPersistenceFilter`、`SecurityContextHolderFilter`、`BasicAuthenticationFilter`、`UsernamePasswordAuthenticationFilter`、`ExceptionTranslationFilter`、`LogoutFilter` 等中。
+
+[[nsa-http-security-context-explicit-save]]
+* **security-context-explicit-save**
+如果为真，使用 `SecurityContextHolderFilter` 替代 `SecurityContextPersistenceFilter`。
+需要显式保存
+
+[[nsa-http-security-context-repository-ref]]
+* **security-context-repository-ref**
+允许将自定义的 `SecurityContextRepository` 注入到 `SecurityContextPersistenceFilter` 中。
+
+[[nsa-http-servlet-api-provision]]
+* **servlet-api-provision**
+提供 `HttpServletRequest` 安全方法的版本，如 `isUserInRole()` 和 `getPrincipal()`，这些方法通过向堆栈中添加 `SecurityContextHolderAwareRequestFilter` Bean 实现。
+默认值为 `true`。
+
+[[nsa-http-use-expressions]]
+* **use-expressions**
+启用 EL 表达式在 `access` 属性中，如 xref:servlet/authorization/authorize-http-requests.adoc#authorization-expressions[基于表达式的访问控制] 章节所述。
+默认值为 true。
+
+[[nsa-http-children]]
+=== <http> 的子元素
+* <<nsa-access-denied-handler,access-denied-handler>>
+* <<nsa-anonymous,anonymous>>
+* <<nsa-cors,cors>>
+* <<nsa-csrf,csrf>>
+* <<nsa-custom-filter,custom-filter>>
+* <<nsa-expression-handler,expression-handler>>
+* <<nsa-form-login,form-login>>
+* <<nsa-headers,headers>>
+* <<nsa-http-basic,http-basic>>
+* <<nsa-intercept-url,intercept-url>>
+* <<nsa-jee,jee>>
+* <<nsa-logout,logout>>
+* <<nsa-oauth2-client,oauth2-client>>
+* <<nsa-oauth2-login,oauth2-login>>
+* <<nsa-oauth2-resource-server,oauth2-resource-server>>
+* <<nsa-password-management,password-management>>
+* <<nsa-port-mappings,port-mappings>>
+* <<nsa-remember-me,remember-me>>
+* <<nsa-request-cache,request-cache>>
+* <<nsa-saml2-login,saml2-login>>
+* <<nsa-saml2-logout,saml2-logout>>
+* <<nsa-session-management,session-management>>
+* <<nsa-x509,x509>>
+
+[[nsa-access-denied-handler]]
+== <access-denied-handler>
+此元素允许您使用 <<nsa-access-denied-handler-error-page,error-page>> 属性设置 `ExceptionTranslationFilter` 使用的默认 `AccessDeniedHandler` 的 `errorPage` 属性，或者使用 <<nsa-access-denied-handler-ref,ref>> 属性提供您自己的实现。
+这一点在 xref:servlet/architecture.adoc#servlet-exceptiontranslationfilter[ExceptionTranslationFilter] 部分中有更详细的讨论。
+
+[[nsa-access-denied-handler-parents]]
+=== <access-denied-handler> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-access-denied-handler-attributes]]
+=== <access-denied-handler> 属性
+
+[[nsa-access-denied-handler-error-page]]
+* **error-page**
+经过身份验证的用户请求他们没有权限访问的页面时将被重定向到的拒绝访问页面。
+
+[[nsa-access-denied-handler-ref]]
+* **ref**
+定义对类型为 `AccessDeniedHandler` 的 Spring Bean 的引用。
+
+[[nsa-cors]]
+== <cors>
+此元素允许配置一个 `CorsFilter`。
+如果没有指定 `CorsFilter` 或 `CorsConfigurationSource` 并且 Spring MVC 在类路径上，则使用 `HandlerMappingIntrospector` 作为 `CorsConfigurationSource`。
+
+[[nsa-cors-attributes]]
+=== <cors> 属性
+`<cors>` 元素上的属性控制 headers 元素。
+
+[[nsa-cors-ref]]
+* **ref**
+可选属性，指定 `CorsFilter` 的 Bean 名称。
+
+[[nsa-cors-configuration-source-ref]]
+* **cors-configuration-source-ref**
+可选属性，指定要注入到 XML 命名空间创建的 `CorsFilter` 中的 `CorsConfigurationSource` 的 Bean 名称。
+
+[[nsa-cors-parents]]
+=== <cors> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-headers]]
+== <headers>
+此元素允许配置附加的安全响应头。
+它支持轻松配置多个头部，并且还允许通过 <<nsa-header,header>> 元素设置自定义头部。
+更多信息可以在参考文档的 xref:features/exploits/headers.adoc#headers[安全头部] 部分找到。
+
+** `Cache-Control`, `Pragma`, 和 `Expires` - 可以使用 <<nsa-cache-control,cache-control>> 元素设置。
+这确保浏览器不会缓存您的安全页面。
+** `Strict-Transport-Security` - 可以使用 <<nsa-hsts,hsts>> 元素设置。
+这确保浏览器自动为未来的请求请求 HTTPS。
+** `X-Frame-Options` - 可以使用 <<nsa-frame-options,frame-options>> 元素设置。
+https://en.wikipedia.org/wiki/Clickjacking#X-Frame-Options[X-Frame-Options] 头部可用于防止点击劫持攻击。
+** `X-XSS-Protection` - 可以使用 <<nsa-xss-protection,xss-protection>> 元素设置。
+https://en.wikipedia.org/wiki/Cross-site_scripting[X-XSS-Protection ] 头部可以被浏览器用来进行基本控制。
+** `X-Content-Type-Options` - 可以使用 <<nsa-content-type-options,content-type-options>> 元素设置。
+https://blogs.msdn.com/b/ie/archive/2008/09/02/ie8-security-part-vi-beta-2-update.aspx[X-Content-Type-Options] 头部阻止 Internet Explorer 从声明的内容类型嗅探 MIME 类型。
+这也适用于 Google Chrome，在下载扩展时。
+** `Public-Key-Pinning` 或 `Public-Key-Pinning-Report-Only` - 可以使用 <<nsa-hpkp,hpkp>> 元素设置。
+这允许 HTTPS 网站抵抗因错误签发或欺诈性证书而被冒充的情况。
+** `Content-Security-Policy` 或 `Content-Security-Policy-Report-Only` - 可以使用 <<nsa-content-security-policy,content-security-policy>> 元素设置。
+https://www.w3.org/TR/CSP2/[内容安全策略 (CSP)] 是一种机制，Web 应用程序可以利用它来缓解内容注入漏洞，如跨站脚本 (XSS)。
+** `Referrer-Policy` - 可以使用 <<nsa-referrer-policy,referrer-policy>> 元素设置，https://www.w3.org/TR/referrer-policy/[Referrer-Policy] 是一种机制，Web 应用程序可以利用它来管理包含用户上次所在页面的 referrer 字段。
+** `Feature-Policy` - 可以使用 <<nsa-feature-policy,feature-policy>> 元素设置，https://wicg.github.io/feature-policy/[Feature-Policy] 是一种机制，允许 Web 开发者选择性地启用、禁用和修改浏览器中某些 API 和 Web 特性的行为。
+** `Cross-Origin-Opener-Policy` - 可以使用 <<nsa-cross-origin-opener-policy,cross-origin-opener-policy>> 元素设置，https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cross-Origin-Opener-Policy[Cross-Origin-Opener-Policy] 是一种机制，允许您确保顶级文档不与跨源文档共享浏览上下文组。
+** `Cross-Origin-Embedder-Policy` - 可以使用 <<nsa-cross-origin-embedder-policy,cross-origin-embedder-policy>> 元素设置，https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cross-Origin-Embedder-Policy[Cross-Origin-Embedder-Policy] 是一种机制，防止文档加载任何未明确授予文档权限的跨源资源。
+** `Cross-Origin-Resource-Policy` - 可以使用 <<nsa-cross-origin-resource-policy,cross-origin-resource-policy>> 元素设置，https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cross-Origin-Resource-Policy[Cross-Origin-Resource-Policy] 是一种机制，传达希望浏览器阻止对给定资源的无 CORS 跨源/跨站点请求。
+
+[[nsa-headers-attributes]]
+=== <headers> 属性
+`<headers>` 元素上的属性控制 headers 元素。
+
+[[nsa-headers-defaults-disabled]]
+* **defaults-disabled**
+可选属性，指定是否禁用默认的 Spring Security HTTP 响应头。
+默认值为 false（包含默认头）。
+
+[[nsa-headers-disabled]]
+* **disabled**
+可选属性，指定是否禁用 Spring Security 的 HTTP 响应头。
+默认值为 false（头已启用）。
+
+[[nsa-headers-parents]]
+=== <headers> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-headers-children]]
+=== <headers> 的子元素
+
+* <<nsa-cache-control,cache-control>>
+* <<nsa-content-security-policy,content-security-policy>>
+* <<nsa-content-type-options,content-type-options>>
+* <<nsa-cross-origin-embedder-policy,cross-origin-embedder-policy>>
+* <<nsa-cross-origin-opener-policy,cross-origin-opener-policy>>
+* <<nsa-cross-origin-resource-policy,cross-origin-resource-policy>>
+* <<nsa-feature-policy,feature-policy>>
+* <<nsa-frame-options,frame-options>>
+* <<nsa-header,header>>
+* <<nsa-hpkp,hpkp>>
+* <<nsa-hsts,hsts>>
+* <<nsa-permissions-policy,permission-policy>>
+* <<nsa-referrer-policy,referrer-policy>>
+* <<nsa-xss-protection,xss-protection>>
+
+[[nsa-cache-control]]
+== <cache-control>
+添加 `Cache-Control`、`Pragma` 和 `Expires` 头，以确保浏览器不会缓存您的安全页面。
+
+[[nsa-cache-control-attributes]]
+=== <cache-control> 属性
+
+[[nsa-cache-control-disabled]]
+* **disabled**
+指定是否禁用缓存控制。
+默认为 false。
+
+[[nsa-cache-control-parents]]
+=== <cache-control> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-hsts]]
+== <hsts>
+启用后，将 https://tools.ietf.org/html/rfc6797[严格传输安全] 头添加到任何安全请求的响应中。
+这允许服务器指示浏览器在未来请求中自动使用 HTTPS。
+
+[[nsa-hsts-attributes]]
+=== <hsts> 属性
+
+[[nsa-hsts-disabled]]
+* **disabled**
+指定是否禁用严格传输安全。
+默认为 false。
+
+[[nsa-hsts-include-subdomains]]
+* **include-sub-domains**
+指定是否包含子域。
+默认为 true。
+
+[[nsa-hsts-max-age-seconds]]
+* **max-age-seconds**
+指定主机应被视为已知 HSTS 主机的最大时间。
+默认为一年。
+
+[[nsa-hsts-request-matcher-ref]]
+* **request-matcher-ref**
+用于确定是否应设置头的 RequestMatcher 实例。
+默认是如果 HttpServletRequest.isSecure() 为 true。
+
+[[nsa-hsts-preload]]
+* **preload**
+指定是否包含预加载。
+默认为 false。
+
+[[nsa-hsts-parents]]
+=== <hsts> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-hpkp]]
+== <hpkp>
+启用后，将 https://tools.ietf.org/html/rfc7469[HTTP 公钥固定扩展] 头添加到任何安全请求的响应中。
+这允许 HTTPS 网站抵抗因错误签发或其他欺诈性证书而被冒充的情况。
+
+[[nsa-hpkp-attributes]]
+=== <hpkp> 属性
+
+[[nsa-hpkp-disabled]]
+* **disabled**
+指定是否禁用 HTTP 公钥固定 (HPKP)。
+默认为 true。
+
+[[nsa-hpkp-include-subdomains]]
+* **include-sub-domains**
+指定是否包含子域。
+默认为 false。
+
+[[nsa-hpkp-max-age-seconds]]
+* **max-age-seconds**
+设置 Public-Key-Pins 头的 max-age 指令的值。
+默认为 60 天。
+
+[[nsa-hpkp-report-only]]
+* **report-only**
+指定浏览器是否仅报告引脚验证失败。
+默认为 true。
+
+[[nsa-hpkp-report-uri]]
+* **report-uri**
+指定浏览器应报告引脚验证失败的 URI。
+
+[[nsa-hpkp-parents]]
+=== <hpkp> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-pins]]
+== <pins>
+引脚列表
+
+[[nsa-pins-children]]
+=== <pins> 的子元素
+
+* <<nsa-pin,pin>>
+
+[[nsa-pin]]
+== <pin>
+引脚使用 base64 编码的 SPKI 指纹作为值，加密哈希算法作为属性来指定
+
+[[nsa-pin-attributes]]
+=== <pin> 属性
+
+[[nsa-pin-algorithm]]
+* **algorithm**
+加密哈希算法。
+默认为 SHA256。
+
+[[nsa-pin-parents]]
+=== <pin> 的父元素
+
+* <<nsa-pins,pins>>
+
+[[nsa-content-security-policy]]
+== <content-security-policy>
+启用后，将 https://www.w3.org/TR/CSP2/[内容安全策略 (CSP)] 头添加到响应中。
+CSP 是一种机制，Web 应用程序可以利用它来减轻内容注入漏洞，如跨站脚本 (XSS)。
+
+[[nsa-content-security-policy-attributes]]
+=== <content-security-policy> 属性
+
+[[nsa-content-security-policy-policy-directives]]
+* **policy-directives**
+Content-Security-Policy 头的安全策略指令，或者如果 report-only 设置为 true，则使用 Content-Security-Policy-Report-Only 头。
+
+[[nsa-content-security-policy-report-only]]
+* **report-only**
+设置为 true，以启用 Content-Security-Policy-Report-Only 头，仅报告策略违规。
+默认为 false。
+
+[[nsa-content-security-policy-parents]]
+=== <content-security-policy> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-referrer-policy]]
+== <referrer-policy>
+启用后，将 https://www.w3.org/TR/referrer-policy/[Referrer Policy] 头添加到响应中。
+
+[[nsa-referrer-policy-attributes]]
+=== <referrer-policy> 属性
+
+[[nsa-referrer-policy-policy]]
+* **policy**
+Referrer-Policy 头的策略。
+默认为 "no-referrer"。
+
+[[nsa-referrer-policy-parents]]
+=== <referrer-policy> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-feature-policy]]
+== <feature-policy>
+启用后，将 https://wicg.github.io/feature-policy/[Feature Policy] 头添加到响应中。
+
+[[nsa-feature-policy-attributes]]
+=== <feature-policy> 属性
+
+[[nsa-feature-policy-policy-directives]]
+* **policy-directives**
+Feature-Policy 头的安全策略指令。
+
+[[nsa-feature-policy-parents]]
+=== <feature-policy> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-frame-options]]
+== <frame-options>
+启用后，将 https://tools.ietf.org/html/draft-ietf-websec-x-frame-options[X-Frame-Options header] 添加到响应中，这允许较新的浏览器进行一些安全检查并防止 https://en.wikipedia.org/wiki/Clickjacking[点击劫持] 攻击。
+
+[[nsa-frame-options-attributes]]
+=== <frame-options> 属性
+
+[[nsa-frame-options-disabled]]
+* **disabled**
+如果禁用，将不包含 X-Frame-Options 头。
+默认为 false。
+
+[[nsa-frame-options-policy]]
+* **policy**
+** `DENY` 页面无法在任何站点的框架中显示。
+当指定了 frame-options-policy 时，这是默认值。
+** `SAMEORIGIN` 页面只能在与其自身来源相同的框架中显示。
+
++
+
+换句话说，如果你指定 DENY，不仅从其他站点加载页面的尝试会失败，即使从同一站点加载也会失败。
+另一方面，如果你指定 SAMEORIGIN，只要包含它的站点与提供页面的站点相同，你仍然可以在框架中使用该页面。
+
+[[nsa-frame-options-parents]]
+=== <frame-options> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-permissions-policy]]
+== <permissions-policy>
+将 https://w3c.github.io/webappsec-permissions-policy/[Permissions-Policy header] 添加到响应中。
+
+[[nsa-permissions-policy-attributes]]
+=== <permissions-policy> 属性
+
+[[nsa-permissions-policy-policy]]
+* **policy**
+为 `Permissions-Policy` 头写入的策略值
+
+[[nsa-permissions-policy-parents]]
+=== <permissions-policy> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-xss-protection]]
+== <xss-protection>
+将 https://blogs.msdn.com/b/ie/archive/2008/07/02/ie8-security-part-iv-the-xss-filter.aspx[X-XSS-Protection header] 添加到响应中，以帮助保护免受 https://en.wikipedia.org/wiki/Cross-site_scripting#Non-Persistent[反射/类型1跨站脚本(XSS)] 攻击。
+这绝不是对 XSS 攻击的完整保护！
+
+[[nsa-xss-protection-attributes]]
+=== <xss-protection> 属性
+
+[[nsa-xss-protection-disabled]]
+* **xss-protection-disabled**
+不要包含用于 https://en.wikipedia.org/wiki/Cross-site_scripting#Non-Persistent[反射/类型1跨站脚本(XSS)] 保护的头。
+
+[[nsa-xss-protection-header-value]]
+* **xss-protection-header-value**
+明确设置用于 https://en.wikipedia.org/wiki/Cross-site_scripting#Non-Persistent[反射/类型1跨站脚本(XSS)] 头的值。
+取值之一："0", "1", "1; mode=block"。默认为 "0"。
+
+[[nsa-xss-protection-parents]]
+=== <xss-protection> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-content-type-options]]
+== <content-type-options>
+将值为 nosniff 的 X-Content-Type-Options 头添加到响应中。
+这会 https://blogs.msdn.com/b/ie/archive/2008/09/02/ie8-security-part-vi-beta-2-update.aspx[禁用 IE8+ 和 Chrome 扩展的 MIME 嗅探]。
+
+[[nsa-content-type-options-attributes]]
+=== <content-type-options> 属性
+
+[[nsa-content-type-options-disabled]]
+* **disabled**
+指定是否禁用内容类型选项。
+默认为 false。
+
+[[nsa-content-type-options-parents]]
+=== <content-type-options> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-cross-origin-embedder-policy]]
+==== <cross-origin-embedder-policy>
+启用后，将 https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cross-Origin-Embedder-Policy[跨源嵌入器策略] 头添加到响应中。
+
+[[nsa-cross-origin-embedder-policy-attributes]]
+===== <cross-origin-embedder-policy> 属性
+
+[[nsa-cross-origin-embedder-policy-policy]]
+* **policy**
+`Cross-Origin-Embedder-Policy` 头的策略。
+
+[[nsa-cross-origin-embedder-policy-parents]]
+===== <cross-origin-embedder-policy> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-cross-origin-opener-policy]]
+==== <cross-origin-opener-policy>
+启用后，将 https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cross-Origin-Opener-Policy[跨源打开器策略] 头添加到响应中。
+
+[[nsa-cross-origin-opener-policy-attributes]]
+===== <cross-origin-opener-policy> 属性
+
+[[nsa-cross-origin-opener-policy-policy]]
+* **policy**
+`Cross-Origin-Opener-Policy` 头的策略。
+
+[[nsa-cross-origin-opener-policy-parents]]
+===== <cross-origin-opener-policy> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-cross-origin-resource-policy]]
+==== <cross-origin-resource-policy>
+启用后，将 https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cross-Origin-Resource-Policy[跨源资源策略] 头添加到响应中。
+
+[[nsa-cross-origin-resource-policy-attributes]]
+===== <cross-origin-resource-policy> 属性
+
+[[nsa-cross-origin-resource-policy-policy]]
+* **policy**
+`Cross-Origin-Resource-Policy` 头的策略。
+
+[[nsa-cross-origin-resource-policy-parents]]
+===== <cross-origin-resource-policy> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-header]]
+== <header>
+向响应中添加额外的头部，需要指定名称和值。
+
+[[nsa-header-attributes]]
+=== <header-attributes> 属性
+
+[[nsa-header-name]]
+* **header-name**
+头部的 `name`。
+
+[[nsa-header-value]]
+* **value**
+要添加的头部的 `value`。
+
+[[nsa-header-ref]]
+* **ref**
+对 `HeaderWriter` 接口的自定义实现的引用。
+
+[[nsa-header-parents]]
+=== <header> 的父元素
+
+* <<nsa-headers,headers>>
+
+[[nsa-anonymous]]
+== <anonymous>
+向堆栈中添加一个 `AnonymousAuthenticationFilter` 和一个 `AnonymousAuthenticationProvider`。
+如果使用 `IS_AUTHENTICATED_ANONYMOUSLY` 属性，则必需。
+
+[[nsa-anonymous-parents]]
+=== <anonymous> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-anonymous-attributes]]
+=== <anonymous> 属性
+
+[[nsa-anonymous-enabled]]
+* **enabled**
+在默认的命名空间设置下，匿名“认证”功能是自动启用的。
+您可以使用此属性禁用它。
+
+[[nsa-anonymous-granted-authority]]
+* **granted-authority**
+应分配给匿名请求的授予权限。
+通常这用于为匿名请求分配特定角色，这些角色随后可用于授权决策。
+如果未设置，默认为 `ROLE_ANONYMOUS`。
+
+[[nsa-anonymous-key]]
+* **key**
+提供者和过滤器之间共享的密钥。
+这通常不需要设置。
+如果未设置，它将默认为安全随机生成的值。
+这意味着设置此值可以提高使用匿名功能时的启动时间，因为安全随机值的生成可能需要一段时间。
+
+[[nsa-anonymous-username]]
+* **username**
+应分配给匿名请求的用户名。
+这允许识别主体，这对于日志记录和审计可能很重要。
+如果未设置，默认为 `anonymousUser`。
+
+[[nsa-csrf]]
+== <csrf>
+此元素将向应用程序添加 https://en.wikipedia.org/wiki/Cross-site_request_forgery[跨站请求伪造 (CSRF)] 保护。
+它还会更新默认的 RequestCache，以便在成功认证后仅重放“GET”请求。
+更多信息可以在参考文档的 xref:features/exploits/csrf.adoc#csrf[跨站请求伪造 (CSRF)] 部分找到。
+
+[[nsa-csrf-parents]]
+=== <csrf> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-csrf-attributes]]
+=== <csrf> 属性
+
+[[nsa-csrf-disabled]]
+* **disabled**
+可选属性，指定是否禁用 Spring Security 的 CSRF 保护。
+默认为 false（CSRF 保护已启用）。
+强烈建议保持 CSRF 保护启用。
+
+[[nsa-csrf-token-repository-ref]]
+* **token-repository-ref**
+要使用的 CsrfTokenRepository。
+默认为 `HttpSessionCsrfTokenRepository`。
+
+[[nsa-csrf-request-handler-ref]]
+* **request-handler-ref**
+可选的 `CsrfTokenRequestHandler`。
+默认为 `CsrfTokenRequestAttributeHandler`。
+
+[[nsa-csrf-request-matcher-ref]]
+* **request-matcher-ref**
+用于确定是否应用 CSRF 的 RequestMatcher 实例。
+默认为除“GET”、“TRACE”、“HEAD”、“OPTIONS”之外的任何 HTTP 方法。
+
+[[nsa-custom-filter]]
+== <custom-filter>
+此元素用于向过滤器链添加一个过滤器。
+它不会创建任何额外的 Bean，而是用于选择已在应用程序上下文中定义的 `jakarta.servlet.Filter` 类型的 Bean，并将其放置在 Spring Security 维护的过滤器链中的特定位置。
+详细信息可以在 xref:servlet/configuration/xml-namespace.adoc#ns-custom-filters[命名空间章节] 中找到。
+
+[[nsa-custom-filter-parents]]
+=== <custom-filter> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-custom-filter-attributes]]
+=== <custom-filter> 属性
+
+[[nsa-custom-filter-after]]
+* **after**
+自定义过滤器应在链中立即放置在其后的过滤器。
+这个功能只有高级用户才需要，他们希望将自己的过滤器混合到安全过滤器链中，并对标准 Spring Security 过滤器有一定了解。
+过滤器名称映射到特定的 Spring Security 实现过滤器。
+
+[[nsa-custom-filter-before]]
+* **before**
+自定义过滤器应在链中立即放置在其前的过滤器
+
+[[nsa-custom-filter-position]]
+* **position**
+自定义过滤器应在链中显式放置的位置。
+当你替换标准过滤器时使用。
+
+[[nsa-custom-filter-ref]]
+* **ref**
+定义对实现 `Filter` 的 Spring Bean 的引用。
+
+[[nsa-expression-handler]]
+== <expression-handler>
+定义如果启用了基于表达式的访问控制将使用的 `SecurityExpressionHandler` 实例。
+如果未提供，则使用默认实现（无 ACL 支持）。
+
+[[nsa-expression-handler-parents]]
+=== <expression-handler> 的父元素
+
+* xref:servlet/appendix/namespace/method-security.adoc#nsa-global-method-security[global-method-security]
+* <<nsa-http,http>>
+* xref:servlet/appendix/namespace/method-security.adoc#nsa-method-security[method-security]
+* xref:servlet/appendix/namespace/websocket.adoc#nsa-websocket-message-broker[websocket-message-broker]
+
+[[nsa-expression-handler-attributes]]
+=== <expression-handler> 属性
+
+[[nsa-expression-handler-ref]]
+* **ref**
+定义对实现 `SecurityExpressionHandler` 的 Spring Bean 的引用。
+
+[[nsa-form-login]]
+== <form-login>
+用于向过滤器栈添加一个 `UsernamePasswordAuthenticationFilter` 和一个 `LoginUrlAuthenticationEntryPoint` 到应用程序上下文中，以提供按需身份验证。
+这将始终优先于其他命名空间创建的入口点。
+如果未提供属性，将在 URL "/login" 自动生成一个登录页面 footnote:[
+此功能实际上只是为了方便，并非针对生产环境（在生产环境中会选择视图技术来渲染自定义登录页面）。
+`DefaultLoginPageGeneratingFilter` 类负责渲染登录页面，并在需要时为普通表单登录和/或 OIDC 提供登录表单。
+]
+可以使用 <<nsa-form-login-attributes, `<form-login>` 属性>> 自定义行为。
+
+[[nsa-form-login-parents]]
+=== <form-login> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-form-login-attributes]]
+=== <form-login> 属性
+
+[[nsa-form-login-always-use-default-target]]
+* **always-use-default-target**
+如果设置为 `true`，无论用户如何到达登录页面，用户将始终从 <<nsa-form-login-default-target-url,default-target-url>> 给出的值开始。
+映射到 `UsernamePasswordAuthenticationFilter` 的 `alwaysUseDefaultTargetUrl` 属性。
+默认值为 `false`。
+
+[[nsa-form-login-authentication-details-source-ref]]
+* **authentication-details-source-ref**
+对将由身份验证过滤器使用的 `AuthenticationDetailsSource` 的引用
+
+[[nsa-form-login-authentication-failure-handler-ref]]
+* **authentication-failure-handler-ref**
+可以作为 <<nsa-form-login-authentication-failure-url,authentication-failure-url>> 的替代，让你完全控制身份验证失败后的导航流程。
+该值应该是应用程序上下文中 `AuthenticationFailureHandler` Bean 的名称。
+
+[[nsa-form-login-authentication-failure-url]]
+* **authentication-failure-url**
+映射到 `UsernamePasswordAuthenticationFilter` 的 `authenticationFailureUrl` 属性。
+定义登录失败时浏览器将重定向到的 URL。
+默认为 `/login?error`，这将由自动登录页面生成器自动处理，重新渲染登录页面并显示错误消息。
+
+[[nsa-form-login-authentication-success-handler-ref]]
+* **authentication-success-handler-ref**
+可以作为 <<nsa-form-login-default-target-url,default-target-url>> 和 <<nsa-form-login-always-use-default-target,always-use-default-target>> 的替代，让你完全控制成功身份验证后的导航流程。
+该值应该是应用程序上下文中 `AuthenticationSuccessHandler` Bean 的名称。
+默认情况下，使用 `SavedRequestAwareAuthenticationSuccessHandler` 的实现，并注入 <<nsa-form-login-default-target-url,default-target-url >>。
+
+[[nsa-form-login-default-target-url]]
+* **default-target-url**
+映射到 `UsernamePasswordAuthenticationFilter` 的 `defaultTargetUrl` 属性。
+如果不设置，默认值为 "/"（应用程序根目录）。
+用户登录后将被带到此 URL，前提是他们在尝试访问受保护资源时没有被要求登录，此时他们将被带到最初请求的 URL。
+
+[[nsa-form-login-login-page]]
+* **login-page**
+用于渲染登录页面的 URL。
+映射到 `LoginUrlAuthenticationEntryPoint` 的 `loginFormUrl` 属性。
+默认为 "/login"。
+
+[[nsa-form-login-login-processing-url]]
+* **login-processing-url**
+映射到 `UsernamePasswordAuthenticationFilter` 的 `filterProcessesUrl` 属性。
+默认值为 "/login"。
+
+[[nsa-form-login-password-parameter]]
+* **password-parameter**
+包含密码的请求参数的名称。
+默认为 "password"。
+
+[[nsa-form-login-username-parameter]]
+* **username-parameter**
+包含用户名的请求参数的名称。
+默认为 "username"。
+
+[[nsa-form-login-authentication-success-forward-url]]
+* **authentication-success-forward-url**
+将 `ForwardAuthenticationSuccessHandler` 映射到 `UsernamePasswordAuthenticationFilter` 的 `authenticationSuccessHandler` 属性。
+
+[[nsa-form-login-authentication-failure-forward-url]]
+* **authentication-failure-forward-url**
+将 `ForwardAuthenticationFailureHandler` 映射到 `UsernamePasswordAuthenticationFilter` 的 `authenticationFailureHandler` 属性。
+
+[[nsa-oauth2-login]]
+== <oauth2-login>
+xref:servlet/oauth2/login/index.adoc#oauth2login[OAuth 2.0 登录] 功能配置使用 OAuth 2.0 和/或 OpenID Connect 1.0 提供者的身份验证支持。
+
+[[nsa-oauth2-login-parents]]
+=== <oauth2-login> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-oauth2-login-attributes]]
+=== <oauth2-login> 属性
+
+[[nsa-oauth2-login-client-registration-repository-ref]]
+* **client-registration-repository-ref**
+对 `ClientRegistrationRepository` 的引用。
+
+[[nsa-oauth2-login-authorized-client-repository-ref]]
+* **authorized-client-repository-ref**
+对 `OAuth2AuthorizedClientRepository` 的引用。
+
+[[nsa-oauth2-login-authorized-client-service-ref]]
+* **authorized-client-service-ref**
+对 `OAuth2AuthorizedClientService` 的引用。
+
+[[nsa-oauth2-login-authorization-request-repository-ref]]
+* **authorization-request-repository-ref**
+对 `AuthorizationRequestRepository` 的引用。
+
+[[nsa-oauth2-login-authorization-request-resolver-ref]]
+* **authorization-request-resolver-ref**
+对 `OAuth2AuthorizationRequestResolver` 的引用。
+
+[[nsa-oauth2-login-authorization-redirect-strategy-ref]]
+* **authorization-redirect-strategy-ref**
+对授权 `RedirectStrategy` 的引用。
+
+[[nsa-oauth2-login-access-token-response-client-ref]]
+* **access-token-response-client-ref**
+对 `OAuth2AccessTokenResponseClient` 的引用。
+
+[[nsa-oauth2-login-user-authorities-mapper-ref]]
+* **user-authorities-mapper-ref**
+对 `GrantedAuthoritiesMapper` 的引用。
+
+[[nsa-oauth2-login-user-service-ref]]
+* **user-service-ref**
+对 `OAuth2UserService` 的引用。
+
+[[nsa-oauth2-login-oidc-user-service-ref]]
+* **oidc-user-service-ref**
+对 OpenID Connect `OAuth2UserService` 的引用。
+
+[[nsa-oauth2-login-login-processing-url]]
+* **login-processing-url**
+过滤器处理身份验证请求的 URI。
+
+[[nsa-oauth2-login-login-page]]
+* **login-page**
+发送用户登录的 URI。
+
+[[nsa-oauth2-login-authentication-success-handler-ref]]
+* **authentication-success-handler-ref**
+对 `AuthenticationSuccessHandler` 的引用。
+
+[[nsa-oauth2-login-authentication-failure-handler-ref]]
+* **authentication-failure-handler-ref**
+对 `AuthenticationFailureHandler` 的引用。
+
+[[nsa-oauth2-login-jwt-decoder-factory-ref]]
+* **jwt-decoder-factory-ref**
+对 `JwtDecoderFactory` 的引用，该工厂由 `OidcAuthorizationCodeAuthenticationProvider` 使用。
+
+[[nsa-oauth2-client]]
+== <oauth2-client>
+配置 xref:servlet/oauth2/client/index.adoc#oauth2client[OAuth 2.0 Client] 支持。
+
+[[nsa-oauth2-client-parents]]
+=== <oauth2-client> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-oauth2-client-attributes]]
+=== <oauth2-client> 属性
+
+[[nsa-oauth2-client-client-registration-repository-ref]]
+* **client-registration-repository-ref**
+对 `ClientRegistrationRepository` 的引用。
+
+[[nsa-oauth2-client-authorized-client-repository-ref]]
+* **authorized-client-repository-ref**
+对 `OAuth2AuthorizedClientRepository` 的引用。
+
+[[nsa-oauth2-client-authorized-client-service-ref]]
+* **authorized-client-service-ref**
+对 `OAuth2AuthorizedClientService` 的引用。
+
+[[nsa-oauth2-client-children]]
+=== <oauth2-client> 的子元素
+
+* <<nsa-authorization-code-grant,authorization-code-grant>>
+
+[[nsa-authorization-code-grant]]
+== <authorization-code-grant>
+配置 xref:servlet/oauth2/client/authorization-grants.adoc#oauth2Client-auth-grant-support[OAuth 2.0 授权码授权]。
+
+[[nsa-authorization-code-grant-parents]]
+=== <authorization-code-grant> 的父元素
+
+* <<nsa-oauth2-client,oauth2-client>>
+
+[[nsa-authorization-code-grant-attributes]]
+=== <authorization-code-grant> 属性
+
+[[nsa-authorization-code-grant-authorization-request-repository-ref]]
+* **authorization-request-repository-ref**
+对 `AuthorizationRequestRepository` 的引用。
+
+[[nsa-authorization-code-grant-authorization-redirect-strategy-ref]]
+* **authorization-redirect-strategy-ref**
+对授权 `RedirectStrategy` 的引用。
+
+[[nsa-authorization-code-grant-authorization-request-resolver-ref]]
+* **authorization-request-resolver-ref**
+对 `OAuth2AuthorizationRequestResolver` 的引用。
+
+[[nsa-authorization-code-grant-access-token-response-client-ref]]
+* **access-token-response-client-ref**
+对 `OAuth2AccessTokenResponseClient` 的引用。
+
+[[nsa-client-registrations]]
+== <client-registrations>
+容器元素，用于注册（xref:servlet/oauth2/client/index.adoc#oauth2Client-client-registration[ClientRegistration]）到 OAuth 2.0 或 OpenID Connect 1.0 提供者的客户端。
+
+[[nsa-client-registrations-children]]
+=== <client-registrations> 的子元素
+
+* <<nsa-client-registration,client-registration>>
+* <<nsa-provider,provider>>
+
+[[nsa-client-registration]]
+== <client-registration>
+表示注册到 OAuth 2.0 或 OpenID Connect 1.0 提供者的客户端。
+
+[[nsa-client-registration-parents]]
+=== <client-registration> 的父元素
+
+* <<nsa-client-registrations,client-registrations>>
+
+[[nsa-client-registration-attributes]]
+=== <client-registration> 属性
+
+[[nsa-client-registration-registration-id]]
+* **registration-id**
+唯一标识 `ClientRegistration` 的 ID。
+
+[[nsa-client-registration-client-id]]
+* **client-id**
+客户端标识符。
+
+[[nsa-client-registration-client-secret]]
+* **client-secret**
+客户端密钥。
+
+[[nsa-client-registration-client-authentication-method]]
+* **client-authentication-method**
+用于向提供者验证客户端的方法。
+支持的值为 *client_secret_basic*, *client_secret_post*, *private_key_jwt*, *client_secret_jwt* 和 *none* https://tools.ietf.org/html/rfc6749#section-2.1[(公共客户端)]。
+
+[[nsa-client-registration-authorization-grant-type]]
+* **authorization-grant-type**
+OAuth 2.0 授权框架定义了四种 https://tools.ietf.org/html/rfc6749#section-1.3[授权授权] 类型。
+支持的值为 `authorization_code`, `client_credentials`, `password`，以及扩展授权类型 `urn:ietf:params:oauth:grant-type:jwt-bearer`。
+
+[[nsa-client-registration-redirect-uri]]
+* **redirect-uri**
+客户端注册的重定向 URI，_授权服务器_ 在最终用户完成身份验证和授权访问客户端后，会将最终用户的用户代理重定向到该 URI。
+
+[[nsa-client-registration-scope]]
+* **scope**
+客户端在授权请求流程中请求的范围，例如 openid, email, 或 profile。
+
+[[nsa-client-registration-client-name]]
+* **client-name**
+用于客户端的描述性名称。
+该名称可在某些场景中使用，例如在自动生成的登录页面中显示客户端名称。
+
+[[nsa-client-registration-provider-id]]
+* **provider-id**
+对关联提供者的引用。可以引用 `<provider>` 元素或使用常见的提供者之一（google, github, facebook, okta）。
+
+[[nsa-provider]]
+== <provider>
+OAuth 2.0 或 OpenID Connect 1.0 提供者的配置信息。
+
+[[nsa-provider-parents]]
+=== <provider> 的父元素
+
+* <<nsa-client-registrations,client-registrations>>
+
+[[nsa-provider-attributes]]
+=== <provider> 属性
+
+[[nsa-provider-provider-id]]
+* **provider-id**
+唯一标识提供者的 ID。
+
+[[nsa-provider-authorization-uri]]
+* **authorization-uri**
+授权服务器的授权端点 URI。
+
+[[nsa-provider-token-uri]]
+* **token-uri**
+授权服务器的令牌端点 URI。
+
+[[nsa-provider-user-info-uri]]
+* **user-info-uri**
+用于访问经过身份验证的最终用户的声明/属性的 UserInfo 端点 URI。
+
+[[nsa-provider-user-info-authentication-method]]
+* **user-info-authentication-method**
+向 UserInfo 端点发送访问令牌时使用的身份验证方法。
+支持的值为 *header*, *form* 和 *query*。
+
+[[nsa-provider-user-info-user-name-attribute]]
+* **user-info-user-name-attribute**
+UserInfo 响应中返回的引用最终用户名称或标识符的属性名称。
+
+[[nsa-provider-jwk-set-uri]]
+* **jwk-set-uri**
+用于从授权服务器检索 https://tools.ietf.org/html/rfc7517[JSON Web Key (JWK)] 集合的 URI，其中包含用于验证 https://tools.ietf.org/html/rfc7515[JSON Web Signature (JWS)] ID Token 和可选的 UserInfo 响应的加密密钥。
+
+[[nsa-provider-issuer-uri]]
+* **issuer-uri**
+用于使用 OpenID Connect 提供者的 https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfig[配置端点] 或授权服务器的 https://tools.ietf.org/html/rfc8414#section-3[元数据端点] 发现来初始配置 `ClientRegistration` 的 URI。
+
+[[nsa-oauth2-resource-server]]
+== <oauth2-resource-server>
+向配置中添加一个 `BearerTokenAuthenticationFilter`、`BearerTokenAuthenticationEntryPoint` 和 `BearerTokenAccessDeniedHandler`。
+此外，必须指定 `<jwt>` 或 `<opaque-token>`。
+
+[[nsa-oauth2-resource-server-parents]]
+=== <oauth2-resource-server> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-oauth2-resource-server-children]]
+=== <oauth2-resource-server> 的子元素
+
+* <<nsa-jwt,jwt>>
+* <<nsa-opaque-token,opaque-token>>
+
+[[nsa-oauth2-resource-server-attributes]]
+=== <oauth2-resource-server> 属性
+
+[[nsa-oauth2-resource-server-authentication-manager-resolver-ref]]
+* **authentication-manager-resolver-ref**
+对 `AuthenticationManagerResolver` 的引用，该解析器将在请求时解析 `AuthenticationManager`
+
+[[nsa-oauth2-resource-server-bearer-token-resolver-ref]]
+* **bearer-token-resolver-ref**
+对 `BearerTokenResolver` 的引用，该解析器将从请求中检索承载令牌
+
+[[nsa-oauth2-resource-server-entry-point-ref]]
+* **entry-point-ref**
+对 `AuthenticationEntryPoint` 的引用，该入口点将处理未经授权的请求
+
+[[nsa-jwt]]
+== <jwt>
+表示一个将授权 JWT 的 OAuth 2.0 资源服务器
+
+[[nsa-jwt-parents]]
+=== <jwt> 的父元素
+
+* <<nsa-oauth2-resource-server,oauth2-resource-server>>
+
+[[nsa-jwt-attributes]]
+=== <jwt> 属性
+
+[[nsa-jwt-jwt-authentication-converter-ref]]
+* **jwt-authentication-converter-ref**
+对 `Converter<Jwt, AbstractAuthenticationToken>` 的引用
+
+[[nsa-jwt-decoder-ref]]
+* **jwt-decoder-ref**
+对 `JwtDecoder` 的引用。这是一个较大的组件，覆盖 `jwk-set-uri`
+
+[[nsa-jwt-jwk-set-uri]]
+* **jwk-set-uri**
+用于从 OAuth 2.0 授权服务器加载签名验证密钥的 JWK Set Uri
+
+[[nsa-opaque-token]]
+== <opaque-token>
+表示一个将授权不透明令牌的 OAuth 2.0 资源服务器
+
+[[nsa-opaque-token-parents]]
+=== <opaque-token> 的父元素
+
+* <<nsa-oauth2-resource-server,oauth2-resource-server>>
+
+[[nsa-opaque-token-attributes]]
+=== <opaque-token> 属性
+
+[[nsa-opaque-token-introspector-ref]]
+* **introspector-ref**
+对 `OpaqueTokenIntrospector` 的引用。这是一个较大的组件，覆盖 `introspection-uri`、`client-id` 和 `client-secret`。
+
+[[nsa-opaque-token-introspection-uri]]
+* **introspection-uri**
+用于检查不透明令牌详细信息的内省 Uri。应伴随 `client-id` 和 `client-secret`。
+
+[[nsa-opaque-token-client-id]]
+* **client-id**
+用于对提供的 `introspection-uri` 进行客户端身份验证的客户端 ID。
+
+[[nsa-opaque-token-client-secret]]
+* **client-secret**
+用于对提供的 `introspection-uri` 进行客户端身份验证的客户端密钥。
+
+[[nsa-opaque-token-authentication-converter-ref]]
+* **authentication-converter-ref**
+对 `OpaqueTokenAuthenticationConverter` 的引用。负责将成功的内省结果转换为 `Authentication` 实例。
+
+[[nsa-relying-party-registrations]]
+== <relying-party-registrations>
+用于注册依赖方（xref:servlet/saml2/login/overview.adoc#servlet-saml2login-relyingpartyregistration[ClientRegistration]）到 SAML 2.0 身份提供商的容器元素。
+
+[[nsa-relying-party-registrations-attributes]]
+=== <relying-party-registrations> 属性
+
+[[nsa-relying-party-registrations-id]]
+* **id**
+唯一标识 `RelyingPartyRegistrationRepository` 的 ID。
+
+[[nsa-relying-party-registrations-children]]
+=== <relying-party-registrations> 的子元素
+
+* <<nsa-asserting-party,asserting-party>>
+* <<nsa-relying-party-registration,relying-party-registration>>
+
+[[nsa-relying-party-registration]]
+== <relying-party-registration>
+表示注册到 SAML 2.0 身份提供商的依赖方
+
+[[nsa-relying-party-registration-parents]]
+=== <relying-party-registration> 的父元素
+
+* <<nsa-relying-party-registrations,relying-party-registrations>>
+
+[[nsa-relying-party-registration-attributes]]
+=== <relying-party-registration> 属性
+
+[[nsa-relying-party-registration-registration-id]]
+* **registration-id**
+唯一标识 `RelyingPartyRegistration` 的 ID。
+
+[[nsa-relying-party-registration-metadata-location]]
+* **metadata-location**
+断言方元数据位置。
+
+[[nsa-relying-party-registration-entity-id]]
+* **client-id**
+依赖方的 https://www.oasis-open.org/committees/download.php/51890/SAML%20MD%20simplified%20overview.pdf#2.9%20EntityDescriptor[EntityID]。
+
+[[nsa-relying-party-registration-assertion-consumer-service-location]]
+* **assertion-consumer-service-location**
+AssertionConsumerService 位置。相当于依赖方的 `&lt;SPSSODescriptor&gt;` 中 `&lt;AssertionConsumerService Location="..."/&gt;` 的值。
+
+[[nsa-relying-party-registration-assertion-consumer-service-binding]]
+* **assertion-consumer-service-binding**
+AssertionConsumerService 绑定。相当于依赖方的 `&lt;SPSSODescriptor&gt;` 中 `&lt;AssertionConsumerService Binding="..."/&gt;` 的值。
+支持的值为 *POST* 和 *REDIRECT*。
+
+[[nsa-relying-party-registration-single-logout-service-location]]
+* **single-logout-service-location**
+SingleLogoutService 位置。相当于依赖方的 `&lt;SPSSODescriptor&gt;` 中 &lt;SingleLogoutService Location="..."/&gt; 的值。
+
+[[nsa-relying-party-registration-single-logout-service-response-location]]
+* **single-logout-service-response-location**
+SingleLogoutService ResponseLocation。相当于依赖方的 `&lt;SPSSODescriptor&gt;` 中 &lt;SingleLogoutService ResponseLocation="..."/&gt; 的值。
+
+[[nsa-relying-party-registration-single-logout-service-binding]]
+* **single-logout-service-binding**
+SingleLogoutService 绑定。相当于依赖方的 `&lt;SPSSODescriptor&gt;` 中 &lt;SingleLogoutService Binding="..."/&gt; 的值。
+支持的值为 *POST* 和 *REDIRECT*。
+
+[[nsa-relying-party-registration-asserting-party-id]]
+* **asserting-party-id**
+对关联断言方的引用。必须引用一个 `<asserting-party>` 元素。
+
+[[nsa-relying-party-registration-children]]
+=== <relying-party-registration> 的子元素
+
+* <<nsa-decryption-credential,decryption-credential>>
+* <<nsa-signing-credential,signing-credential>>
+
+[[nsa-decryption-credential]]
+== <decryption-credential>
+与依赖方关联的解密凭据。
+
+[[nsa-decryption-credential-parents]]
+=== <decryption-credential> 的父元素
+
+* <<nsa-relying-party-registration,relying-party-registration>>
+
+[[nsa-decryption-credential-attributes]]
+=== <decryption-credential> 属性
+
+[[nsa-decryption-credential-certificate-location]]
+* **certificate-location**
+获取证书的位置
+
+[[nsa-decryption-credential-private-key-location]]
+* **private-key-location**
+获取依赖方私钥的位置
+
+[[nsa-signing-credential]]
+== <signing-credential>
+与依赖方关联的签名凭据。
+
+[[nsa-signing-credential-parents]]
+=== <verification-credential> 的父元素
+
+* <<nsa-relying-party-registration,relying-party-registration>>
+
+[[nsa-signing-credential-attributes]]
+=== <verification-credential> 属性
+
+[[nsa-signing-credential-certificate-location]]
+* **certificate-location**
+获取此证书的位置
+
+[[nsa-signing-credential-private-key-location]]
+* **private-key-location**
+获取依赖方私钥的位置
+
+[[nsa-asserting-party]]
+== <asserting-party>
+SAML 2.0 断言方的配置信息。
+
+[[nsa-asserting-party-parents]]
+=== <asserting-party> 的父元素
+
+* <<nsa-relying-party-registrations,relying-party-registrations>>
+
+[[nsa-asserting-party-attributes]]
+=== <asserting-party> 属性
+
+[[nsa-asserting-party-asserting-party-id]]
+* **asserting-party-id**
+唯一标识断言方的 ID。
+
+[[nsa-asserting-party-entity-id]]
+* **entity-id**
+断言方的 EntityID
+
+[[nsa-asserting-party-want-authn-requests-signed]]
+* **want-authn-requests-signed**
+`WantAuthnRequestsSigned` 设置，表示断言方偏好依赖方在发送前对 `AuthnRequest` 进行签名。
+
+[[nsa-asserting-party-single-sign-on-service-location]]
+* **single-sign-on-service-location**
+https://www.oasis-open.org/committees/download.php/51890/SAML%20MD%20simplified%20overview.pdf#2.5%20Endpoint[SingleSignOnService] 位置。
+
+[[nsa-asserting-party-single-sign-on-service-binding]]
+* **single-sign-on-service-binding**
+https://www.oasis-open.org/committees/download.php/51890/SAML%20MD%20simplified%20overview.pdf#2.5%20Endpoint[SingleSignOnService] 绑定。
+支持的值为 *POST* 和 *REDIRECT*。
+
+[[nsa-asserting-party-signing-algorithms]]
+* **signing-algorithms**
+此断言方的 `org.opensaml.saml.ext.saml2alg.SigningMethod` 算法列表，按优先顺序排列。
+
+[[nsa-asserting-party-single-logout-service-location]]
+* **single-logout-service-location**
+SingleLogoutService 位置。相当于断言方的 &lt;IDPSSODescriptor&gt; 中 &lt;SingleLogoutService Location="..."/&gt; 的值。
+
+[[nsa-asserting-party-single-logout-service-response-location]]
+* **single-logout-service-response-location**
+SingleLogoutService ResponseLocation。相当于断言方的 &lt;IDPSSODescriptor&gt; 中 &lt;SingleLogoutService ResponseLocation="..."/&gt; 的值。
+
+[[nsa-asserting-party-single-logout-service-binding]]
+* **single-logout-service-binding**
+SingleLogoutService 绑定。相当于断言方的 &lt;IDPSSODescriptor&gt; 中 &lt;SingleLogoutService Binding="..."/&gt; 的值。
+支持的值为 *POST* 和 *REDIRECT*。
+
+[[nsa-asserting-party-children]]
+=== <asserting-party> 的子元素
+
+* <<nsa-encryption-credential,encryption-credential>>
+* <<nsa-verification-credential,verification-credential>>
+
+[[nsa-encryption-credential]]
+== <encryption-credential>
+与断言方关联的加密凭据。
+
+[[nsa-encryption-credential-parents]]
+=== <encryption-credential> 的父元素
+
+* <<nsa-asserting-party,asserting-party>>
+
+[[nsa-encryption-credential-attributes]]
+=== <encryption-credential> 属性
+
+[[nsa-encryption-credential-certificate-location]]
+* **certificate-location**
+获取证书的位置
+
+[[nsa-encryption-credential-private-key-location]]
+* **private-key-location**
+获取依赖方私钥的位置
+
+[[nsa-verification-credential]]
+== <verification-credential>
+与断言方关联的验证凭据。
+
+[[nsa-verification-credential-parents]]
+=== <verification-credential> 的父元素
+
+* <<nsa-asserting-party,asserting-party>>
+
+[[nsa-verification-credential-attributes]]
+=== <verification-credential> 属性
+
+[[nsa-verification-credential-certificate-location]]
+* **certificate-location**
+获取此证书的位置
+
+[[nsa-verification-credential-private-key-location]]
+* **private-key-location**
+获取依赖方私钥的位置
+
+[[nsa-http-basic]]
+== <http-basic>
+向配置中添加一个 `BasicAuthenticationFilter` 和 `BasicAuthenticationEntryPoint`。
+后者仅在未启用基于表单的登录时才会用作配置入口点。
+
+[[nsa-http-basic-parents]]
+=== <http-basic> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-http-basic-attributes]]
+=== <http-basic> 属性
+
+[[nsa-http-basic-authentication-details-source-ref]]
+* **authentication-details-source-ref**
+对将由身份验证过滤器使用的 `AuthenticationDetailsSource` 的引用
+
+[[nsa-http-basic-entry-point-ref]]
+* **entry-point-ref**
+设置由 `BasicAuthenticationFilter` 使用的 `AuthenticationEntryPoint`。
+
+[[nsa-http-firewall]]
+== <http-firewall> 元素
+这是一个顶级元素，可用于将自定义的 `HttpFirewall` 实现注入到命名空间创建的 `FilterChainProxy` 中。
+默认实现应适用于大多数应用程序。
+
+[[nsa-http-firewall-attributes]]
+=== <http-firewall> 属性
+
+[[nsa-http-firewall-ref]]
+* **ref**
+定义对实现 `HttpFirewall` 的 Spring Bean 的引用。
+
+[[nsa-intercept-url]]
+== <intercept-url>
+此元素用于定义应用程序感兴趣的 URL 模式集，并配置如何处理它们。
+它用于构造 `FilterSecurityInterceptor` 使用的 `FilterInvocationSecurityMetadataSource`。
+它还负责配置 `ChannelProcessingFilter`，如果特定 URL 需要通过 HTTPS 访问，例如。
+当将指定的模式与传入请求进行匹配时，匹配是按照元素声明的顺序进行的。
+因此，最具体的模式应放在前面，最一般的应放在最后。
+
+[[nsa-intercept-url-parents]]
+=== <intercept-url> 的父元素
+
+* <<nsa-filter-security-metadata-source,filter-security-metadata-source>>
+* <<nsa-http,http>>
+
+[[nsa-intercept-url-attributes]]
+=== <intercept-url> 属性
+
+[[nsa-intercept-url-access]]
+* **access**
+列出将存储在 `FilterInvocationSecurityMetadataSource` 中的定义的 URL 模式/方法组合的访问属性。
+这应该是安全配置属性（如角色名称）的逗号分隔列表。
+
+[[nsa-intercept-url-method]]
+* **method**
+将与模式和 servlet 路径（可选）结合使用的 HTTP 方法，以匹配传入请求。
+如果省略，则任何方法都将匹配。
+如果指定了相同的模式，有和没有方法，方法特定的匹配将优先。
+
+[[nsa-intercept-url-pattern]]
+* **pattern**
+定义 URL 路径的模式。
+内容将取决于包含 http 元素的 `request-matcher` 属性，因此如果 Spring MVC 在类路径中，则默认为 MVC 匹配器。
+
+[[nsa-intercept-url-request-matcher-ref]]
+* **request-matcher-ref**
+对 `RequestMatcher` 的引用，将用于确定是否使用此 `<intercept-url>`。
+
+[[nsa-intercept-url-requires-channel]]
+* **requires-channel**
+可以是 "http" 或 "https"，具体取决于特定 URL 模式是否应通过 HTTP 或 HTTPS 访问。
+另外，当没有偏好时可以使用 "any" 值。
+如果此属性存在于任何 `<intercept-url>` 元素上，则会在过滤器堆栈中添加 `ChannelProcessingFilter`，并将其额外依赖项添加到应用程序上下文中。
+
+如果添加了 `<port-mappings>` 配置，这将被 `SecureChannelProcessor` 和 `InsecureChannelProcessor` Bean 用来确定用于重定向到 HTTP/HTTPS 的端口。
+
+注意：此属性对 <<nsa-filter-security-metadata-source,filter-security-metadata-source>> 无效
+
+[[nsa-intercept-url-servlet-path]]
+* **servlet-path**
+将与模式和 HTTP 方法结合使用的 servlet 路径，以匹配传入请求。
+此属性仅在 <<nsa-http-request-matcher,request-matcher>> 为 'mvc' 时适用。
+此外，仅在以下两种情况下才需要此值：1）在 `ServletContext` 中注册了两个或更多具有以 `'/'` 开头的不同映射的 `HttpServlet`；2）模式以注册的 `HttpServlet` 路径的相同值开头，不包括默认（根）`HttpServlet` `'/'`。
+
+注意：此属性对 <<nsa-filter-security-metadata-source,filter-security-metadata-source>> 无效
+
+[[nsa-jee]]
+== <jee>
+向过滤器链添加 J2eePreAuthenticatedProcessingFilter，以提供与容器身份验证的集成。
+
+[[nsa-jee-parents]]
+=== <jee> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-jee-attributes]]
+=== <jee> 属性
+
+[[nsa-jee-mappable-roles]]
+* **mappable-roles**
+要在传入的 HttpServletRequest 中查找的角色的逗号分隔列表。
+
+[[nsa-jee-user-service-ref]]
+* **user-service-ref**
+对用户服务（或 UserDetailsService Bean）ID 的引用
+
+[[nsa-logout]]
+== <logout>
+向过滤器堆栈添加一个 `LogoutFilter`。
+这配置了一个 `SecurityContextLogoutHandler`。
+
+[[nsa-logout-parents]]
+=== <logout> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-logout-attributes]]
+=== <logout> 属性
+
+[[nsa-logout-delete-cookies]]
+* **delete-cookies**
+用户注销时应删除的 cookie 名称的逗号分隔列表。
+
+[[nsa-logout-invalidate-session]]
+* **invalidate-session**
+映射到 `SecurityContextLogoutHandler` 的 `invalidateHttpSession`。
+默认为 "true"，因此在注销时会失效会话。
+
+[[nsa-logout-logout-success-url]]
+* **logout-success-url**
+用户注销后将被带到的目的地 URL。
+默认为 <form-login-login-page>/?logout （即 /login?logout）
+
++
+
+设置此属性将注入带有配置了属性值的 `SimpleRedirectInvalidSessionStrategy` 的 `SessionManagementFilter`。
+当提交无效的会话 ID 时，将调用该策略，重定向到配置的 URL。
+
+[[nsa-logout-logout-url]]
+* **logout-url**
+将导致注销的 URL（即由过滤器处理的 URL）。
+默认为 "/logout"。
+
+[[nsa-logout-success-handler-ref]]
+* **success-handler-ref**
+可用于提供 `LogoutSuccessHandler` 的实例，该实例将在注销后被调用以控制导航。
+
+[[nsa-saml2-login]]
+== <saml2-login>
+xref:servlet/saml2/login/index.adoc#servlet-saml2login[SAML 2.0 登录] 功能配置使用 SAML 2.0 服务提供商的身份验证支持。
+
+[[nsa-saml2-login-parents]]
+=== <saml2-login> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-saml2-login-attributes]]
+=== <saml2-login> 属性
+
+[[nsa-saml2-login-relying-party-registration-repository-ref]]
+* **relying-party-registration-repository-ref**
+对 `RelyingPartyRegistrationRepository` 的引用。
+
+[[nsa-saml2-login-authentication-request-repository-ref]]
+* **authentication-request-repository-ref**
+对 `Saml2AuthenticationRequestRepository` 的引用。
+
+[[nsa-saml2-login-authentication-request-resolver-ref]]
+* **authentication-request-context-resolver-ref**
+对 `Saml2AuthenticationRequestResolver` 的引用。
+
+[[nsa-saml2-login-authentication-converter-ref]]
+* **authentication-converter-ref**
+对 `AuthenticationConverter` 的引用。
+
+[[nsa-saml2-login-login-processing-url]]
+* **login-processing-url**
+过滤器处理身份验证请求的 URI。
+
+[[nsa-saml2-login-login-page]]
+* **login-page**
+发送用户登录的 URI。
+
+[[nsa-saml2-login-authentication-success-handler-ref]]
+* **authentication-success-handler-ref**
+对 `AuthenticationSuccessHandler` 的引用。
+
+[[nsa-saml2-login-authentication-failure-handler-ref]]
+* **authentication-failure-handler-ref**
+对 `AuthenticationFailureHandler` 的引用。
+
+[[nsa-saml2-login-authentication-manager-ref]]
+* **authentication-manager-ref**
+对 `AuthenticationManager` 的引用。
+
+[[nsa-saml2-logout]]
+== <saml2-logout>
+xref:servlet/saml2/logout.adoc#servlet-saml2login-logout[SAML 2.0 单点注销] 功能配置支持 RP 和 AP 发起的 SAML 2.0 单点注销。
+
+[[nsa-saml2-logout-parents]]
+=== <saml2-logout> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-saml2-logout-attributes]]
+=== <saml2-logout> 属性
+
+[[nsa-saml2-logout-logout-url]]
+* **logout-url**
+依赖方或断言方可触发注销的 URL。
+
+[[nsa-saml2-logout-logout-request-url]]
+* **logout-request-url**
+断言方可发送 SAML 2.0 注销请求的 URL。
+
+[[nsa-saml2-logout-logout-response-url]]
+* **logout-response-url**
+断言方可发送 SAML 2.0 注销响应的 URL。
+
+[[nsa-saml2-logout-relying-party-registration-repository-ref]]
+* **relying-party-registration-repository-ref**
+对 `RelyingPartyRegistrationRepository` 的引用。
+
+[[nsa-saml2-logout-logout-request-validator-ref]]
+* **logout-request-validator-ref**
+对 `Saml2LogoutRequestValidator` 的引用。
+
+[[nsa-saml2-logout-logout-request-resolver-ref]]
+* **logout-request-resolver-ref**
+对 `Saml2LogoutRequestResolver` 的引用。
+
+[[nsa-saml2-logout-logout-request-repository-ref]]
+* **logout-request-repository-ref**
+对 `Saml2LogoutRequestRepository` 的引用。
+
+[[nsa-saml2-logout-logout-response-validator-ref]]
+* **logout-response-validator-ref**
+对 `Saml2LogoutResponseValidator` 的引用。
+
+[[nsa-saml2-logout-logout-response-resolver-ref]]
+* **logout-response-resolver-ref**
+对 `Saml2LogoutResponseResolver` 的引用。
+
+[[nsa-password-management]]
+== <password-management>
+此元素配置密码管理。
+
+[[nsa-password-management-parents]]
+=== <password-management> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-password-management-attributes]]
+=== <password-management> 属性
+
+[[nsa-password-management-change-password-page]]
+* **change-password-page**
+更改密码页面。默认为 "/change-password"。
+
+[[nsa-port-mappings]]
+== <port-mappings>
+默认情况下，`PortMapperImpl` 的实例将被添加到配置中，用于重定向到安全和不安全的 URL。
+此元素可选择用于覆盖该类定义的默认映射。
+每个子 `<port-mapping>` 元素定义一对 HTTP:HTTPS 端口。
+默认映射为 80:443 和 8080:8443。
+覆盖这些的示例可以在 xref:servlet/exploits/http.adoc#servlet-http-redirect[重定向到 HTTPS] 中找到。
+
+[[nsa-port-mappings-parents]]
+=== <port-mappings> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-port-mappings-children]]
+=== <port-mappings> 的子元素
+
+* <<nsa-port-mapping,port-mapping>>
+
+[[nsa-port-mapping]]
+== <port-mapping>
+提供一种将 HTTP 端口映射到 HTTPS 端口的方法，当强制重定向时使用。
+
+[[nsa-port-mapping-parents]]
+=== <port-mapping> 的父元素
+
+* <<nsa-port-mappings,port-mappings>>
+
+[[nsa-port-mapping-attributes]]
+=== <port-mapping> 属性
+
+[[nsa-port-mapping-http]]
+* **http**
+要使用的 HTTP 端口。
+
+[[nsa-port-mapping-https]]
+* **https**
+要使用的 HTTPS 端口。
+
+[[nsa-remember-me]]
+== <remember-me>
+向堆栈中添加 `RememberMeAuthenticationFilter`。
+然后将根据属性设置，使用 `TokenBasedRememberMeServices`、`PersistentTokenBasedRememberMeServices` 或用户指定的实现 `RememberMeServices` 的 Bean 对其进行配置。
+
+[[nsa-remember-me-parents]]
+=== <remember-me> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-remember-me-attributes]]
+=== <remember-me> 属性
+
+[[nsa-remember-me-authentication-success-handler-ref]]
+* **authentication-success-handler-ref**
+如果需要自定义导航，则在 `RememberMeAuthenticationFilter` 上设置 `authenticationSuccessHandler` 属性。
+该值应该是应用程序上下文中 `AuthenticationSuccessHandler` Bean 的名称。
+
+[[nsa-remember-me-data-source-ref]]
+* **data-source-ref**
+对 `DataSource` Bean 的引用。
+如果设置了此项，将使用 `PersistentTokenBasedRememberMeServices` 并配置 `JdbcTokenRepositoryImpl` 实例。
+
+[[nsa-remember-me-remember-me-parameter]]
+* **remember-me-parameter**
+切换记住我身份验证的请求参数名称。
+默认为 "remember-me"。
+映射到 `AbstractRememberMeServices` 的 "parameter" 属性。
+
+[[nsa-remember-me-remember-me-cookie]]
+* **remember-me-cookie**
+存储记住我身份验证令牌的 cookie 名称。
+默认为 "remember-me"。
+映射到 `AbstractRememberMeServices` 的 "cookieName" 属性。
+
+[[nsa-remember-me-key]]
+* **key**
+映射到 `AbstractRememberMeServices` 的 "key" 属性。
+应设置为唯一值以确保记住我的 cookie 仅在单个应用程序中有效 footnote:[
+这不影响 `PersistentTokenBasedRememberMeServices` 的使用，因为令牌存储在服务器端。
+]。
+如果未设置，将生成一个安全的随机值。
+由于生成安全随机值可能需要一段时间，显式设置此值可以帮助改善使用记住我功能时的启动时间。
+
+[[nsa-remember-me-services-alias]]
+* **services-alias**
+将内部定义的 `RememberMeServices` 导出为 Bean 别名，使其可以在应用程序上下文中的其他 Bean 中使用。
+
+[[nsa-remember-me-services-ref]]
+* **services-ref**
+允许完全控制过滤器将使用的 `RememberMeServices` 实现。
+该值应该是实现此接口的应用程序上下文中 Bean 的 `id`。
+如果使用注销过滤器，还应实现 `LogoutHandler`。
+
+[[nsa-remember-me-token-repository-ref]]
+* **token-repository-ref**
+配置 `PersistentTokenBasedRememberMeServices`，但允许使用自定义的 `PersistentTokenRepository` Bean。
+
+[[nsa-remember-me-token-validity-seconds]]
+* **token-validity-seconds**
+映射到 `AbstractRememberMeServices` 的 `tokenValiditySeconds` 属性。
+指定记住我 cookie 应有效的秒数。
+默认情况下，它将有效 14 天。
+
+[[nsa-remember-me-use-secure-cookie]]
+* **use-secure-cookie**
+建议记住我的 cookie 仅通过 HTTPS 提交，因此应标记为 "secure"。
+默认情况下，如果登录请求所通过的连接是安全的（应该是这样），则会使用安全 cookie。
+如果将此属性设置为 `false`，则不会使用安全 cookie。
+将其设置为 `true` 将始终在 cookie 上设置安全标志。
+此属性映射到 `AbstractRememberMeServices` 的 `useSecureCookie` 属性。
+
+[[nsa-remember-me-user-service-ref]]
+* **user-service-ref**
+记住我的服务实现需要访问 `UserDetailsService`，因此必须在应用程序上下文中定义一个。
+如果只有一个，它将被自动选择和使用。
+如果有多个实例，您可以使用此属性显式指定 Bean `id`。
+
+[[nsa-request-cache]]
+== <request-cache> 元素
+设置 `ExceptionTranslationFilter` 将用于在调用 `AuthenticationEntryPoint` 之前存储请求信息的 `RequestCache` 实例。
+
+[[nsa-request-cache-parents]]
+=== <request-cache> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-request-cache-attributes]]
+=== <request-cache> 属性
+
+[[nsa-request-cache-ref]]
+* **ref**
+定义对 `RequestCache` 的 Spring Bean 的引用。
+
+[[nsa-session-management]]
+== <session-management>
+会话管理相关功能通过向过滤器堆栈添加 `SessionManagementFilter` 来实现。
+
+[[nsa-session-management-parents]]
+=== <session-management> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-session-management-attributes]]
+=== <session-management> 属性
+
+[[nsa-session-management-authentication-strategy-explicit-invocation]]
+* **authentication-strategy-explicit-invocation**
+将此属性设置为 true 意味着 `SessionManagementFilter` 不会被注入，需要显式调用 SessionAuthenticationStrategy。
+
+[[nsa-session-management-invalid-session-url]]
+* **invalid-session-url**
+设置此属性将向 `SessionManagementFilter` 注入一个配置了属性值的 `SimpleRedirectInvalidSessionStrategy`。
+当提交无效的会话 ID 时，将调用该策略，重定向到配置的 URL。
+
+[[nsa-session-management-invalid-session-strategy-ref]]
+* **invalid-session-url**
+允许注入 `SessionManagementFilter` 使用的 InvalidSessionStrategy 实例。
+使用此属性或 `invalid-session-url` 属性，但不要同时使用两者。
+
+[[nsa-session-management-session-authentication-error-url]]
+* **session-authentication-error-url**
+定义当 SessionAuthenticationStrategy 引发异常时应显示的错误页面的 URL。
+如果未设置，将向客户端返回未授权（401）错误代码。
+请注意，如果错误发生在基于表单的登录过程中，此属性不适用，此时认证失败的 URL 将优先。
+
+[[nsa-session-management-session-authentication-strategy-ref]]
+* **session-authentication-strategy-ref**
+允许注入 `SessionManagementFilter` 使用的 SessionAuthenticationStrategy 实例
+
+[[nsa-session-management-session-fixation-protection]]
+* **session-fixation-protection**
+指示在用户认证时如何应用会话固定保护。
+如果设置为 "none"，则不应用保护。
+"newSession" 将创建一个新的空会话，只迁移与 Spring Security 相关的属性。
+"migrateSession" 将创建一个新会话并将所有会话属性复制到新会话中。
+在 Servlet 3.1（Java EE 7）及更高版本的容器中，指定 "changeSessionId" 将保留现有会话并使用容器提供的会话固定保护（HttpServletRequest#changeSessionId()）。
+在 Servlet 3.1 及更高版本的容器中默认为 "changeSessionId"，在较旧的容器中默认为 "migrateSession"。
+如果在较旧的容器中使用 "changeSessionId"，将抛出异常。
+
++
+
+如果启用了会话固定保护，`SessionManagementFilter` 将被注入一个适当配置的 `DefaultSessionAuthenticationStrategy`。
+有关此类的更多详细信息，请参阅 Javadoc。
+
+[[nsa-session-management-children]]
+=== <session-management> 的子元素
+
+* <<nsa-concurrency-control,concurrency-control>>
+
+[[nsa-concurrency-control]]
+== <concurrency-control>
+添加对并发会话控制的支持，允许限制用户可以拥有的活动会话数量。
+将创建一个 `ConcurrentSessionFilter`，并且 `SessionManagementFilter` 将使用 `ConcurrentSessionControlAuthenticationStrategy`。
+如果已声明 `form-login` 元素，则策略对象也将被注入到创建的身份验证过滤器中。
+将创建一个 `SessionRegistry` 实例（除非用户希望使用自定义 Bean，否则为 `SessionRegistryImpl` 实例）供策略使用。
+
+[[nsa-concurrency-control-parents]]
+=== <concurrency-control> 的父元素
+
+* <<nsa-session-management,session-management>>
+
+[[nsa-concurrency-control-attributes]]
+=== <concurrency-control> 属性
+
+[[nsa-concurrency-control-error-if-maximum-exceeded]]
+* **error-if-maximum-exceeded**
+如果设置为 "true"，当用户试图超过允许的最大会话数时，将引发 `SessionAuthenticationException`。
+默认行为是使原始会话过期。
+
+[[nsa-concurrency-control-expired-url]]
+* **expired-url**
+如果用户试图使用已被并发会话控制器“过期”的会话（因为用户已超过允许的会话数并在其他地方重新登录），将重定向到的 URL。
+除非设置了 `exception-if-maximum-exceeded`，否则应设置此属性。
+如果未提供值，则只会将过期消息直接写回响应。
+
+[[nsa-concurrency-control-expired-session-strategy-ref]]
+* **expired-url**
+允许注入 `ConcurrentSessionFilter` 使用的 ExpiredSessionStrategy 实例
+
+[[nsa-concurrency-control-max-sessions]]
+* **max-sessions**
+映射到 `ConcurrentSessionControlAuthenticationStrategy` 的 `maximumSessions` 属性。
+指定 `-1` 作为值以支持无限会话。
+
+[[nsa-concurrency-control-session-registry-alias]]
+* **session-registry-alias**
+拥有对内部会话注册表的引用也可能对您的自定义 Bean 或管理界面有用。
+您可以使用 `session-registry-alias` 属性暴露内部 Bean，并为其赋予一个您可以在配置其他地方使用的名称。
+
+[[nsa-concurrency-control-session-registry-ref]]
+* **session-registry-ref**
+用户可以使用 `session-registry-ref` 属性提供自己的 `SessionRegistry` 实现。
+其他并发会话控制 Bean 将被连接以使用它。
+
+[[nsa-x509]]
+== <x509>
+添加对 X.509 身份验证的支持。
+将向堆栈中添加一个 `X509AuthenticationFilter`，并创建一个 `Http403ForbiddenEntryPoint` Bean。
+后者仅在没有使用其他身份验证机制时使用（其唯一功能是返回 HTTP 403 错误代码）。
+还将创建一个 `PreAuthenticatedAuthenticationProvider`，它将委托给 `UserDetailsService` 加载用户权限。
+
+[[nsa-x509-parents]]
+=== <x509> 的父元素
+
+* <<nsa-http,http>>
+
+[[nsa-x509-attributes]]
+=== <x509> 属性
+
+[[nsa-x509-authentication-details-source-ref]]
+* **authentication-details-source-ref**
+对 `AuthenticationDetailsSource` 的引用
+
+[[nsa-x509-subject-principal-regex]]
+* **subject-principal-regex**
+定义用于从证书中提取用户名（用于 `UserDetailsService`）的正则表达式。
+
+[[nsa-x509-user-service-ref]]
+* **user-service-ref**
+允许在配置了多个实例的情况下，使用特定的 `UserDetailsService` 与 X.509 结合使用。
+如果未设置，将尝试自动定位合适的实例并使用它。
+
+[[nsa-filter-chain-map]]
+== <filter-chain-map>
+用于显式配置带有 FilterChainMap 的 FilterChainProxy 实例
+
+[[nsa-filter-chain-map-attributes]]
+=== <filter-chain-map> 属性
+
+[[nsa-filter-chain-map-request-matcher]]
+* **request-matcher**
+定义用于匹配传入请求的策略。
+目前选项为 'ant'（用于 ant 路径模式）、'regex' 用于正则表达式和 'ciRegex' 用于大小写不敏感的正则表达式。
+
+[[nsa-filter-chain-map-children]]
+=== <filter-chain-map> 的子元素
+
+* <<nsa-filter-chain,filter-chain>>
+
+[[nsa-filter-chain]]
+== <filter-chain>
+用于定义特定的 URL 模式和适用于匹配该模式的 URL 的过滤器列表。
+当多个 filter-chain 元素按顺序组装以配置 FilterChainProxy 时，最具体的模式必须放在列表顶部，最一般的放在底部。
+
+[[nsa-filter-chain-parents]]
+=== <filter-chain> 的父元素
+
+* <<nsa-filter-chain-map,filter-chain-map>>
+
+[[nsa-filter-chain-attributes]]
+=== <filter-chain> 属性
+
+[[nsa-filter-chain-filters]]
+* **filters**
+引用实现 `Filter` 的 Spring Bean 的逗号分隔列表。
+值 "none" 表示此 `FilterChain` 不应使用任何 `Filter`。
+
+[[nsa-filter-chain-pattern]]
+* **pattern**
+与 <<nsa-filter-chain-map-request-matcher,request-matcher>> 结合创建 RequestMatcher 的模式
+
+[[nsa-filter-chain-request-matcher-ref]]
+* **request-matcher-ref**
+对 `RequestMatcher` 的引用，用于确定是否应调用 `filters` 属性中的任何 `Filter`。
+
+[[nsa-filter-security-metadata-source]]
+== <filter-security-metadata-source>
+用于显式配置 FilterSecurityMetadataSource Bean，供 FilterSecurityInterceptor 使用。
+通常仅在显式配置 FilterChainProxy 时才需要，而不是使用 <http> 元素。
+使用的 intercept-url 元素应仅包含 pattern、method 和 access 属性。
+任何其他属性将导致配置错误。
+
+[[nsa-filter-security-metadata-source-attributes]]
+=== <filter-security-metadata-source> 属性
+
+[[nsa-filter-security-metadata-source-id]]
+* **id**
+Bean 标识符，用于在上下文中引用该 Bean。
+
+[[nsa-filter-security-metadata-source-request-matcher]]
+* **request-matcher**
+定义用于匹配传入请求的策略。
+目前选项为 'ant'（用于 ant 路径模式）、'regex' 用于正则表达式和 'ciRegex' 用于大小写不敏感的正则表达式。
+
+[[nsa-filter-security-metadata-source-use-expressions]]
+* **use-expressions**
+启用在 <intercept-url> 元素的 'access' 属性中使用表达式，而不是传统的配置属性列表。
+默认为 'true'。
+如果启用，每个属性应包含一个布尔表达式。
+如果表达式求值为 'true'，则将授予访问权限。
+
+[[nsa-filter-security-metadata-source-children]]
+=== <filter-security-metadata-source> 的子元素
+
+* <<nsa-intercept-url,intercept-url>>

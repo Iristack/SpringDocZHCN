@@ -1,0 +1,16 @@
+[[authorization]]
+= 授权（Authorization）
+
+Spring Security 对 https://en.wikipedia.org/wiki/Authorization[授权] 提供了全面的支持。  
+授权是指确定哪些用户被允许访问特定资源的过程。  
+通过支持基于请求的授权和基于方法调用的授权，Spring Security 实现了 https://en.wikipedia.org/wiki/Defense_in_depth_(computing)[纵深防御]。
+
+[[authorization-request]]
+== 基于请求的授权
+
+Spring Security 针对 xref:servlet/authorization/authorize-http-requests.adoc[Servlet] 和 xref:reactive/authorization/authorize-http-requests.adoc[WebFlux] 环境，提供了基于请求的授权机制。
+
+[[authorization-method]]
+== 基于方法的授权
+
+Spring Security 针对 xref:servlet/authorization/method-security.adoc[Servlet] 和 xref:reactive/authorization/method.adoc[WebFlux] 环境，提供了基于方法调用的授权机制。

@@ -1,0 +1,23 @@
+[[test-mockmvc-smmrpp]]
+= SecurityMockMvcRequestPostProcessors
+:page-section-summary-toc: 1
+Spring MVC Test 提供了一个便捷的接口（`RequestPostProcessor`），可用于修改请求。  
+Spring Security 提供了多个 `RequestPostProcessor` 实现，使测试变得更加容易。  
+要使用 Spring Security 的 `RequestPostProcessor` 实现，请使用以下静态导入：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*
+----
+======

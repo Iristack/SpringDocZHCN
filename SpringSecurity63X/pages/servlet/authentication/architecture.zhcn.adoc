@@ -1,0 +1,265 @@
+[[servlet-authentication-architecture]]
+= Servlet 认证架构
+:figures: servlet/authentication/architecture
+
+本节内容在 xref:servlet/architecture.adoc#servlet-architecture[Servlet 安全：整体概览] 的基础上进一步展开，介绍 Spring Security 在 Servlet 认证中使用的主要架构组件。
+如需了解这些组件如何协同工作的具体流程，请参阅 xref:servlet/authentication/index.adoc#servlet-authentication-mechanisms[认证机制] 中的特定章节。
+
+* <<servlet-authentication-securitycontextholder>> - `SecurityContextHolder` 是 Spring Security 存储当前已 xref:features/authentication/index.adoc#authentication[认证] 用户信息的地方。
+* <<servlet-authentication-securitycontext>> - 从 `SecurityContextHolder` 获取，包含当前已认证用户的 `Authentication` 对象。
+* <<servlet-authentication-authentication>> - 可作为 `AuthenticationManager` 的输入，提供用户用于认证的凭据；也可表示来自 `SecurityContext` 的当前用户。
+* <<servlet-authentication-granted-authority>> - 授予 `Authentication` 主体的权限（例如角色、作用域等）。
+* <<servlet-authentication-authenticationmanager>> - 定义了 Spring Security 的过滤器如何执行 xref:features/authentication/index.adoc#authentication[认证] 的 API。
+* <<servlet-authentication-providermanager>> - `AuthenticationManager` 最常见的实现。
+* <<servlet-authentication-authenticationprovider>> - 被 `ProviderManager` 使用，用于执行特定类型的认证。
+* <<servlet-authentication-authenticationentrypoint>> - 用于向客户端请求凭据（例如重定向到登录页面、发送 `WWW-Authenticate` 响应等）。
+* <<servlet-authentication-abstractprocessingfilter>> - 用于认证的基础 `Filter`。  
+该部分也展示了认证的高层流程以及各组件之间的协作方式。
+
+[[servlet-authentication-securitycontextholder]]
+== SecurityContextHolder
+
+Spring Security 认证模型的核心是 `SecurityContextHolder`。  
+它包含了 <<servlet-authentication-securitycontext>>。
+
+[.invert-dark]
+image::{figures}/securitycontextholder.png[]
+
+`SecurityContextHolder` 是 Spring Security 存储谁已 xref:features/authentication/index.adoc#authentication[认证] 的详细信息的位置。  
+Spring Security 不关心 `SecurityContextHolder` 是如何被填充的。  
+只要其中包含值，就会被视为当前已认证的用户。
+
+最简单的认证方式是直接设置 `SecurityContextHolder`：
+
+.设置 `SecurityContextHolder`
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+SecurityContext context = SecurityContextHolder.createEmptyContext(); // <1>
+Authentication authentication =
+    new TestingAuthenticationToken("username", "password", "ROLE_USER"); // <2>
+context.setAuthentication(authentication);
+
+SecurityContextHolder.setContext(context); // <3>
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val context: SecurityContext = SecurityContextHolder.createEmptyContext() // <1>
+val authentication: Authentication = TestingAuthenticationToken("username", "password", "ROLE_USER") // <2>
+context.authentication = authentication
+
+SecurityContextHolder.setContext(context) // <3>
+----
+======
+
+<1> 首先创建一个空的 `SecurityContext`。  
+建议创建新的 `SecurityContext` 实例，而不是使用 `SecurityContextHolder.getContext().setAuthentication(authentication)`，以避免多线程环境下的竞态条件。
+<2> 然后创建一个新的 <<servlet-authentication-authentication,`Authentication`>> 对象。  
+Spring Security 并不关心 `SecurityContext` 上设置的是哪种 `Authentication` 实现。  
+此处我们使用 `TestingAuthenticationToken`，因为它非常简单。  
+更常见的生产场景是使用 `UsernamePasswordAuthenticationToken(userDetails, password, authorities)`。
+<3> 最后将 `SecurityContext` 设置到 `SecurityContextHolder` 中。  
+Spring Security 将使用此信息进行 xref:servlet/authorization/index.adoc#servlet-authorization[授权]。
+
+要获取已认证主体的信息，可以通过访问 `SecurityContextHolder` 来实现。
+
+.访问当前已认证的用户
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+SecurityContext context = SecurityContextHolder.getContext();
+Authentication authentication = context.getAuthentication();
+String username = authentication.getName();
+Object principal = authentication.getPrincipal();
+Collection<? extends GrantedAuthority> authorities = authentication.getAuthorities();
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val context = SecurityContextHolder.getContext()
+val authentication = context.authentication
+val username = authentication.name
+val principal = authentication.principal
+val authorities = authentication.authorities
+----
+======
+
+// FIXME: 添加对 HttpServletRequest.getRemoteUser() 和 @CurrentSecurityContext @AuthenticationPrincipal 的链接和相关说明
+
+默认情况下，`SecurityContextHolder` 使用 `ThreadLocal` 来存储这些信息，这意味着 `SecurityContext` 对同一线程中的方法始终可用，即使没有显式地将 `SecurityContext` 作为参数传递给这些方法。  
+只要在当前主体的请求处理完成后清理线程，这种使用 `ThreadLocal` 的方式是相当安全的。  
+Spring Security 的 xref:servlet/architecture.adoc#servlet-filterchainproxy[FilterChainProxy] 会确保 `SecurityContext` 始终被清除。
+
+某些应用程序由于其特殊的线程工作方式，并不适合使用 `ThreadLocal`。  
+例如，一个 Swing 客户端可能希望 JVM 中的所有线程共享相同的 `SecurityContext`。  
+你可以在启动时为 `SecurityContextHolder` 配置一种策略，以指定上下文的存储方式。  
+对于独立应用，可以使用 `SecurityContextHolder.MODE_GLOBAL` 策略。  
+其他应用可能希望由安全线程派生出的新线程也继承相同的安全身份，这可以通过使用 `SecurityContextHolder.MODE_INHERITABLETHREADLOCAL` 实现。  
+你可以通过两种方式更改默认的 `SecurityContextHolder.MODE_THREADLOCAL` 模式：一是设置系统属性，二是调用 `SecurityContextHolder` 上的静态方法。  
+大多数应用无需更改默认模式。但如果你确实需要修改，请查看 `SecurityContextHolder` 的 JavaDoc 以了解更多细节。
+
+[[servlet-authentication-securitycontext]]
+== SecurityContext
+
+{security-api-url}org/springframework/security/core/context/SecurityContext.html[`SecurityContext`] 从 <<servlet-authentication-securitycontextholder>> 获取。  
+`SecurityContext` 包含一个 <<servlet-authentication-authentication>> 对象。
+
+[[servlet-authentication-authentication]]
+== Authentication
+
+{security-api-url}org/springframework/security/core/Authentication.html[`Authentication`] 接口在 Spring Security 中有两个主要用途：
+
+* 作为 <<servlet-authentication-authenticationmanager,`AuthenticationManager`>> 的输入，提供用户提交的认证凭据。  
+在此场景下，`isAuthenticated()` 返回 `false`。
+* 表示当前已认证的用户。  
+你可以从 <<servlet-authentication-securitycontext>> 获取当前的 `Authentication`。
+
+`Authentication` 包含以下内容：
+
+* `principal`：标识用户。  
+在基于用户名/密码的认证中，通常是一个 xref:servlet/authentication/passwords/user-details.adoc#servlet-authentication-userdetails[`UserDetails`] 实例。
+* `credentials`：通常是密码。  
+在用户认证成功后，通常会被清除，以防止敏感信息泄露。
+* `authorities`：<<servlet-authentication-granted-authority,`GrantedAuthority`>> 实例，表示授予用户的高级权限。  
+常见例子包括角色和作用域。
+
+[[servlet-authentication-granted-authority]]
+== GrantedAuthority
+{security-api-url}org/springframework/security/core/GrantedAuthority.html[`GrantedAuthority`] 实例表示授予用户的高级权限。  
+典型示例包括角色和作用域。
+
+你可以通过 <<servlet-authentication-authentication,`Authentication.getAuthorities()`>> 方法获取 `GrantedAuthority` 实例。  
+该方法返回一个 `GrantedAuthority` 对象的集合。  
+顾名思义，`GrantedAuthority` 是授予主体的权限。  
+这类权限通常是 "`roles`"，例如 `ROLE_ADMINISTRATOR` 或 `ROLE_HR_SUPERVISOR`。  
+这些角色随后可用于 Web 授权、方法授权和领域对象授权。  
+Spring Security 的其他部分会解释这些权限并期望它们存在。  
+在基于用户名/密码的认证中，`GrantedAuthority` 实例通常由 xref:servlet/authentication/passwords/user-details-service.adoc#servlet-authentication-userdetailsservice[`UserDetailsService`] 加载。
+
+通常，`GrantedAuthority` 对象是应用范围内的权限，不针对特定的领域对象。  
+因此，你不太可能会有一个 `GrantedAuthority` 来表示对编号为 54 的 `Employee` 对象的权限，因为如果存在数千个这样的权限，内存很快就会耗尽（或至少导致用户认证过程变得极慢）。  
+当然，Spring Security 明确设计用于处理此类常见需求，但你应该使用项目的领域对象安全功能来实现这一目的。
+
+[[servlet-authentication-authenticationmanager]]
+== AuthenticationManager
+
+{security-api-url}org/springframework/security/authentication/AuthenticationManager.html[`AuthenticationManager`] 是定义 Spring Security 过滤器如何执行 xref:features/authentication/index.adoc#authentication[认证] 的 API。  
+`AuthenticationManager` 返回的 <<servlet-authentication-authentication,`Authentication`>> 会被控制器（即 xref:servlet/architecture.adoc#servlet-security-filters[Spring Security 的 `Filters` 实例]）设置到 <<servlet-authentication-securitycontextholder>> 上。  
+如果你不与 Spring Security 的 `Filters` 实例集成，则可以直接设置 `SecurityContextHolder`，而无需使用 `AuthenticationManager`。
+
+虽然 `AuthenticationManager` 的实现可以是任意的，但最常见的实现是 <<servlet-authentication-providermanager,`ProviderManager`>>。  
+// FIXME: 添加配置说明
+
+[[servlet-authentication-providermanager]]
+== ProviderManager
+
+{security-api-url}org/springframework/security/authentication/ProviderManager.html[`ProviderManager`] 是 <<servlet-authentication-authenticationmanager,`AuthenticationManager`>> 最常用的实现。  
+`ProviderManager` 将认证委托给一个 <<servlet-authentication-authenticationprovider,`AuthenticationProvider`>> 实例列表。  
+每个 `AuthenticationProvider` 都有机会表明认证应成功、失败，或表示无法做出决定并交由下游的 `AuthenticationProvider` 决定。  
+如果没有一个配置的 `AuthenticationProvider` 能完成认证，则认证失败，并抛出 `ProviderNotFoundException` —— 一种特殊的 `AuthenticationException`，表示 `ProviderManager` 未配置支持传入的 `Authentication` 类型。
+
+[.invert-dark]
+image::{figures}/providermanager.png[]
+
+实际上，每个 `AuthenticationProvider` 都知道如何执行特定类型的认证。  
+例如，一个 `AuthenticationProvider` 可能能够验证用户名/密码，而另一个可能能够认证 SAML 断言。  
+这让每个 `AuthenticationProvider` 专注于特定类型的认证，同时支持多种认证方式，并只暴露一个单一的 `AuthenticationManager` Bean。
+
+`ProviderManager` 还允许配置一个可选的父级 `AuthenticationManager`，当所有 `AuthenticationProvider` 都无法完成认证时会咨询该父级。  
+父级可以是任何类型的 `AuthenticationManager`，但通常也是 `ProviderManager` 的实例。
+
+[.invert-dark]
+image::{figures}/providermanager-parent.png[]
+
+事实上，多个 `ProviderManager` 实例可能共享同一个父级 `AuthenticationManager`。  
+这种情况在存在多个 xref:servlet/architecture.adoc#servlet-securityfilterchain[`SecurityFilterChain`] 实例且具有部分共通认证逻辑（共享的父级 `AuthenticationManager`）但又有不同认证机制（不同的 `ProviderManager` 实例）的场景中较为常见。
+
+[.invert-dark]
+image::{figures}/providermanagers-parent.png[]
+
+[[servlet-authentication-providermanager-erasing-credentials]]
+默认情况下，`ProviderManager` 会尝试清除成功认证返回的 `Authentication` 对象中的敏感凭据信息。  
+这可以防止密码等信息在 `HttpSession` 中保留过长时间。
+
+这在使用用户对象缓存（例如为了提升无状态应用的性能）时可能会引发问题。  
+如果 `Authentication` 包含对缓存中对象的引用（例如 `UserDetails` 实例），而其凭据被移除，则无法再使用缓存值进行认证。  
+使用缓存时必须考虑这一点。  
+明显的解决方案是在缓存实现或创建返回的 `Authentication` 对象的 `AuthenticationProvider` 中先复制该对象。  
+或者，你可以禁用 `ProviderManager` 上的 `eraseCredentialsAfterAuthentication` 属性。  
+详见 {security-api-url}org/springframework/security/authentication/ProviderManager.html[ProviderManager] 类的 Javadoc。
+
+[[servlet-authentication-authenticationprovider]]
+== AuthenticationProvider
+
+你可以将多个 {security-api-url}org/springframework/security/authentication/AuthenticationProvider.html[``AuthenticationProvider``] 实例注入到 <<servlet-authentication-providermanager,`ProviderManager`>> 中。  
+每个 `AuthenticationProvider` 执行一种特定类型的认证。  
+例如，xref:servlet/authentication/passwords/dao-authentication-provider.adoc#servlet-authentication-daoauthenticationprovider[`DaoAuthenticationProvider`] 支持基于用户名/密码的认证，而 `JwtAuthenticationProvider` 支持 JWT 令牌的认证。
+
+[[servlet-authentication-authenticationentrypoint]]
+== 使用 `AuthenticationEntryPoint` 请求凭据
+
+{security-api-url}org/springframework/security/web/AuthenticationEntryPoint.html[`AuthenticationEntryPoint`] 用于发送 HTTP 响应，向客户端请求凭据。
+
+有时，客户端会主动包含凭据（如用户名和密码）来请求资源。  
+在这种情况下，Spring Security 无需再提供要求凭据的 HTTP 响应，因为凭据已经包含在请求中。
+
+而在其他情况下，客户端会向其无权访问的资源发起未认证请求。  
+此时，`AuthenticationEntryPoint` 的实现将被用来向客户端请求凭据。  
+`AuthenticationEntryPoint` 的实现可能会执行 xref:servlet/authentication/passwords/form.adoc#servlet-authentication-form[重定向到登录页面]、响应包含 xref:servlet/authentication/passwords/basic.adoc#servlet-authentication-basic[WWW-Authenticate] 头部的 HTTP 响应，或其他操作。
+
+// FIXME: authenticationsuccesshandler
+// FIXME: authenticationfailurehandler
+
+[[servlet-authentication-abstractprocessingfilter]]
+== AbstractAuthenticationProcessingFilter
+
+{security-api-url}org/springframework/security/web/authentication/AbstractAuthenticationProcessingFilter.html[`AbstractAuthenticationProcessingFilter`] 是用于认证用户凭据的基础 `Filter`。  
+在认证凭据之前，Spring Security 通常会使用 <<servlet-authentication-authenticationentrypoint,`AuthenticationEntryPoint`>> 向客户端请求凭据。
+
+接着，`AbstractAuthenticationProcessingFilter` 可以对其接收到的认证请求进行认证。
+
+[.invert-dark]
+image::{figures}/abstractauthenticationprocessingfilter.png[]
+
+image:{icondir}/number_1.png[] 当用户提交凭据时，`AbstractAuthenticationProcessingFilter` 从 `HttpServletRequest` 创建一个用于认证的 <<servlet-authentication-authentication,`Authentication`>> 对象。  
+所创建的 `Authentication` 类型取决于 `AbstractAuthenticationProcessingFilter` 的子类。  
+例如，xref:servlet/authentication/passwords/form.adoc#servlet-authentication-usernamepasswordauthenticationfilter[`UsernamePasswordAuthenticationFilter`] 会根据 `HttpServletRequest` 中提交的 __用户名__ 和 __密码__ 创建一个 `UsernamePasswordAuthenticationToken`。
+
+image:{icondir}/number_2.png[] 接着，该 <<servlet-authentication-authentication,`Authentication`>> 被传递给 <<servlet-authentication-authenticationmanager,`AuthenticationManager`>> 进行认证。
+
+image:{icondir}/number_3.png[] 如果认证失败，则进入 __失败__ 流程：
+
+* 清空 <<servlet-authentication-securitycontextholder>>；
+* 调用 `RememberMeServices.loginFail`。  
+如果未配置“记住我”功能，则此操作无效。  
+详见 {security-api-url}org/springframework/security/web/authentication/rememberme/package-frame.html[`rememberme`] 包；
+* 调用 `AuthenticationFailureHandler`。  
+详见 {security-api-url}org/springframework/security/web/authentication/AuthenticationFailureHandler.html[`AuthenticationFailureHandler`] 接口。
+
+image:{icondir}/number_4.png[] 如果认证成功，则进入 __成功__ 流程：
+
+* 通知 `SessionAuthenticationStrategy` 新的登录事件。  
+详见 {security-api-url}org/springframework/security/web/authentication/session/SessionAuthenticationStrategy.html[`SessionAuthenticationStrategy`] 接口；
+* 将 <<servlet-authentication-authentication>> 设置到 <<servlet-authentication-securitycontextholder>> 上。  
+之后，若需保存 `SecurityContext` 以便在后续请求中自动恢复，则必须显式调用 `SecurityContextRepository#saveContext`。  
+详见 {security-api-url}org/springframework/security/web/context/SecurityContextHolderFilter.html[`SecurityContextHolderFilter`] 类；
+* 调用 `RememberMeServices.loginSuccess`。  
+如果未配置“记住我”功能，则此操作无效。  
+详见 {security-api-url}org/springframework/security/web/authentication/rememberme/package-frame.html[`rememberme`] 包；
+* `ApplicationEventPublisher` 发布一个 `InteractiveAuthenticationSuccessEvent` 事件；
+* 调用 `AuthenticationSuccessHandler`。  
+详见 {security-api-url}org/springframework/security/web/authentication/AuthenticationSuccessHandler.html[`AuthenticationSuccessHandler`] 接口。
+
+// daoauthenticationprovider (goes in username/password)

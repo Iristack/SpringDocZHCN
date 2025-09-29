@@ -1,0 +1,236 @@
+[[webflux-observability]]
+= 可观测性
+
+Spring Security 开箱即用地与 Spring Observability 集成，支持分布式追踪；同时配置指标收集也非常简单。
+
+[[webflux-observability-tracing]]
+== 追踪（Tracing）
+
+当存在 `ObservationRegistry` Bean 时，Spring Security 会为以下组件创建追踪信息：
+
+* 过滤器链（filter chain）
+* `ReactiveAuthenticationManager`
+* `ReactiveAuthorizationManager`
+
+[[webflux-observability-tracing-boot]]
+=== Boot 集成
+
+例如，考虑一个简单的 Spring Boot 应用程序：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@SpringBootApplication
+public class MyApplication {
+	@Bean
+	public ReactiveUserDetailsService userDetailsService() {
+		return new MapReactiveUserDetailsManager(
+				User.withDefaultPasswordEncoder()
+						.username("user")
+						.password("password")
+						.authorities("app")
+						.build()
+		);
+	}
+
+	@Bean
+	ObservationRegistryCustomizer<ObservationRegistry> addTextHandler() {
+		return (registry) -> registry.observationConfig().observationHandler(new ObservationTextPublisher());
+	}
+
+	public static void main(String[] args) {
+		SpringApplication.run(ListenerSamplesApplication.class, args);
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@SpringBootApplication
+class MyApplication {
+	@Bean
+	fun userDetailsService(): ReactiveUserDetailsService {
+		MapReactiveUserDetailsManager(
+				User.withDefaultPasswordEncoder()
+						.username("user")
+						.password("password")
+						.authorities("app")
+						.build()
+		);
+	}
+
+	@Bean
+	fun addTextHandler(): ObservationRegistryCustomizer<ObservationRegistry> {
+		return registry: ObservationRegistry -> registry.observationConfig()
+				.observationHandler(ObservationTextPublisher());
+	}
+
+	fun main(args: Array<String>) {
+		runApplication<MyApplication>(*args)
+	}
+}
+----
+======
+
+以及一个对应的请求：
+
+[source,bash]
+----
+?> http -a user:password :8080
+----
+
+将产生如下输出（缩进已添加以便清晰阅读）：
+
+[source,bash]
+----
+START - name='http.server.requests', contextualName='null', error='null', lowCardinalityKeyValues=[], highCardinalityKeyValues=[], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@5dfdb78', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=0.00191856, duration(nanos)=1918560.0, startTimeNanos=101177265022745}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@121549e0']
+	START - name='spring.security.http.chains', contextualName='spring.security.http.chains.before', error='null', lowCardinalityKeyValues=[chain.size='14', filter.section='before'], highCardinalityKeyValues=[request.line='/'], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@3932a48c', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=4.65777E-4, duration(nanos)=465777.0, startTimeNanos=101177276300777}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@562db70f']
+	STOP - name='spring.security.http.chains', contextualName='spring.security.http.chains.before', error='null', lowCardinalityKeyValues=[chain.size='14', filter.section='before'], highCardinalityKeyValues=[request.line='/'], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@3932a48c', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=0.003733105, duration(nanos)=3733105.0, startTimeNanos=101177276300777}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@562db70f']
+		START - name='spring.security.authentications', contextualName='null', error='null', lowCardinalityKeyValues=[authentication.failure.type='Optional', authentication.method='UserDetailsRepositoryReactiveAuthenticationManager', authentication.request.type='UsernamePasswordAuthenticationToken'], highCardinalityKeyValues=[], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@574ba6cd', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=3.21015E-4, duration(nanos)=321015.0, startTimeNanos=101177336038417}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@49202cc7']
+		STOP - name='spring.security.authentications', contextualName='null', error='null', lowCardinalityKeyValues=[authentication.failure.type='Optional', authentication.method='UserDetailsRepositoryReactiveAuthenticationManager', authentication.request.type='UsernamePasswordAuthenticationToken', authentication.result.type='UsernamePasswordAuthenticationToken'], highCardinalityKeyValues=[], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@574ba6cd', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=0.37574992, duration(nanos)=3.7574992E8, startTimeNanos=101177336038417}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@49202cc7']
+		START - name='spring.security.authorizations', contextualName='null', error='null', lowCardinalityKeyValues=[object.type='SecurityContextServerWebExchange'], highCardinalityKeyValues=[], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@6f837332', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=2.65687E-4, duration(nanos)=265687.0, startTimeNanos=101177777941381}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@7f5bc7cb']
+		STOP - name='spring.security.authorizations', contextualName='null', error='null', lowCardinalityKeyValues=[authorization.decision='true', object.type='SecurityContextServerWebExchange'], highCardinalityKeyValues=[authentication.authorities='[app]', authorization.decision.details='AuthorizationDecision [granted=true]'], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@6f837332', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=0.039239047, duration(nanos)=3.9239047E7, startTimeNanos=101177777941381}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@7f5bc7cb']
+		START - name='spring.security.http.secured.requests', contextualName='null', error='null', lowCardinalityKeyValues=[], highCardinalityKeyValues=[], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@2f33dfae', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=3.1775E-4, duration(nanos)=317750.0, startTimeNanos=101177821377592}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@63b0d28f']
+		STOP - name='spring.security.http.secured.requests', contextualName='null', error='null', lowCardinalityKeyValues=[], highCardinalityKeyValues=[], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@2f33dfae', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=0.219901971, duration(nanos)=2.19901971E8, startTimeNanos=101177821377592}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@63b0d28f']
+	START - name='spring.security.http.chains', contextualName='spring.security.http.chains.after', error='null', lowCardinalityKeyValues=[chain.size='14', filter.section='after'], highCardinalityKeyValues=[request.line='/'], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@40b25623', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=3.25118E-4, duration(nanos)=325118.0, startTimeNanos=101178044824275}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@3b6cec2']
+	STOP - name='spring.security.http.chains', contextualName='spring.security.http.chains.after', error='null', lowCardinalityKeyValues=[chain.size='14', filter.section='after'], highCardinalityKeyValues=[request.line='/'], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@40b25623', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=0.001693146, duration(nanos)=1693146.0, startTimeNanos=101178044824275}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@3b6cec2']
+STOP - name='http.server.requests', contextualName='null', error='null', lowCardinalityKeyValues=[], highCardinalityKeyValues=[], map=[class io.micrometer.tracing.handler.TracingObservationHandler$TracingContext='io.micrometer.tracing.handler.TracingObservationHandler$TracingContext@5dfdb78', class io.micrometer.core.instrument.LongTaskTimer$Sample='SampleImpl{duration(seconds)=0.784320641, duration(nanos)=7.84320641E8, startTimeNanos=101177265022745}', class io.micrometer.core.instrument.Timer$Sample='io.micrometer.core.instrument.Timer$Sample@121549e0']
+----
+
+[[webflux-observability-tracing-manual-configuration]]
+=== 手动配置
+
+对于非 Spring Boot 应用程序，或需要覆盖默认的 Boot 配置时，你可以手动发布自己的 `ObservationRegistry` Bean，Spring Security 依然会自动使用它。
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@SpringBootApplication
+public class MyApplication {
+	@Bean
+	public ReactiveUserDetailsService userDetailsService() {
+		return new MapReactiveUserDetailsManager(
+				User.withDefaultPasswordEncoder()
+						.username("user")
+						.password("password")
+						.authorities("app")
+						.build()
+		);
+	}
+
+	@Bean
+	ObservationRegistry<ObservationRegistry> observationRegistry() {
+		ObservationRegistry registry = ObservationRegistry.create();
+		registry.observationConfig().observationHandler(new ObservationTextPublisher());
+		return registry;
+	}
+
+	public static void main(String[] args) {
+		SpringApplication.run(ListenerSamplesApplication.class, args);
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@SpringBootApplication
+class MyApplication {
+	@Bean
+	fun userDetailsService(): ReactiveUserDetailsService {
+		MapReactiveUserDetailsManager(
+				User.withDefaultPasswordEncoder()
+						.username("user")
+						.password("password")
+						.authorities("app")
+						.build()
+		);
+	}
+
+	@Bean
+	fun observationRegistry(): ObservationRegistry<ObservationRegistry> {
+		val registry = ObservationRegistry.create()
+		registry.observationConfig().observationHandler(ObservationTextPublisher())
+		return registry
+	}
+
+	fun main(args: Array<String>) {
+		runApplication<MyApplication>(*args)
+	}
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<sec:http auto-config="true" observation-registry-ref="ref">
+	<sec:intercept-url pattern="/**" access="authenticated"/>
+</sec:http>
+
+<!-- 定义并配置 ObservationRegistry Bean -->
+----
+======
+
+[[webflux-observability-tracing-disable]]
+=== 禁用可观测性
+
+如果你不希望启用任何 Spring Security 的观测功能，在 Spring Boot 应用中可以通过发布一个 `ObservationRegistry.NOOP` 的 `@Bean` 来实现。  
+但请注意，这可能不仅禁用 Spring Security 的观测，还会影响其他组件的观测功能。
+
+更精确的做法是：通过 `ObservationPredicate` 修改现有的 `ObservationRegistry`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+ObservationRegistryCustomizer<ObservationRegistry> noSpringSecurityObservations() {
+	ObservationPredicate predicate = (name, context) -> !name.startsWith("spring.security.");
+	return (registry) -> registry.observationConfig().observationPredicate(predicate);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun noSpringSecurityObservations(): ObservationRegistryCustomizer<ObservationRegistry> {
+	val predicate = ObservationPredicate { name: String, _: Observation.Context -> !name.startsWith("spring.security.") }
+	return ObservationRegistryCustomizer { registry -> registry.observationConfig().observationPredicate(predicate) }
+}
+----
+======
+
+[TIP]
+XML 配置方式不支持禁用观测功能。  
+如果不希望启用观测，只需不要设置 `observation-registry-ref` 属性即可。
+
+[[webflux-observability-tracing-listing]]
+=== 追踪记录列表
+
+Spring Security 在每个请求中跟踪以下跨度（spans）：
+
+1. `spring.security.http.requests` —— 包裹整个过滤器链（包括请求处理）的跨度
+2. `spring.security.http.chains.before` —— 包裹安全过滤器接收阶段的跨度
+3. `spring.security.http.chains.after` —— 包裹安全过滤器返回阶段的跨度
+4. `spring.security.http.secured.requests` —— 包裹已被保护的应用请求的跨度
+5. `spring.security.http.unsecured.requests` —— 包裹 Spring Security 未进行保护的请求的跨度
+6. `spring.security.authentications` —— 包裹认证尝试的跨度
+7. `spring.security.authorizations` —— 包裹授权尝试的跨度
+
+[TIP]
+`spring.security.http.chains.before` + `spring.security.http.secured.requests` + `spring.security.http.chains.after` = `spring.security.http.requests`  
+`spring.security.http.chains.before` + `spring.security.http.chains.after` = 请求中由 Spring Security 处理的部分

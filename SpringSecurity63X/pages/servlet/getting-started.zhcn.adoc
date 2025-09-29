@@ -1,0 +1,170 @@
+[[servlet-hello]]
+= 你好，Spring Security
+
+本节介绍如何将 Spring Security 与 {spring-boot-reference-url}[Spring Boot] 配合使用的最基本配置，并在之后指引你下一步的操作。
+
+[NOTE]
+====
+完整的入门应用可以在我们的示例仓库中找到：{gh-samples-url}/servlet/spring-boot/java/hello-security。
+为方便起见，你可以下载一个由 Spring Initializr 准备的最小化 Spring Boot + Spring Security 应用：https://start.spring.io/starter.zip?type=maven-project&language=java&packaging=jar&jvmVersion=1.8&groupId=example&artifactId=hello-security&name=hello-security&description=Hello%20Security&packageName=example.hello-security&dependencies=web,security。
+====
+
+[[servlet-hello-dependencies]]
+== 更新依赖项
+
+你需要首先将 Spring Security 添加到应用程序的类路径中；有两种方式可以实现这一点：使用 xref:getting-spring-security.adoc#getting-maven-boot[Maven] 或 xref:getting-spring-security.adoc#getting-gradle-boot[Gradle]。
+
+[[servlet-hello-starting]]
+== 启动 Hello Spring Security Boot
+
+当 Spring Security 已 <<servlet-hello-dependencies,位于类路径上>> 时，你现在可以运行 {spring-boot-reference-url}#using.running-your-application[Spring Boot 应用程序]。  
+以下片段展示了部分输出内容，表明 Spring Security 已在你的应用中启用：
+
+.运行 Spring Boot 应用程序
+[tabs]
+======
+Maven::
++
+[source,bash,role="primary"]
+----
+$ ./mvnw spring-boot:run
+...
+INFO 23689 --- [  restartedMain] .s.s.UserDetailsServiceAutoConfiguration :
+
+Using generated security password: 8e557245-73e2-4286-969a-ff57fe326336
+
+...
+----
+
+Gradle::
++
+[source,bash,role="secondary"]
+----
+$ ./gradlew :bootRun
+...
+INFO 23689 --- [  restartedMain] .s.s.UserDetailsServiceAutoConfiguration :
+
+Using generated security password: 8e557245-73e2-4286-969a-ff57fe326336
+
+...
+----
+
+Jar::
++
+[source,bash,role="secondary"]
+----
+$ java -jar target/myapplication-0.0.1.jar
+...
+INFO 23689 --- [  restartedMain] .s.s.UserDetailsServiceAutoConfiguration :
+
+Using generated security password: 8e557245-73e2-4286-969a-ff57fe326336
+
+...
+----
+======
+
+现在你已经成功启动了应用，可以尝试访问某个端点来看看会发生什么。  
+如果你不带凭据地访问某个端点，例如：
+
+.查询受保护的 Boot 应用
+[source,bash]
+----
+$ curl -i http://localhost:8080/some/path
+HTTP/1.1 401
+...
+----
+
+那么 Spring Security 将以 `401 Unauthorized` 拒绝访问。
+
+[TIP]
+如果你在浏览器中输入相同的 URL，它将重定向到默认登录页面。
+
+而如果你使用凭据（可在控制台输出中找到）进行请求，如下所示：
+
+.使用凭据查询
+[source,bash]
+----
+$ curl -i -u user:8e557245-73e2-4286-969a-ff57fe326336 http://localhost:8080/some/path
+HTTP/1.1 404
+...
+----
+
+则 Spring Boot 会处理该请求，但由于 `/some/path` 并不存在，因此返回 `404 Not Found`。
+
+接下来，你可以选择：
+
+* 更深入地了解 <<servlet-hello-auto-configuration,Spring Boot 默认为 Spring Security 启用了哪些功能>>
+* 阅读有关 <<security-use-cases,Spring Security 支持的常见使用场景>>
+* 开始配置认证机制：xref:servlet/authentication/index.adoc[认证]
+
+[[servlet-hello-auto-configuration]]
+== 运行时行为说明
+
+Spring Boot 和 Spring Security 的默认配置在运行时提供了以下行为：
+
+* 要求对任意端点（包括 Boot 的 `/error` 端点）进行用户 xref:servlet/authorization/authorize-http-requests.adoc[身份验证]
+* xref:servlet/authentication/passwords/user-details-service.adoc[注册一个默认用户]，并在启动时生成密码（密码会输出到控制台；如上例中的 `8e557245-73e2-4286-969a-ff57fe326336`）
+* 使用 BCrypt 对 xref:servlet/authentication/passwords/password-encoder.adoc[密码存储进行保护]，并支持其他编码方式
+* 提供基于表单的 xref:servlet/authentication/passwords/form.adoc[登录] 和 xref:servlet/authentication/logout.adoc[注销] 流程
+* 支持 xref:servlet/authentication/passwords/form.adoc[表单登录] 和 xref:servlet/authentication/passwords/basic.adoc[HTTP Basic 认证]
+* 提供内容协商：对 Web 请求重定向到登录页；对服务请求返回 `401 Unauthorized`
+* xref:servlet/exploits/csrf.adoc[防范 CSRF] 攻击
+* xref:servlet/authentication/session-management.adoc#ns-session-fixation[防范会话固定] 攻击
+* 写入 xref:servlet/exploits/headers.adoc#servlet-headers-hsts[Strict-Transport-Security] 头部，确保使用 HTTPS
+* 写入 xref:servlet/exploits/headers.adoc#servlet-headers-content-type-options[X-Content-Type-Options] 头部，防止 https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html#x-content-type-options[MIME 类型嗅探攻击]
+* 写入 xref:servlet/exploits/headers.adoc#servlet-headers-cache-control[缓存控制头部]，以保护已认证资源
+* 写入 xref:servlet/exploits/headers.adoc#servlet-headers-frame-options[X-Frame-Options] 头部，防止 https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html#x-frame-options[点击劫持攻击]
+* 与 xref:servlet/integrations/servlet-api.adoc[``HttpServletRequest`` 的认证方法] 集成
+* 发布 xref:servlet/authentication/events.adoc[认证成功和失败事件]
+
+理解 Spring Boot 是如何与 Spring Security 协作实现这些功能是有帮助的。  
+查看 {spring-boot-api-url}org/springframework/boot/autoconfigure/security/servlet/SecurityAutoConfiguration.html[Boot 的安全自动配置] 可知，其主要执行以下操作（简化以便说明）：
+
+.Spring Boot 安全自动配置
+[source,java]
+----
+@EnableWebSecurity <1>
+@Configuration
+public class DefaultSecurityConfig {
+    @Bean
+    @ConditionalOnMissingBean(UserDetailsService.class)
+    InMemoryUserDetailsManager inMemoryUserDetailsManager() { <2>
+        String generatedPassword = // ...;
+        return new InMemoryUserDetailsManager(User.withUsername("user")
+                .password(generatedPassword).roles("USER").build());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(AuthenticationEventPublisher.class)
+    DefaultAuthenticationEventPublisher defaultAuthenticationEventPublisher(ApplicationEventPublisher delegate) { <3>
+        return new DefaultAuthenticationEventPublisher(delegate);
+    }
+}
+----
+1. 添加 `@EnableWebSecurity` 注解。（这会发布 xref:servlet/architecture.adoc#servlet-securityfilterchain[Spring Security 默认的 `Filter` 链] 作为一个 `@Bean`）
+2. 发布一个 xref:servlet/authentication/passwords/user-details-service.adoc[`UserDetailsService`] `@Bean`，用户名为 `user`，密码是随机生成并打印到控制台的
+3. 发布一个 xref:servlet/authentication/events.adoc[`AuthenticationEventPublisher`] `@Bean`，用于发布认证事件
+
+[NOTE]
+Spring Boot 会将所有作为 `@Bean` 发布的 `Filter` 添加到应用的过滤器链中。这意味着，在 Spring Boot 中使用 `@EnableWebSecurity` 会自动为每个请求注册 Spring Security 的过滤器链。
+
+[[security-use-cases]]
+== 安全使用场景
+
+从这里开始，你可能有多个方向可以选择。为了确定下一步对你和你的应用最合适的方向，请考虑以下 Spring Security 设计用于解决的常见使用场景：
+
+* 我正在构建一个 REST API，需要 xref:servlet/oauth2/resource-server/jwt.adoc[验证 JWT] 或 xref:servlet/oauth2/resource-server/opaque-token.adoc[其他承载令牌]
+* 我正在构建一个 Web 应用、API 网关或 BFF（Backend For Frontend），并且：
+** 需要通过 xref:servlet/oauth2/login/core.adoc[OAuth 2.0 或 OIDC 登录]
+** 需要通过 xref:servlet/saml2/login/index.adoc[SAML 2.0 登录]
+** 需要通过 xref:servlet/authentication/cas.adoc[CAS 登录]
+* 我需要管理：
+** 用户信息，存储于 xref:servlet/authentication/passwords/ldap.adoc[LDAP] 或 xref:servlet/authentication/passwords/ldap.adoc#_active_directory[Active Directory]，或使用 xref:servlet/integrations/data.adoc[Spring Data]，或通过 xref:servlet/authentication/passwords/jdbc.adoc[JDBC]
+** xref:servlet/authentication/passwords/storage.adoc[密码存储]
+
+如果以上场景都不符合你的需求，建议按以下顺序思考你的应用：
+
+1. *协议*：首先考虑你的应用将使用的通信协议。对于基于 Servlet 的应用，Spring Security 支持 HTTP 以及 xref:servlet/integrations/websocket.adoc[WebSocket]。
+2. *认证*：其次，考虑用户如何 xref:servlet/authentication/index.adoc[进行认证]，以及该认证是有状态还是无状态。
+3. *授权*：然后，考虑你将如何判断 xref:servlet/authorization/index.adoc[用户被授权执行哪些操作]。
+4. *防御*：最后，xref:servlet/exploits/csrf.adoc#csrf-considerations[集成 Spring Security 的默认防护机制]，并评估你还需要哪些 xref:servlet/exploits/headers.adoc[额外的安全防护措施]。

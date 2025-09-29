@@ -1,0 +1,11 @@
+= LDAP 迁移
+
+以下步骤涉及如何配置 LDAP 组件以及如何使用嵌入式 LDAP 服务器的相关变更。
+
+== 使用 `UnboundId` 替代 `ApacheDS`
+
+ApacheDS 已经相当长一段时间未发布正式版本，且其在 Spring Security 中的类已在 5.2 版本中被 https://github.com/spring-projects/spring-security/pull/6376[弃用]。
+因此，Spring Security 将在 7.0 版本中停止对 ApacheDS 的支持。
+
+如果您当前正在使用 ApacheDS 作为嵌入式 LDAP 服务器，我们建议迁移到 https://ldap.com/unboundid-ldap-sdk-for-java/[UnboundId]。
+您可以在 xref:servlet/authentication/passwords/ldap.adoc#servlet-authentication-ldap-embedded[此章节] 找到相关说明，了解如何设置嵌入式的 UnboundId LDAP 服务器。

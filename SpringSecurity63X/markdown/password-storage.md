@@ -1,0 +1,723 @@
+Spring Security 的 `PasswordEncoder`
+接口用于对密码进行单向转换，以安全地存储密码。 由于 `PasswordEncoder`
+是单向的，因此当需要双向转换密码时（例如存储用于数据库身份验证的凭据），它并不适用。
+通常，`PasswordEncoder`
+用于存储密码，在用户认证时将用户提供的密码与存储的密码进行比对。
+
+# 密码存储历史 {#authentication-password-storage-history}
+
+多年来，存储密码的标准机制不断演进。
+起初，密码以明文形式存储。人们认为这些密码是安全的，因为保存密码的数据存储本身需要凭据才能访问。然而，恶意用户通过
+SQL
+注入等攻击手段找到了获取大量用户名和密码"数据转储"的方法。随着越来越多的用户凭据被公开，安全专家意识到必须采取更多措施来保护用户的密码。
+
+随后，开发者被鼓励使用单向哈希算法（如
+SHA-256）处理密码后再存储。当用户尝试登录时，系统会将用户输入密码的哈希值与存储的哈希值进行比较。这意味着系统只需存储密码的单向哈希值。一旦发生数据泄露，暴露的也只是密码的单向哈希值。由于哈希是单向的，并且从哈希值反推原始密码在计算上非常困难，因此破解所有密码所需的努力被认为不值得。为了攻破这一新机制，恶意用户开始创建称为
+[彩虹表](https://en.wikipedia.org/wiki/Rainbow_table)
+的查找表。他们不再每次猜测密码都重新计算哈希，而是预先计算一次并将其存入查找表中。
+
+为减轻彩虹表的有效性，开发者被建议使用加盐（salted）密码。哈希函数的输入不再是单纯的密码，而是为每个用户的密码生成一组随机字节（称为"盐"）。然后将盐和用户密码一起传入哈希函数，生成唯一的哈希值。盐将以明文形式与用户密码一同存储。当用户尝试登录时，系统会将存储的哈希值与当前输入密码结合存储的盐重新计算后的哈希值进行比较。由于每个用户的盐都是唯一的，导致每个盐和密码组合的哈希值也不同，从而使彩虹表失效。
+
+在现代，我们认识到加密哈希（如
+SHA-256）已不再足够安全。原因是现代硬件每秒可以执行数十亿次哈希计算，这使得逐个破解密码变得轻而易举。
+
+现在，开发者被鼓励使用自适应单向函数来存储密码。这种函数在验证密码时故意消耗大量资源（CPU、内存等）。自适应单向函数允许配置一个"工作因子"（work
+factor），该因子可随硬件性能提升而调整。我们建议将"工作因子"调整到在你的系统上验证一个密码大约耗时一秒。这样做的权衡是在保证安全性的同时，不会对自身系统造成过大负担或影响用户体验。Spring
+Security
+提供了一个良好的"工作因子"初始设置，但由于不同系统的性能差异巨大，我们鼓励用户根据自己的系统环境自定义"工作因子"。应使用的自适应单向函数示例包括
+[bcrypt](#authentication-password-storage-bcrypt)、[PBKDF2](#authentication-password-storage-pbkdf2)、[scrypt](#authentication-password-storage-scrypt)
+和 [argon2](#authentication-password-storage-argon2)。
+
+由于自适应单向函数本身设计为资源密集型操作，如果每次请求都验证用户名和密码，将显著降低应用程序性能。Spring
+Security（或其他任何库）无法加快密码验证速度，因为安全性正是通过增加验证过程的资源消耗来实现的。因此，建议用户使用长期凭据（即用户名和密码）换取短期凭据（如会话、OAuth
+Token 等）。短期凭据可以快速验证，且不会降低安全性。
+
+# DelegatingPasswordEncoder {#authentication-password-storage-dpe}
+
+在 Spring Security 5.0 之前，默认的 `PasswordEncoder` 是
+`NoOpPasswordEncoder`，它要求使用明文密码。根据
+[密码存储历史](#authentication-password-storage-history)
+部分的内容，你可能会预期现在的默认 `PasswordEncoder` 应该是类似
+`BCryptPasswordEncoder` 这样的实现。但实际情况忽略了三个现实问题：
+
+- 许多应用仍在使用旧的密码编码方式，难以轻松迁移。
+
+- 密码存储的最佳实践未来还会再次改变。
+
+- 作为一个框架，Spring Security 不能频繁引入破坏性变更。
+
+为此，Spring Security 引入了
+`DelegatingPasswordEncoder`，它通过以下方式解决了上述所有问题：
+
+- 确保使用当前推荐的密码存储方式对密码进行编码
+
+- 支持验证现代和传统格式的密码
+
+- 允许将来升级编码方式
+
+你可以通过 `PasswordEncoderFactories` 轻松创建
+`DelegatingPasswordEncoder` 实例：
+
+:::: example
+::: title
+创建默认的 DelegatingPasswordEncoder
+:::
+
+Java
+
+:   ``` java
+    PasswordEncoder passwordEncoder =
+        PasswordEncoderFactories.createDelegatingPasswordEncoder();
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    val passwordEncoder: PasswordEncoder = PasswordEncoderFactories.createDelegatingPasswordEncoder()
+    ```
+::::
+
+或者，你也可以创建自定义实例：
+
+:::: example
+::: title
+创建自定义的 DelegatingPasswordEncoder
+:::
+
+Java
+
+:   ``` java
+    String idForEncode = "bcrypt";
+    Map encoders = new HashMap<>();
+    encoders.put(idForEncode, new BCryptPasswordEncoder());
+    encoders.put("noop", NoOpPasswordEncoder.getInstance());
+    encoders.put("pbkdf2", Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_5());
+    encoders.put("pbkdf2@SpringSecurity_v5_8", Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_8());
+    encoders.put("scrypt", SCryptPasswordEncoder.defaultsForSpringSecurity_v4_1());
+    encoders.put("scrypt@SpringSecurity_v5_8", SCryptPasswordEncoder.defaultsForSpringSecurity_v5_8());
+    encoders.put("argon2", Argon2PasswordEncoder.defaultsForSpringSecurity_v5_2());
+    encoders.put("argon2@SpringSecurity_v5_8", Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8());
+    encoders.put("sha256", new StandardPasswordEncoder());
+
+    PasswordEncoder passwordEncoder =
+        new DelegatingPasswordEncoder(idForEncode, encoders);
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    val idForEncode = "bcrypt"
+    val encoders: MutableMap<String, PasswordEncoder> = mutableMapOf()
+    encoders[idForEncode] = BCryptPasswordEncoder()
+    encoders["noop"] = NoOpPasswordEncoder.getInstance()
+    encoders["pbkdf2"] = Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_5()
+    encoders["pbkdf2@SpringSecurity_v5_8"] = Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_8()
+    encoders["scrypt"] = SCryptPasswordEncoder.defaultsForSpringSecurity_v4_1()
+    encoders["scrypt@SpringSecurity_v5_8"] = SCryptPasswordEncoder.defaultsForSpringSecurity_v5_8()
+    encoders["argon2"] = Argon2PasswordEncoder.defaultsForSpringSecurity_v5_2()
+    encoders["argon2@SpringSecurity_v5_8"] = Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8()
+    encoders["sha256"] = StandardPasswordEncoder()
+
+    val passwordEncoder: PasswordEncoder = DelegatingPasswordEncoder(idForEncode, encoders)
+    ```
+::::
+
+## 密码存储格式 {#authentication-password-storage-dpe-format}
+
+密码的一般格式如下：
+
+:::: formalpara
+::: title
+DelegatingPasswordEncoder 存储格式
+:::
+
+``` text
+{id}encodedPassword
+```
+::::
+
+其中 `id` 是用于查找应使用哪个 `PasswordEncoder`
+的标识符，`encodedPassword` 是所选 `PasswordEncoder`
+编码后的原始密码。`id` 必须位于密码开头，以 `{` 开始，以 `}`
+结束。如果找不到对应的 `id`，则 `id` 将被设为
+null。例如，以下可能是使用不同 `id` 值编码的密码列表。所有原始密码均为
+`password`。
+
+:::: formalpara
+::: title
+DelegatingPasswordEncoder 编码密码示例
+:::
+
+``` text
+{bcrypt}$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG 
+{noop}password 
+{pbkdf2}5d923b44a6d129f3ddf3e3c8d29412723dcbde72445e8ef6bf3b508fbf17fa4ed4d6b99ca763d8dc 
+{scrypt}$e0801$8bWJaSu2IKSn9Z9kM+TPXfOc/9bdYSrN1oD9qfVThWEwdRTnO7re7Ei+fUZRJ68k9lTyuTeUp4of4g24hHnazw==$OAOec05+bXxvuu/1qZ6NUR+xQYvYv7BeL1QxwRpY5Pc=  
+{sha256}97cde38028ad898ebc02e690819fa220e88c62e0699403e94fff291cfffaf8410849f27605abcbc0 
+```
+::::
+
+- 第一个密码的 `PasswordEncoder` id 为 `bcrypt`，`encodedPassword` 值为
+  `$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG`。匹配时会委托给
+  `BCryptPasswordEncoder`
+
+- 第二个密码的 `PasswordEncoder` id 为 `noop`，`encodedPassword` 值为
+  `password`。匹配时会委托给 `NoOpPasswordEncoder`
+
+- 第三个密码的 `PasswordEncoder` id 为 `pbkdf2`，`encodedPassword` 值为
+  `5d923b44a6d129f3ddf3e3c8d29412723dcbde72445e8ef6bf3b508fbf17fa4ed4d6b99ca763d8dc`。匹配时会委托给
+  `Pbkdf2PasswordEncoder`
+
+- 第四个密码的 `PasswordEncoder` id 为 `scrypt`，`encodedPassword` 值为
+  `$e0801$8bWJaSu2IKSn9Z9kM+TPXfOc/9bdYSrN1oD9qfVThWEwdRTnO7re7Ei+fUZRJ68k9lTyuTeUp4of4g24hHnazw==$OAOec05+bXxvuu/1qZ6NUR+xQYvYv7BeL1QxwRpY5Pc=`。匹配时会委托给
+  `SCryptPasswordEncoder`
+
+- 最后一个密码的 `PasswordEncoder` id 为 `sha256`，`encodedPassword`
+  值为
+  `97cde38028ad898ebc02e690819fa220e88c62e0699403e94fff291cfffaf8410849f27605abcbc0`。匹配时会委托给
+  `StandardPasswordEncoder`
+
+:::: note
+::: title
+:::
+
+一些用户可能担心这种存储格式会暴露给潜在黑客。这其实无需担忧，因为密码的安全性并不依赖于算法保密。此外，大多数格式即使没有前缀也很容易被攻击者识别。例如，BCrypt
+密码通常以 `$2a$` 开头。
+::::
+
+## 密码编码 {#authentication-password-storage-dpe-encoding}
+
+构造函数中传入的 `idForEncode` 决定了用于编码密码的
+`PasswordEncoder`。在前面构建的 `DelegatingPasswordEncoder`
+示例中，这意味着对 `password` 进行编码的结果将由 `BCryptPasswordEncoder`
+处理，并以前缀 `{bcrypt}` 开头。最终结果如下所示：
+
+:::: formalpara
+::: title
+DelegatingPasswordEncoder 编码示例
+:::
+
+``` text
+{bcrypt}$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG
+```
+::::
+
+## 密码匹配 {#authentication-password-storage-dpe-matching}
+
+匹配基于 `{id}` 及其在构造函数中映射到的 `PasswordEncoder`。我们在
+[密码存储格式](#authentication-password-storage-dpe-format)
+中的例子展示了具体的工作方式。默认情况下，调用
+`matches(CharSequence, String)` 方法时，若传入的密码包含未映射的
+`id`（包括 null id），将抛出 `IllegalArgumentException`。可以通过
+`DelegatingPasswordEncoder.setDefaultPasswordEncoderForMatches(PasswordEncoder)`
+自定义此行为。
+
+利用
+`id`，我们可以匹配任意格式的密码编码，同时使用最现代的方式对新密码进行编码。这一点非常重要，因为与加密不同，密码哈希的设计初衷就是无法简单恢复明文。由于无法恢复明文，迁移现有密码非常困难。虽然用户从
+`NoOpPasswordEncoder`
+迁移相对容易，但我们仍选择默认包含它，以便简化入门体验。
+
+## 快速入门体验 {#authentication-password-storage-dep-getting-started}
+
+如果你正在搭建演示或示例项目，手动哈希用户密码会显得繁琐。为此提供了便捷机制来简化流程，但这仍然不适合生产环境使用。
+
+:::: example
+::: title
+withDefaultPasswordEncoder 示例
+:::
+
+Java
+
+:   ``` java
+    UserDetails user = User.withDefaultPasswordEncoder()
+      .username("user")
+      .password("password")
+      .roles("user")
+      .build();
+    System.out.println(user.getPassword());
+    // {bcrypt}$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    val user = User.withDefaultPasswordEncoder()
+        .username("user")
+        .password("password")
+        .roles("user")
+        .build()
+    println(user.password)
+    // {bcrypt}$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG
+    ```
+::::
+
+如果你要创建多个用户，还可以复用构建器：
+
+:::: example
+::: title
+withDefaultPasswordEncoder 复用构建器
+:::
+
+Java
+
+:   ``` java
+    UserBuilder users = User.withDefaultPasswordEncoder();
+    UserDetails user = users
+      .username("user")
+      .password("password")
+      .roles("USER")
+      .build();
+    UserDetails admin = users
+      .username("admin")
+      .password("password")
+      .roles("USER","ADMIN")
+      .build();
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    val users = User.withDefaultPasswordEncoder()
+    val user = users
+        .username("user")
+        .password("password")
+        .roles("USER")
+        .build()
+    val admin = users
+        .username("admin")
+        .password("password")
+        .roles("USER", "ADMIN")
+        .build()
+    ```
+::::
+
+这种方式确实会对存储的密码进行哈希处理，但密码仍会在内存和编译后的源代码中暴露。因此，它仍然不适合生产环境。对于生产环境，你应该
+[在外部对密码进行哈希](#authentication-password-storage-boot-cli)。
+
+## 使用 Spring Boot CLI 编码 {#authentication-password-storage-boot-cli}
+
+正确编码密码最简单的方法是使用 [Spring Boot
+CLI](https://docs.spring.io/spring-boot/docs/current/reference/html/spring-boot-cli.html)。
+
+例如，以下命令将密码 `password` 编码，适用于
+[DelegatingPasswordEncoder](#authentication-password-storage-dpe)：
+
+:::: formalpara
+::: title
+Spring Boot CLI encodepassword 示例
+:::
+
+    spring encodepassword password
+    {bcrypt}$2a$10$X5wFBtLrL/kHcmrOGGTrGufsBX8CJ0WpQpF3pgeuxBB/H73BK1DW6
+::::
+
+## 故障排除 {#authentication-password-storage-dpe-troubleshoot}
+
+当存储的某个密码缺少 `id` 时（如
+[密码存储格式](#authentication-password-storage-dpe-format)
+所述），会出现以下错误：
+
+    java.lang.IllegalArgumentException: There is no PasswordEncoder mapped for the id "null"
+        at org.springframework.security.crypto.password.DelegatingPasswordEncoder$UnmappedIdPasswordEncoder.matches(DelegatingPasswordEncoder.java:233)
+        at org.springframework.security.crypto.password.DelegatingPasswordEncoder.matches(DelegatingPasswordEncoder.java:196)
+
+解决此问题的最简单方法是确定当前密码的存储方式，并显式提供正确的
+`PasswordEncoder`。
+
+如果你是从 Spring Security 4.2.x 升级而来，可以通过 [暴露一个
+`NoOpPasswordEncoder`
+Bean](#authentication-password-storage-configuration) 来恢复之前的行为。
+
+另一种方法是为所有密码加上正确的 `id` 前缀，并继续使用
+`DelegatingPasswordEncoder`。例如，如果你使用的是 BCrypt，则需将密码从：
+
+    $2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG
+
+迁移到：
+
+    {bcrypt}$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG
+
+有关完整映射列表，请参阅
+[`PasswordEncoderFactories`](https://docs.spring.io/spring-security/site/docs/5.0.x/api/org/springframework/security/crypto/factory/PasswordEncoderFactories.html)
+的 Javadoc。
+
+# BCryptPasswordEncoder {#authentication-password-storage-bcrypt}
+
+`BCryptPasswordEncoder` 实现使用广泛支持的
+[bcrypt](https://en.wikipedia.org/wiki/Bcrypt)
+算法对密码进行哈希。为了增强抵御密码破解的能力，bcrypt
+故意设计得很慢。与其他自适应单向函数一样，应将其调整为在你的系统上验证密码约耗时一秒。`BCryptPasswordEncoder`
+的默认实现使用强度等级 10，详见
+[`BCryptPasswordEncoder`](https://docs.spring.io/spring-security/site/docs/current/api/org/springframework/security/crypto/bcrypt/BCryptPasswordEncoder.html)
+的
+Javadoc。建议你在自己的系统上测试并调整强度参数，使其验证密码的时间接近一秒。
+
+:::: example
+::: title
+BCryptPasswordEncoder
+:::
+
+Java
+
+:   ``` java
+    // 创建强度为 16 的编码器
+    BCryptPasswordEncoder encoder = new BCryptPasswordEncoder(16);
+    String result = encoder.encode("myPassword");
+    assertTrue(encoder.matches("myPassword", result));
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    // 创建强度为 16 的编码器
+    val encoder = BCryptPasswordEncoder(16)
+    val result: String = encoder.encode("myPassword")
+    assertTrue(encoder.matches("myPassword", result))
+    ```
+::::
+
+# Argon2PasswordEncoder {#authentication-password-storage-argon2}
+
+`Argon2PasswordEncoder` 实现使用
+[Argon2](https://en.wikipedia.org/wiki/Argon2)
+算法对密码进行哈希。Argon2 是
+[密码哈希竞赛](https://en.wikipedia.org/wiki/Password_Hashing_Competition)
+的获胜者。为了抵御在定制硬件上的密码破解，Argon2
+是一种故意缓慢且需要大量内存的算法。与其他自适应单向函数一样，应将其调整为在你的系统上验证密码约耗时一秒。当前
+`Argon2PasswordEncoder` 的实现需要 BouncyCastle 支持。
+
+:::: example
+::: title
+Argon2PasswordEncoder
+:::
+
+Java
+
+:   ``` java
+    // 使用所有默认值创建编码器
+    Argon2PasswordEncoder encoder = Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8();
+    String result = encoder.encode("myPassword");
+    assertTrue(encoder.matches("myPassword", result));
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    // 使用所有默认值创建编码器
+    val encoder = Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8()
+    val result: String = encoder.encode("myPassword")
+    assertTrue(encoder.matches("myPassword", result))
+    ```
+::::
+
+# Pbkdf2PasswordEncoder {#authentication-password-storage-pbkdf2}
+
+`Pbkdf2PasswordEncoder` 实现使用
+[PBKDF2](https://en.wikipedia.org/wiki/PBKDF2)
+算法对密码进行哈希。为了抵御密码破解，PBKDF2
+是一种故意缓慢的算法。与其他自适应单向函数一样，应将其调整为在你的系统上验证密码约耗时一秒。当需要符合
+FIPS 认证时，该算法是一个不错的选择。
+
+:::: example
+::: title
+Pbkdf2PasswordEncoder
+:::
+
+Java
+
+:   ``` java
+    // 使用所有默认值创建编码器
+    Pbkdf2PasswordEncoder encoder = Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_8();
+    String result = encoder.encode("myPassword");
+    assertTrue(encoder.matches("myPassword", result));
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    // 使用所有默认值创建编码器
+    val encoder = Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_8()
+    val result: String = encoder.encode("myPassword")
+    assertTrue(encoder.matches("myPassword", result))
+    ```
+::::
+
+# SCryptPasswordEncoder {#authentication-password-storage-scrypt}
+
+`SCryptPasswordEncoder` 实现使用
+[scrypt](https://en.wikipedia.org/wiki/Scrypt)
+算法对密码进行哈希。为了抵御在定制硬件上的密码破解，scrypt
+是一种故意缓慢且需要大量内存的算法。与其他自适应单向函数一样，应将其调整为在你的系统上验证密码约耗时一秒。
+
+:::: example
+::: title
+SCryptPasswordEncoder
+:::
+
+Java
+
+:   ``` java
+    // 使用所有默认值创建编码器
+    SCryptPasswordEncoder encoder = SCryptPasswordEncoder.defaultsForSpringSecurity_v5_8();
+    String result = encoder.encode("myPassword");
+    assertTrue(encoder.matches("myPassword", result));
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    // 使用所有默认值创建编码器
+    val encoder = SCryptPasswordEncoder.defaultsForSpringSecurity_v5_8()
+    val result: String = encoder.encode("myPassword")
+    assertTrue(encoder.matches("myPassword", result))
+    ```
+::::
+
+# 其他 `PasswordEncoder` {#authentication-password-storage-other}
+
+还存在大量其他 `PasswordEncoder`
+实现，它们的存在完全是为了向后兼容。这些类均已标记为弃用，表明它们不再被认为是安全的。不过目前没有计划移除它们，因为迁移现有的遗留系统较为困难。
+
+# 密码存储配置 {#authentication-password-storage-configuration}
+
+Spring Security 默认使用
+[DelegatingPasswordEncoder](#authentication-password-storage-dpe)。但是，你可以通过将
+`PasswordEncoder` 暴露为 Spring Bean 来自定义此行为。
+
+如果你是从 Spring Security 4.2.x 升级而来，可以通过暴露一个
+`NoOpPasswordEncoder` Bean 来恢复之前的行为。
+
+:::: warning
+::: title
+:::
+
+回退到 `NoOpPasswordEncoder` 不被认为是安全的做法。 你应该改为迁移到使用
+`DelegatingPasswordEncoder` 以支持安全的密码编码。
+::::
+
+:::: example
+::: title
+NoOpPasswordEncoder
+:::
+
+Java
+
+:   ``` java
+    @Bean
+    public static NoOpPasswordEncoder passwordEncoder() {
+        return NoOpPasswordEncoder.getInstance();
+    }
+    ```
+
+XML
+
+:   ``` xml
+    <b:bean id="passwordEncoder"
+            class="org.springframework.security.crypto.password.NoOpPasswordEncoder" factory-method="getInstance"/>
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    fun passwordEncoder(): PasswordEncoder {
+        return NoOpPasswordEncoder.getInstance();
+    }
+    ```
+::::
+
+:::: note
+::: title
+:::
+
+XML 配置要求 `NoOpPasswordEncoder` 的 Bean 名称为 `passwordEncoder`。
+::::
+
+# 更改密码配置 {#authentication-change-password-configuration}
+
+大多数允许用户设置密码的应用程序也需要提供更新密码的功能。
+
+[更改密码的知名
+URL](https://w3c.github.io/webappsec-change-password-url/)
+定义了一种机制，使密码管理器能够发现特定应用程序的密码更新端点。
+
+你可以配置 Spring Security
+以提供此发现端点。例如，如果你的应用程序中的更改密码端点是
+`/change-password`，则可以如下配置 Spring Security：
+
+:::: example
+::: title
+默认更改密码端点
+:::
+
+Java
+
+:   ``` java
+    http
+        .passwordManagement(Customizer.withDefaults())
+    ```
+
+XML
+
+:   ``` xml
+    <sec:password-management/>
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    http {
+        passwordManagement { }
+    }
+    ```
+::::
+
+此后，当密码管理器访问 `/.well-known/change-password` 时，Spring
+Security 将重定向到你的端点 `/change-password`。
+
+或者，如果你的端点不是 `/change-password`，也可以明确指定：
+
+:::: example
+::: title
+更改密码端点
+:::
+
+Java
+
+:   ``` java
+    http
+        .passwordManagement((management) -> management
+            .changePasswordPage("/update-password")
+        )
+    ```
+
+XML
+
+:   ``` xml
+    <sec:password-management change-password-page="/update-password"/>
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    http {
+        passwordManagement {
+            changePasswordPage = "/update-password"
+        }
+    }
+    ```
+::::
+
+通过以上配置，当密码管理器访问 `/.well-known/change-password` 时，Spring
+Security 将重定向到 `/update-password`。
+
+# 泄露密码检查 {#authentication-compromised-password-check}
+
+在某些场景下，你需要检查密码是否已被泄露。例如，如果你正在开发一个处理敏感数据的应用程序，通常需要对用户密码进行一些检查以确保其可靠性。其中一项检查就是判断密码是否已被泄露，通常是由于该密码出现在某次
+[数据泄露](https://wikipedia.org/wiki/Data_breach)事件中。
+
+为此，Spring Security 提供了与 [Have I Been Pwned
+API](https://haveibeenpwned.com/API/v3#PwnedPasswords) 的集成，通过
+{security-api-url}org/springframework/security/core/password/HaveIBeenPwnedRestApiPasswordChecker.html\[`HaveIBeenPwnedRestApiPasswordChecker`
+实现\] 实现了
+{security-api-url}org/springframework/security/core/password/CompromisedPasswordChecker.html\[`CompromisedPasswordChecker`
+接口\]。
+
+你可以自行使用 `CompromisedPasswordChecker` API，或者如果你正在使用
+[DaoAuthenticationProvider](servlet/authentication/passwords/dao-authentication-provider.xml)
+并通过 [Spring Security
+认证机制](servlet/authentication/passwords/index.xml)，只需提供一个
+`CompromisedPasswordChecker` Bean，Spring Security 配置将自动使用它。
+
+这样，当你尝试使用弱密码（如
+`123456`）通过表单登录进行身份验证时，你会收到 401 错误或被重定向到
+`/login?error` 页面（取决于用户代理）。然而，仅返回 401
+或重定向在此情况下不够友好，会导致用户困惑，因为他们输入了正确的密码却仍无法登录。在这种情况下，你可以通过
+`AuthenticationFailureHandler` 处理
+`CompromisedPasswordException`，执行自定义逻辑，例如将用户代理重定向到
+`/reset-password`：
+
+:::: example
+::: title
+使用 CompromisedPasswordChecker
+:::
+
+Java
+
+:   ``` java
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(authorize -> authorize
+                .anyRequest().authenticated()
+            )
+            .formLogin((login) -> login
+                .failureHandler(new CompromisedPasswordAuthenticationFailureHandler())
+            );
+        return http.build();
+    }
+
+    @Bean
+    public CompromisedPasswordChecker compromisedPasswordChecker() {
+        return new HaveIBeenPwnedRestApiPasswordChecker();
+    }
+
+    static class CompromisedPasswordAuthenticationFailureHandler implements AuthenticationFailureHandler {
+
+        private final SimpleUrlAuthenticationFailureHandler defaultFailureHandler = new SimpleUrlAuthenticationFailureHandler(
+                "/login?error");
+
+        private final RedirectStrategy redirectStrategy = new DefaultRedirectStrategy();
+
+        @Override
+        public void onAuthenticationFailure(HttpServletRequest request, HttpServletResponse response,
+                AuthenticationException exception) throws IOException, ServletException {
+            if (exception instanceof CompromisedPasswordException) {
+                this.redirectStrategy.sendRedirect(request, response, "/reset-password");
+                return;
+            }
+            this.defaultFailureHandler.onAuthenticationFailure(request, response, exception);
+        }
+
+    }
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    open fun filterChain(http:HttpSecurity): SecurityFilterChain {
+        http {
+            authorizeHttpRequests {
+                authorize(anyRequest, authenticated)
+            }
+            formLogin {
+                failureHandler = CompromisedPasswordAuthenticationFailureHandler()
+            }
+        }
+        return http.build()
+    }
+
+    @Bean
+    open fun compromisedPasswordChecker(): CompromisedPasswordChecker {
+        return HaveIBeenPwnedRestApiPasswordChecker()
+    }
+
+    class CompromisedPasswordAuthenticationFailureHandler : AuthenticationFailureHandler {
+        private val defaultFailureHandler = SimpleUrlAuthenticationFailureHandler("/login?error")
+        private val redirectStrategy = DefaultRedirectStrategy()
+
+        override fun onAuthenticationFailure(
+            request: HttpServletRequest,
+            response: HttpServletResponse,
+            exception: AuthenticationException
+        ) {
+            if (exception is CompromisedPasswordException) {
+                redirectStrategy.sendRedirect(request, response, "/reset-password")
+                return
+            }
+            defaultFailureHandler.onAuthenticationFailure(request, response, exception)
+        }
+    }
+    ```
+::::

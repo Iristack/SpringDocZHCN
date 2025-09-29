@@ -1,0 +1,5 @@
+= 集成
+:page-section-summary-toc: 1
+
+Spring Security 与多种框架和 API 进行了集成。  
+本节将介绍 Spring Security 与其他技术的各种集成方式：

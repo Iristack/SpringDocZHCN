@@ -1,0 +1,8 @@
+[[preparing]]
+= 为 7.0 版本做准备
+
+尽管 Spring Security 7.0 尚未确定发布日期，但现在开始为其做准备非常重要。
+
+本准备指南旨在总结 Spring Security 7.0 中最重要的变更，并提供相应的准备工作步骤。
+
+请确保您的应用程序保持使用最新的 Spring Security 6 和 Spring Boot 3 版本。

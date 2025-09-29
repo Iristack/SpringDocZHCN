@@ -1,0 +1,5 @@
+[[servlet-authentication-userdetails]]
+= UserDetails
+
+{security-api-url}org/springframework/security/core/userdetails/UserDetails.html[`UserDetails`] 由 xref:servlet/authentication/passwords/user-details-service.adoc#servlet-authentication-userdetailsservice[`UserDetailsService`] 返回。
+xref:servlet/authentication/passwords/dao-authentication-provider.adoc#servlet-authentication-daoauthenticationprovider[`DaoAuthenticationProvider`] 会验证 `UserDetails`，然后返回一个 xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[`Authentication`] 对象，该对象的主体（principal）即为配置的 `UserDetailsService` 所返回的 `UserDetails`。

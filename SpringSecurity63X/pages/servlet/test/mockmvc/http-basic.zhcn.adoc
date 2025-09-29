@@ -1,0 +1,32 @@
+= 测试 HTTP Basic 认证
+
+虽然一直以来都可以使用 HTTP Basic 进行认证，但记住请求头的名称、格式以及对值进行编码总是有些繁琐。  
+现在可以使用 Spring Security 的 `httpBasic` xref:servlet/test/mockmvc/request-post-processors.adoc[`RequestPostProcessor`] 来简化这一过程。  
+例如，下面的代码片段：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+mvc
+	.perform(get("/").with(httpBasic("user","password")))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+mvc.get("/") {
+    with(httpBasic("user","password"))
+}
+----
+======
+
+将尝试使用 HTTP Basic 认证用户名为 "user"、密码为 "password" 的用户，并确保在 HTTP 请求中包含以下请求头：
+
+[source,text]
+----
+Authorization: Basic dXNlcjpwYXNzd29yZA==
+----

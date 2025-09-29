@@ -1,0 +1,527 @@
+[[servlet-saml2login-authenticate-responses]]
+= 验证 ``<saml2:Response>`` 响应
+
+为了验证 SAML 2.0 响应，Spring Security 使用 xref:servlet/saml2/login/overview.adoc#servlet-saml2login-authentication-saml2authenticationtokenconverter[`Saml2AuthenticationTokenConverter`] 来填充 `Authentication` 请求，并使用 xref:servlet/saml2/login/overview.adoc#servlet-saml2login-architecture[`OpenSaml4AuthenticationProvider`] 对其进行认证。
+
+你可以通过以下几种方式对其进行配置：
+
+1. 更改 `RelyingPartyRegistration` 的查找方式
+2. 设置时间戳验证的时钟偏移（clock skew）
+3. 将响应映射为一组 `GrantedAuthority` 实例
+4. 自定义断言（assertion）验证策略
+5. 自定义响应和断言元素的解密策略
+
+要进行这些配置，你需要在 DSL 中使用 `saml2Login#authenticationManager` 方法。
+
+[[saml2-response-processing-endpoint]]
+== 更改 SAML 响应处理端点
+
+默认端点是 `+/login/saml2/sso/{registrationId}+`。  
+你可以在 DSL 和相关元数据中像下面这样更改它：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+SecurityFilterChain securityFilters(HttpSecurity http) throws Exception {
+	http
+        // ...
+        .saml2Login((saml2) -> saml2.loginProcessingUrl("/saml2/login/sso"))
+        // ...
+
+    return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun securityFilters(http: HttpSecurity): SecurityFilterChain {
+	http {
+        // ...
+        .saml2Login {
+            loginProcessingUrl = "/saml2/login/sso"
+        }
+        // ...
+    }
+
+    return http.build()
+}
+----
+======
+
+以及：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+relyingPartyRegistrationBuilder.assertionConsumerServiceLocation("/saml/SSO")
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+relyingPartyRegistrationBuilder.assertionConsumerServiceLocation("/saml/SSO")
+----
+======
+
+[[relyingpartyregistrationresolver-apply]]
+== 更改 `RelyingPartyRegistration` 查找逻辑
+
+默认情况下，该转换器会匹配任何关联的 `<saml2:AuthnRequest>` 或 URL 中找到的 `registrationId`。  
+或者，如果在这两种情况下都找不到，则会尝试根据 `<saml2:Response#Issuer>` 元素来查找。
+
+在某些场景下，你可能需要更复杂的查找机制，例如当你支持 `ARTIFACT` 绑定时。  
+在这种情况下，你可以通过自定义 `AuthenticationConverter` 来定制查找行为，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+SecurityFilterChain securityFilters(HttpSecurity http, AuthenticationConverter authenticationConverter) throws Exception {
+	http
+        // ...
+        .saml2Login((saml2) -> saml2.authenticationConverter(authenticationConverter))
+        // ...
+
+    return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun securityFilters(http: HttpSecurity, converter: AuthenticationConverter): SecurityFilterChain {
+	http {
+        // ...
+        .saml2Login {
+            authenticationConverter = converter
+        }
+        // ...
+    }
+
+    return http.build()
+}
+----
+======
+
+[[servlet-saml2login-opensamlauthenticationprovider-clockskew]]
+== 设置时钟偏移（Clock Skew）
+
+断言方（asserting party）与依赖方（relying party）的系统时钟不完全同步是很常见的现象。  
+因此，你可以为 ``OpenSaml4AuthenticationProvider`` 的默认断言验证器设置一定的容差：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        OpenSaml4AuthenticationProvider authenticationProvider = new OpenSaml4AuthenticationProvider();
+        authenticationProvider.setAssertionValidator(OpenSaml4AuthenticationProvider
+                .createDefaultAssertionValidator(assertionToken -> {
+                    Map<String, Object> params = new HashMap<>();
+                    params.put(CLOCK_SKEW, Duration.ofMinutes(10).toMillis());
+                    // ... 其他验证参数
+                    return new ValidationContext(params);
+                })
+        );
+
+        http
+            .authorizeHttpRequests(authz -> authz
+                .anyRequest().authenticated()
+            )
+            .saml2Login(saml2 -> saml2
+                .authenticationManager(new ProviderManager(authenticationProvider))
+            );
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+open class SecurityConfig {
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        val authenticationProvider = OpenSaml4AuthenticationProvider()
+        authenticationProvider.setAssertionValidator(
+            OpenSaml4AuthenticationProvider
+                .createDefaultAssertionValidator(Converter<OpenSaml4AuthenticationProvider.AssertionToken, ValidationContext> {
+                    val params: MutableMap<String, Any> = HashMap()
+                    params[CLOCK_SKEW] =
+                        Duration.ofMinutes(10).toMillis()
+                    ValidationContext(params)
+                })
+        )
+        http {
+            authorizeRequests {
+                authorize(anyRequest, authenticated)
+            }
+            saml2Login {
+                authenticationManager = ProviderManager(authenticationProvider)
+            }
+        }
+        return http.build()
+    }
+}
+----
+======
+
+[[servlet-saml2login-opensamlauthenticationprovider-userdetailsservice]]
+== 与 `UserDetailsService` 协同工作
+
+也许你还想包含来自传统 `UserDetailsService` 的用户详细信息。  
+在这种情况下，可以使用响应认证转换器，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    @Autowired
+    UserDetailsService userDetailsService;
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        OpenSaml4AuthenticationProvider authenticationProvider = new OpenSaml4AuthenticationProvider();
+        authenticationProvider.setResponseAuthenticationConverter(responseToken -> {
+            Saml2Authentication authentication = OpenSaml4AuthenticationProvider
+                    .createDefaultResponseAuthenticationConverter() <1>
+                    .convert(responseToken);
+            Assertion assertion = responseToken.getResponse().getAssertions().get(0);
+            String username = assertion.getSubject().getNameID().getValue();
+            UserDetails userDetails = this.userDetailsService.loadUserByUsername(username); <2>
+            return MySaml2Authentication(userDetails, authentication); <3>
+        });
+
+        http
+            .authorizeHttpRequests(authz -> authz
+                .anyRequest().authenticated()
+            )
+            .saml2Login(saml2 -> saml2
+                .authenticationManager(new ProviderManager(authenticationProvider))
+            );
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+open class SecurityConfig {
+    @Autowired
+    var userDetailsService: UserDetailsService? = null
+
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        val authenticationProvider = OpenSaml4AuthenticationProvider()
+        authenticationProvider.setResponseAuthenticationConverter { responseToken: OpenSaml4AuthenticationProvider.ResponseToken ->
+            val authentication = OpenSaml4AuthenticationProvider
+                .createDefaultResponseAuthenticationConverter() <1>
+                .convert(responseToken)
+            val assertion: Assertion = responseToken.response.assertions[0]
+            val username: String = assertion.subject.nameID.value
+            val userDetails = userDetailsService!!.loadUserByUsername(username) <2>
+            MySaml2Authentication(userDetails, authentication) <3>
+        }
+        http {
+            authorizeRequests {
+                authorize(anyRequest, authenticated)
+            }
+            saml2Login {
+                authenticationManager = ProviderManager(authenticationProvider)
+            }
+        }
+        return http.build()
+    }
+}
+----
+======
+<1> 首先调用默认转换器，提取响应中的属性和权限
+<2> 然后使用相关信息调用 xref:servlet/authentication/passwords/user-details-service.adoc#servlet-authentication-userdetailsservice[`UserDetailsService`]
+<3> 最后返回一个包含用户详情的自定义认证对象
+
+[NOTE]
+调用 ``OpenSaml4AuthenticationProvider`` 的默认认证转换器不是必须的。  
+它返回一个 `Saml2AuthenticatedPrincipal`，其中包含从 ``AttributeStatement`` 提取的属性以及单个 `ROLE_USER` 权限。
+
+[[servlet-saml2login-opensamlauthenticationprovider-additionalvalidation]]
+== 执行额外的响应验证
+
+`OpenSaml4AuthenticationProvider` 在解密 `Response` 后立即验证 `Issuer` 和 `Destination` 值。  
+你可以通过扩展默认验证器并串联自定义响应验证器来自定义验证逻辑，也可以完全替换为你自己的验证器。
+
+例如，你可以在 `Response` 对象中获取附加信息并抛出一个自定义异常，如下所示：
+[source,java]
+----
+OpenSaml4AuthenticationProvider provider = new OpenSaml4AuthenticationProvider();
+provider.setResponseValidator((responseToken) -> {
+	Saml2ResponseValidatorResult result = OpenSamlAuthenticationProvider
+		.createDefaultResponseValidator()
+		.convert(responseToken)
+		.concat(myCustomValidator.convert(responseToken));
+	if (!result.getErrors().isEmpty()) {
+		String inResponseTo = responseToken.getInResponseTo();
+		throw new CustomSaml2AuthenticationException(result, inResponseTo);
+	}
+	return result;
+});
+----
+
+== 执行额外的断言验证
+`OpenSaml4AuthenticationProvider` 对 SAML 2.0 断言执行最基本的验证。  
+在验证签名之后，它会：
+
+1. 验证 `<AudienceRestriction>` 和 `<DelegationRestriction>` 条件
+2. 验证 `<SubjectConfirmation>`，但不包括 IP 地址信息
+
+若要执行额外的验证，你可以配置自己的断言验证器，该验证器首先委托给 ``OpenSaml4AuthenticationProvider`` 的默认验证器，然后再执行自己的验证逻辑。
+
+[[servlet-saml2login-opensamlauthenticationprovider-onetimeuse]]
+例如，你可以使用 OpenSAML 的 `OneTimeUseConditionValidator` 来验证 `<OneTimeUse>` 条件，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+OpenSaml4AuthenticationProvider provider = new OpenSaml4AuthenticationProvider();
+OneTimeUseConditionValidator validator = ...;
+provider.setAssertionValidator(assertionToken -> {
+    Saml2ResponseValidatorResult result = OpenSaml4AuthenticationProvider
+            .createDefaultAssertionValidator()
+            .convert(assertionToken);
+    Assertion assertion = assertionToken.getAssertion();
+    OneTimeUse oneTimeUse = assertion.getConditions().getOneTimeUse();
+    ValidationContext context = new ValidationContext();
+    try {
+        if (validator.validate(oneTimeUse, assertion, context) == ValidationResult.VALID) {
+            return result;
+        }
+    } catch (Exception e) {
+        return result.concat(new Saml2Error(INVALID_ASSERTION, e.getMessage()));
+    }
+    return result.concat(new Saml2Error(INVALID_ASSERTION, context.getValidationFailureMessage()));
+});
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+var provider = OpenSaml4AuthenticationProvider()
+var validator: OneTimeUseConditionValidator = ...
+provider.setAssertionValidator { assertionToken ->
+    val result = OpenSaml4AuthenticationProvider
+        .createDefaultAssertionValidator()
+        .convert(assertionToken)
+    val assertion: Assertion = assertionToken.assertion
+    val oneTimeUse: OneTimeUse = assertion.conditions.oneTimeUse
+    val context = ValidationContext()
+    try {
+        if (validator.validate(oneTimeUse, assertion, context) == ValidationResult.VALID) {
+            return@setAssertionValidator result
+        }
+    } catch (e: Exception) {
+        return@setAssertionValidator result.concat(Saml2Error(INVALID_ASSERTION, e.message))
+    }
+    result.concat(Saml2Error(INVALID_ASSERTION, context.validationFailureMessage))
+}
+----
+======
+
+[NOTE]
+虽然推荐，但并非必须调用 ``OpenSaml4AuthenticationProvider`` 的默认断言验证器。  
+如果你自己已经实现了 `<AudienceRestriction>` 或 `<SubjectConfirmation>` 的检查，就可以跳过它。
+
+[[servlet-saml2login-opensamlauthenticationprovider-decryption]]
+== 自定义解密逻辑
+
+Spring Security 会自动使用注册在 xref:servlet/saml2/login/overview.adoc#servlet-saml2login-rpr-credentials[`RelyingPartyRegistration`] 中的解密 xref:servlet/saml2/login/overview.adoc#servlet-saml2login-rpr-credentials[`Saml2X509Credential` 实例] 来解密 `<saml2:EncryptedAssertion>`、`<saml2:EncryptedAttribute>` 和 `<saml2:EncryptedID>` 元素。
+
+`OpenSaml4AuthenticationProvider` 提供了 xref:servlet/saml2/login/overview.adoc#servlet-saml2login-architecture[两种解密策略]。  
+- **响应解密器**：用于解密 `<saml2:Response>` 中的加密元素，如 `<saml2:EncryptedAssertion>`。  
+- **断言解密器**：用于解密 `<saml2:Assertion>` 中的加密元素，如 `<saml2:EncryptedAttribute>` 和 `<saml2:EncryptedID>`。
+
+你可以用自己的实现替换 ``OpenSaml4AuthenticationProvider`` 的默认解密策略。  
+例如，如果你有一个独立的服务负责解密 `<saml2:Response>` 中的断言，可以像这样使用它：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+MyDecryptionService decryptionService = ...;
+OpenSaml4AuthenticationProvider provider = new OpenSaml4AuthenticationProvider();
+provider.setResponseElementsDecrypter((responseToken) -> decryptionService.decrypt(responseToken.getResponse()));
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val decryptionService: MyDecryptionService = ...
+val provider = OpenSaml4AuthenticationProvider()
+provider.setResponseElementsDecrypter { responseToken -> decryptionService.decrypt(responseToken.response) }
+----
+======
+
+如果你还需要解密 `<saml2:Assertion>` 中的各个元素，也可以自定义断言解密器：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+provider.setAssertionElementsDecrypter((assertionToken) -> decryptionService.decrypt(assertionToken.getAssertion()));
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+provider.setAssertionElementsDecrypter { assertionToken -> decryptionService.decrypt(assertionToken.assertion) }
+----
+======
+
+NOTE: 之所以有两个独立的解密器，是因为断言可能与响应分别签名。  
+在签名验证之前尝试解密已签名断言的元素可能会使签名失效。  
+如果你的断言方仅对响应签名，则可以安全地仅使用响应解密器解密所有元素。
+
+[[servlet-saml2login-authenticationmanager-custom]]
+== 使用自定义认证管理器
+
+[[servlet-saml2login-opensamlauthenticationprovider-authenticationmanager]]
+当然，`authenticationManager` DSL 方法也可用于完全自定义 SAML 2.0 认证流程。  
+该认证管理器应能接收一个包含 SAML 2.0 Response XML 数据的 `Saml2AuthenticationToken` 对象。
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        AuthenticationManager authenticationManager = new MySaml2AuthenticationManager(...);
+        http
+            .authorizeHttpRequests(authorize -> authorize
+                .anyRequest().authenticated()
+            )
+            .saml2Login(saml2 -> saml2
+                .authenticationManager(authenticationManager)
+            )
+        ;
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+open class SecurityConfig {
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        val customAuthenticationManager: AuthenticationManager = MySaml2AuthenticationManager(...)
+        http {
+            authorizeRequests {
+                authorize(anyRequest, authenticated)
+            }
+            saml2Login {
+                authenticationManager = customAuthenticationManager
+            }
+        }
+        return http.build()
+    }
+}
+----
+======
+
+[[servlet-saml2login-authenticatedprincipal]]
+== 使用 `Saml2AuthenticatedPrincipal`
+
+当依赖方针对某个断言方正确配置后，即可接受断言。  
+一旦依赖方验证了一个断言，结果就是一个带有 `Saml2AuthenticatedPrincipal` 的 `Saml2Authentication`。
+
+这意味着你可以在控制器中像这样访问主体（principal）：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Controller
+public class MainController {
+	@GetMapping("/")
+	public String index(@AuthenticationPrincipal Saml2AuthenticatedPrincipal principal, Model model) {
+		String email = principal.getFirstAttribute("email");
+		model.setAttribute("email", email);
+		return "index";
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Controller
+class MainController {
+    @GetMapping("/")
+    fun index(@AuthenticationPrincipal principal: Saml2AuthenticatedPrincipal, model: Model): String {
+        val email = principal.getFirstAttribute<String>("email")
+        model.setAttribute("email", email)
+        return "index"
+    }
+}
+----
+======
+
+[TIP]
+由于 SAML 2.0 规范允许每个属性具有多个值，你可以调用 `getAttribute` 获取属性值列表，或调用 `getFirstAttribute` 获取第一个值。  
+当你确定只有一个值时，`getFirstAttribute` 非常方便。

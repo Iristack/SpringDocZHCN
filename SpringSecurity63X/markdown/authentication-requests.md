@@ -1,0 +1,238 @@
+如前所述，Spring Security 的 SAML 2.0 支持通过生成一个
+`<saml2:AuthnRequest>` 来启动与声明方（asserting party）的身份验证流程。
+
+Spring Security 通过在过滤器链中注册
+`Saml2WebSsoAuthenticationRequestFilter` 实现此功能。
+默认情况下，该过滤器响应端点 `/saml2/authenticate/{registrationId}`。
+
+例如，如果你的应用部署在 `https://rp.example.com`，并且你的注册 ID 为
+`okta`，你可以访问以下地址：
+
+`https://rp.example.org/saml2/authenticate/okta`
+
+结果将是一个重定向，其中包含一个 `SAMLRequest`
+参数，该参数包含了已签名、压缩并编码的 `<saml2:AuthnRequest>`。
+
+# 更改 `<saml2:AuthnRequest>` 的存储方式 {#servlet-saml2login-store-authn-request}
+
+`Saml2WebSsoAuthenticationRequestFilter` 使用
+`Saml2AuthenticationRequestRepository` 在 [发送 `<saml2:AuthnRequest>`
+给声明方](servlet/saml2/login/authentication-requests.xml#servlet-saml2login-sp-initiated-factory)之前持久化一个
+`AbstractSaml2AuthenticationRequest` 实例。
+
+此外，`Saml2WebSsoAuthenticationFilter` 和
+`Saml2AuthenticationTokenConverter` 也使用
+`Saml2AuthenticationRequestRepository` 来加载任何
+`AbstractSaml2AuthenticationRequest`，作为 [验证
+`<saml2:Response>`](servlet/saml2/login/authentication.xml#servlet-saml2login-authenticate-responses)
+的一部分。
+
+默认情况下，Spring Security 使用
+`HttpSessionSaml2AuthenticationRequestRepository`，它会将
+`AbstractSaml2AuthenticationRequest` 存储在 `HttpSession` 中。
+
+如果你有自定义的 `Saml2AuthenticationRequestRepository`
+实现，可以通过将其暴露为 `@Bean` 来配置，如下例所示：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    @Bean
+    Saml2AuthenticationRequestRepository<AbstractSaml2AuthenticationRequest> authenticationRequestRepository() {
+        return new CustomSaml2AuthenticationRequestRepository();
+    }
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    open fun authenticationRequestRepository(): Saml2AuthenticationRequestRepository<AbstractSaml2AuthenticationRequest> {
+        return CustomSaml2AuthenticationRequestRepository()
+    }
+    ```
+:::
+
+# 更改 `<saml2:AuthnRequest>` 的发送方式 {#servlet-saml2login-sp-initiated-factory-signing}
+
+默认情况下，Spring Security 会对每个 `<saml2:AuthnRequest>`
+进行签名，并通过 GET 请求发送给声明方。
+
+但许多声明方并不要求对 `<saml2:AuthnRequest>` 进行签名。这可以通过
+`RelyingPartyRegistrations` 自动配置，也可以手动设置，如下所示：
+
+:::: example
+::: title
+不需要签名的 AuthnRequests
+:::
+
+Boot
+
+:   ``` yaml
+    spring:
+      security:
+        saml2:
+          relyingparty:
+            registration:
+              okta:
+                assertingparty:
+                  entity-id: ...
+                  singlesignon.sign-request: false
+    ```
+
+Java
+
+:   ``` java
+    RelyingPartyRegistration relyingPartyRegistration = RelyingPartyRegistration.withRegistrationId("okta")
+            // ...
+            .assertingPartyDetails(party -> party
+                // ...
+                .wantAuthnRequestsSigned(false)
+            )
+            .build();
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    var relyingPartyRegistration: RelyingPartyRegistration =
+        RelyingPartyRegistration.withRegistrationId("okta")
+            // ...
+            .assertingPartyDetails { party: AssertingPartyDetails.Builder -> party
+                    // ...
+                    .wantAuthnRequestsSigned(false)
+            }
+            .build()
+    ```
+::::
+
+否则，你需要为 `RelyingPartyRegistration#signingX509Credentials`
+指定一个私钥，以便 Spring Security 在发送前对 `<saml2:AuthnRequest>`
+进行签名。
+
+默认情况下，Spring Security 使用 `rsa-sha256` 算法对
+`<saml2:AuthnRequest>`
+进行签名，但某些声明方可能要求不同的算法，具体信息通常在其元数据中指明。
+
+你可以根据声明方的 [元数据使用
+`RelyingPartyRegistrations`](servlet/saml2/login/overview.xml#servlet-saml2login-relyingpartyregistrationrepository)
+来配置算法。
+
+或者，你也可以手动提供：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    String metadataLocation = "classpath:asserting-party-metadata.xml";
+    RelyingPartyRegistration relyingPartyRegistration = RelyingPartyRegistrations.fromMetadataLocation(metadataLocation)
+            // ...
+            .assertingPartyDetails((party) -> party
+                // ...
+                .signingAlgorithms((sign) -> sign.add(SignatureConstants.ALGO_ID_SIGNATURE_RSA_SHA512))
+            )
+            .build();
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    var metadataLocation = "classpath:asserting-party-metadata.xml"
+    var relyingPartyRegistration: RelyingPartyRegistration =
+        RelyingPartyRegistrations.fromMetadataLocation(metadataLocation)
+            // ...
+            .assertingPartyDetails { party: AssertingPartyDetails.Builder -> party
+                    // ...
+                    .signingAlgorithms { sign: MutableList<String?> ->
+                        sign.add(
+                            SignatureConstants.ALGO_ID_SIGNATURE_RSA_SHA512
+                        )
+                    }
+            }
+            .build()
+    ```
+:::
+
+:::: note
+::: title
+:::
+
+上面的代码片段使用了 OpenSAML 的 `SignatureConstants`
+类来提供算法名称，但这只是为了方便。由于数据类型是
+`String`，你也可以直接提供算法名称。
+::::
+
+一些声明方要求通过 POST 方法发送 `<saml2:AuthnRequest>`。这可以通过
+`RelyingPartyRegistrations` 自动配置，也可以手动设置，如下所示：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    RelyingPartyRegistration relyingPartyRegistration = RelyingPartyRegistration.withRegistrationId("okta")
+            // ...
+            .assertingPartyDetails(party -> party
+                // ...
+                .singleSignOnServiceBinding(Saml2MessageBinding.POST)
+            )
+            .build();
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    var relyingPartyRegistration: RelyingPartyRegistration? =
+        RelyingPartyRegistration.withRegistrationId("okta")
+            // ...
+            .assertingPartyDetails { party: AssertingPartyDetails.Builder -> party
+                // ...
+                .singleSignOnServiceBinding(Saml2MessageBinding.POST)
+            }
+            .build()
+    ```
+:::
+
+# 自定义 OpenSAML 的 `AuthnRequest` 实例 {#servlet-saml2login-sp-initiated-factory-custom-authnrequest}
+
+你可能有多种原因需要调整 `AuthnRequest`。例如，你可能希望将 `ForceAuthN`
+设置为 `true`，而 Spring Security 默认将其设为 `false`。
+
+你可以通过发布一个 `OpenSaml4AuthenticationRequestResolver` 作为 `@Bean`
+来自定义 OpenSAML 的 `AuthnRequest` 元素，如下所示：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    @Bean
+    Saml2AuthenticationRequestResolver authenticationRequestResolver(RelyingPartyRegistrationRepository registrations) {
+        RelyingPartyRegistrationResolver registrationResolver =
+                new DefaultRelyingPartyRegistrationResolver(registrations);
+        OpenSaml4AuthenticationRequestResolver authenticationRequestResolver =
+                new OpenSaml4AuthenticationRequestResolver(registrationResolver);
+        authenticationRequestResolver.setAuthnRequestCustomizer((context) -> context
+                .getAuthnRequest().setForceAuthn(true));
+        return authenticationRequestResolver;
+    }
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    fun authenticationRequestResolver(registrations : RelyingPartyRegistrationRepository) : Saml2AuthenticationRequestResolver {
+        val registrationResolver : RelyingPartyRegistrationResolver =
+                new DefaultRelyingPartyRegistrationResolver(registrations)
+        val authenticationRequestResolver : OpenSaml4AuthenticationRequestResolver =
+                new OpenSaml4AuthenticationRequestResolver(registrationResolver)
+        authenticationRequestResolver.setAuthnRequestCustomizer((context) -> context
+                .getAuthnRequest().setForceAuthn(true))
+        return authenticationRequestResolver
+    }
+    ```
+:::

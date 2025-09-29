@@ -1,0 +1,20 @@
+= Spring Security
+
+[NOTE]
+====
+您可以将 Spring Security 的文档作为 zip 文件进行 https://docs.spring.io/spring-security/reference/spring-security-docs.zip[下载]。
+====
+
+Spring Security 是一个提供 xref:features/authentication/index.adoc[认证]、xref:features/authorization/index.adoc[授权] 以及 xref:features/exploits/index.adoc[抵御常见攻击] 功能的框架。  
+它对保护基于 xref:servlet/index.adoc[命令式] 和 xref:reactive/index.adoc[响应式] 的应用提供了头等支持，是保护基于 Spring 的应用程序的事实标准。
+
+有关功能的完整列表，请参见参考文档中的 xref:features/index.adoc[特性] 部分。
+
+== 入门指南
+
+如果您准备开始保护您的应用程序，请参阅 xref:servlet/getting-started.adoc[servlet] 和 xref:reactive/getting-started.adoc[响应式] 的入门指南部分。这些章节将引导您创建第一个 Spring Security 应用程序。
+
+如果您想了解 Spring Security 的工作原理，可以参考 xref:servlet/architecture.adoc[架构] 部分。  
+// FIXME 添加指向响应式架构的链接
+
+如果您有任何问题，我们有一个非常活跃的 xref:community.adoc[社区]，很乐意为您提供帮助！

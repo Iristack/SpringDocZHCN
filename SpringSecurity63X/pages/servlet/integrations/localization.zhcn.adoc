@@ -1,0 +1,35 @@
+[[localization]]
+= 国际化（Localization）
+
+Spring Security 支持对最终用户可能看到的异常消息进行本地化。  
+如果你的应用程序面向英语使用者，默认情况下无需任何配置，因为所有安全相关的消息默认都是英文的。  
+但如果你需要支持其他语言环境（locales），本节将提供你需要了解的全部信息。
+
+所有异常消息，包括与认证失败和访问被拒绝（授权失败）相关的消息，都可以被本地化。  
+而那些面向开发人员或系统部署人员的异常和日志消息（例如：错误的属性、接口契约违规、使用了错误的构造函数、启动时验证、调试级别的日志等）则不会被本地化，而是直接在 Spring Security 的代码中以英文硬编码。
+
+在 `spring-security-core-xx.jar` 文件中，你可以找到一个 `org.springframework.security` 包，该包内包含一个 `messages.properties` 文件，以及一些常见语言的本地化版本。  
+你的 `ApplicationContext` 应引用这个资源文件，因为 Spring Security 中的类实现了 Spring 的 `MessageSourceAware` 接口，并期望在应用上下文启动时通过依赖注入获得消息解析器。  
+通常，你只需要在应用上下文中注册一个 bean 来指向这些消息资源。以下是一个示例：
+
+[source,xml]
+----
+<bean id="messageSource"
+	class="org.springframework.context.support.ReloadableResourceBundleMessageSource">
+<property name="basename" value="classpath:org/springframework/security/messages"/>
+</bean>
+----
+
+其中的 `messages.properties` 遵循标准资源束（resource bundle）命名规范，代表 Spring Security 消息支持的默认语言，该默认文件为英文。
+
+若要自定义 `messages.properties` 文件或支持其他语言，你可以复制该文件并根据目标语言重命名（如 `messages_zh_CN.properties` 表示简体中文），然后将其注册到上述 bean 定义中。  
+此文件中的消息键（message keys）数量不多，因此本地化工作量较小，不应被视为重大任务。  
+如果你完成了该文件的本地化，建议通过创建 JIRA 任务并附上适当命名的本地化版本 `messages.properties`，将成果分享给社区。
+
+Spring Security 依赖于 Spring 的国际化支持来查找对应的语言消息。  
+要使此机制正常工作，必须确保传入请求的区域设置（locale）已存储在 Spring 的 `org.springframework.context.i18n.LocaleContextHolder` 中。  
+Spring MVC 的 `DispatcherServlet` 会自动为你完成这一操作。然而，由于 Spring Security 的过滤器在此之前就被调用，因此必须在调用安全过滤器之前，确保 `LocaleContextHolder` 已设置正确的 `Locale`。  
+你可以自己编写一个过滤器（必须放在 `web.xml` 中 Spring Security 过滤器之前），或者使用 Spring 提供的 `RequestContextFilter` 来实现这一点。  
+有关在 Spring 中使用国际化的更多细节，请参考 Spring 框架的官方文档。
+
+示例应用 `contacts` 已配置为使用本地化消息。

@@ -1,0 +1,669 @@
+[[servlet-saml2login-logout]]
+= 执行单点注销
+
+除了其 xref:servlet/authentication/logout.adoc[其他注销机制] 外，Spring Security 还支持由服务提供方（RP）和断言方（AP）发起的 SAML 2.0 单点注销（Single Logout）。
+
+简而言之，Spring Security 支持以下两种使用场景：
+
+* **RP 发起** - 您的应用程序有一个端点，当向该端点发送 POST 请求时，会注销当前用户并向断言方发送一个 `saml2:LogoutRequest`。随后，断言方将返回一个 `saml2:LogoutResponse`，您的应用程序可据此做出响应。
+* **AP 发起** - 您的应用程序有一个端点，用于接收来自断言方的 `saml2:LogoutRequest`。此时您的应用程序完成本地注销流程，并向断言方发送一个 `saml2:LogoutResponse`。
+
+[NOTE]
+在 **AP 发起** 的场景中，任何您应用原本计划在注销后进行的本地重定向都将失效。一旦您的应用程序发送了 `saml2:LogoutResponse`，它就不再控制浏览器行为。
+
+== 单点注销的最小配置
+
+要使用 Spring Security 的 SAML 2.0 单点注销功能，您需要满足以下条件：
+
+* 首先，断言方必须支持 SAML 2.0 单点注销
+* 其次，断言方应配置为对其发送到您应用程序 `/logout/saml2/slo` 端点的 `saml2:LogoutRequest` 和 `saml2:LogoutResponse` 进行签名并使用 POST 方法传输
+* 第三，您的应用程序必须拥有用于对 `saml2:LogoutRequest` 和 `saml2:LogoutResponse` 进行签名的 PKCS#8 私钥和 X.509 证书
+
+您可以通过以下方式在 Spring Boot 中实现这一点：
+
+[source,yaml]
+----
+spring:
+  security:
+    saml2:
+      relyingparty:
+        registration:
+          metadata:
+            signing.credentials: <3>
+              - private-key-location: classpath:credentials/rp-private.key
+                certificate-location: classpath:credentials/rp-certificate.crt
+            singlelogout.url: "{baseUrl}/logout/saml2/slo" <2>
+            assertingparty:
+              metadata-uri: https://ap.example.com/metadata <1>
+
+----
+<1> - IDP 的元数据 URI，表明该 IDP 支持 SLO
+<2> - 您应用程序中的 SLO 端点
+<3> - 用于对 ``<saml2:LogoutRequest>`` 和 ``<saml2:LogoutResponse>`` 进行签名的凭据
+
+[NOTE]
+----
+如果断言方的元数据中包含 `<SingleLogoutService>` 元素，则表示其支持单点注销。
+----
+
+就这样！
+
+Spring Security 的注销功能提供了多个可配置项。请考虑以下使用场景：
+
+* 了解上述 <<_startup_expectations, 最小化配置的工作原理>>
+* 了解 <<architecture, 整体架构>>
+* 允许用户仅 <<separating-local-saml2-logout, 注销应用程序本身>>
+* 自定义 <<_configuring_logout_endpoints, 注销端点>>
+* 将 `<saml2:LogoutRequests>` 存储在 <<_customizing_storage, 除会话以外的位置>>
+
+=== 启动时预期行为
+
+当使用这些属性时，SAML 2.0 服务提供方不仅会自动配置登录功能，还会通过 RP 或 AP 发起的方式，利用 ``<saml2:LogoutRequest>`` 和 ``<saml2:LogoutResponse>`` 实现注销功能。
+
+这是通过一个确定性的启动过程来实现的：
+
+1. 查询身份服务器元数据端点中的 `<SingleLogoutService>` 元素
+2. 扫描元数据并缓存所有用于验证签名的公钥
+3. 准备相应的端点
+
+此过程的一个后果是：身份服务器必须处于运行状态并能接收请求，服务提供方才可成功启动。
+
+[NOTE]
+如果服务提供方在查询身份服务器时（给定适当超时）发现其不可用，则启动将失败。
+
+=== 运行时预期行为
+
+根据上述配置，任何已登录用户都可以向您的应用程序发送 `POST /logout` 来执行 RP 发起的 SLO。您的应用程序将执行以下操作：
+
+1. 注销用户并使会话失效
+2. 生成一个 `<saml2:LogoutRequest>` 并将其 POST 到关联断言方的 SLO 端点
+3. 若断言方返回 `<saml2:LogoutResponse>`，应用程序将验证该响应，并重定向至配置的成功端点
+
+此外，当断言方向 `/logout/saml2/slo` 发送 `<saml2:LogoutRequest>` 时，您的应用程序也可参与 AP 发起的注销流程。发生这种情况时，您的应用程序将执行以下操作：
+
+1. 验证 `<saml2:LogoutRequest>`
+2. 注销用户并使会话失效
+3. 生成 `<saml2:LogoutResponse>` 并 POST 回断言方的 SLO 端点
+
+== 不使用 Boot 的最小化配置
+
+除了使用 Boot 属性外，您也可以直接发布 Bean 来达到相同效果：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+public class SecurityConfig {
+    @Value("${private.key}") RSAPrivateKey key;
+    @Value("${public.certificate}") X509Certificate certificate;
+
+    @Bean
+    RelyingPartyRegistrationRepository registrations() {
+        Saml2X509Credential credential = Saml2X509Credential.signing(key, certificate);
+        RelyingPartyRegistration registration = RelyingPartyRegistrations
+                .fromMetadataLocation("https://ap.example.org/metadata") <1>
+                .registrationId("metadata")
+                .singleLogoutServiceLocation("{baseUrl}/logout/saml2/slo") <2>
+                .signingX509Credentials((signing) -> signing.add(credential)) <3>
+                .build();
+        return new InMemoryRelyingPartyRegistrationRepository(registration);
+    }
+
+    @Bean
+    SecurityFilterChain web(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests((authorize) -> authorize
+                .anyRequest().authenticated()
+            )
+            .saml2Login(withDefaults())
+            .saml2Logout(withDefaults()); <4>
+
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+class SecurityConfig(@Value("${private.key}") val key: RSAPrivateKey,
+        @Value("${public.certificate}") val certificate: X509Certificate) {
+
+    @Bean
+    fun registrations(): RelyingPartyRegistrationRepository {
+        val credential = Saml2X509Credential.signing(key, certificate)
+        val registration = RelyingPartyRegistrations
+                .fromMetadataLocation("https://ap.example.org/metadata") <1>
+                .registrationId("metadata")
+                .singleLogoutServiceLocation("{baseUrl}/logout/saml2/slo") <2>
+                .signingX509Credentials({ signing: List<Saml2X509Credential> -> signing.add(credential) }) <3>
+                .build()
+        return InMemoryRelyingPartyRegistrationRepository(registration)
+    }
+
+    @Bean
+    fun web(http: HttpSecurity): SecurityFilterChain {
+        http {
+            authorizeHttpRequests {
+                anyRequest = authenticated
+            }
+            saml2Login {
+
+            }
+            saml2Logout { <4>
+
+            }
+        }
+
+        return http.build()
+    }
+}
+----
+======
+<1> - IDP 的元数据 URI，表明该 IDP 支持 SLO
+<2> - 您应用程序中的 SLO 端点
+<3> - 用于对 ``<saml2:LogoutRequest>`` 和 ``<saml2:LogoutResponse>`` 进行签名的凭据，您还可以将其添加到 xref:servlet/saml2/login/overview.adoc#servlet-saml2login-rpr-duplicated[多个依赖方注册信息] 中
+<4> - 其次，表明您的应用程序希望使用 SAML SLO 来注销最终用户
+
+[NOTE]
+添加 `saml2Logout` 会使您的整个服务提供方具备注销能力。由于这是一个可选功能，您需要为每个单独的 `RelyingPartyRegistration` 启用它。如上所示，您可以通过设置 `RelyingPartyRegistration.Builder#singleLogoutServiceLocation` 属性来实现。
+
+[[architecture]]
+== SAML 2.0 注销工作原理
+
+接下来，我们来看一下 Spring Security 在基于 Servlet 的应用程序（如我们刚才看到的例子）中支持 https://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf#page=37[SAML 2.0 注销] 所使用的架构组件。
+
+对于 RP 发起的注销：
+
+image:{icondir}/number_1.png[] Spring Security 执行其 xref:servlet/authentication/logout.adoc#logout-architecture[注销流程]，调用其 ``LogoutHandler`` 来使会话失效并执行其他清理工作。然后调用 {security-api-url}org/springframework/security/saml2/provider/service/web/authentication/logout/Saml2RelyingPartyInitiatedLogoutSuccessHandler.html[`Saml2RelyingPartyInitiatedLogoutSuccessHandler`]。
+
+image:{icondir}/number_2.png[] 注销成功处理器使用 {security-api-url}org/springframework/security/saml2/provider/service/web/authentication/logout/Saml2LogoutRequestResolver.html[`Saml2LogoutRequestResolver`] 实例创建、签名并序列化 `<saml2:LogoutRequest>`。它使用与当前 `Saml2AuthenticatedPrincipal` 关联的 xref:servlet/saml2/login/overview.adoc#servlet-saml2login-relyingpartyregistration[`RelyingPartyRegistration`] 中的密钥和配置。然后，通过 redirect-POST 将 `<saml2:LogoutRequest>` 发送到断言方的 SLO 端点。
+
+浏览器将控制权交给断言方。如果断言方重定向回来（可能不会），则应用程序进入步骤 image:{icondir}/number_3.png[]。
+
+image:{icondir}/number_3.png[] {security-api-url}org/springframework/security/saml2/provider/service/web/authentication/logout/Saml2LogoutResponseFilter.html[`Saml2LogoutResponseFilter`] 使用其 {security-api-url}org/springframework/security/saml2/provider/service/authentication/logout/Saml2LogoutResponseValidator.html[`Saml2LogoutResponseValidator`] 对 `<saml2:LogoutResponse>` 进行反序列化、验证和处理。
+
+image:{icondir}/number_4.png[] 如果有效，则通过重定向到 `/login?logout` 或其他已配置的目标完成本地注销流程。如果无效，则返回 400 错误。
+
+对于 AP 发起的注销：
+
+image:{icondir}/number_1.png[] {security-api-url}org/springframework/security/saml2/provider/service/web/authentication/logout/Saml2LogoutRequestFilter.html[`Saml2LogoutRequestFilter`] 使用其 {security-api-url}org/springframework/security/saml2/provider/service/authentication/logout/Saml2LogoutRequestValidator.html[`Saml2LogoutRequestValidator`] 对 `<saml2:LogoutRequest>` 进行反序列化、验证和处理。
+
+image:{icondir}/number_2.png[] 如果验证通过，过滤器将调用配置的 ``LogoutHandler``s，使会话失效并执行其他清理。
+
+image:{icondir}/number_3.png[] 它使用 {security-api-url}org/springframework/security/saml2/provider/service/web/authentication/logout/Saml2LogoutResponseResolver.html[`Saml2LogoutResponseResolver`] 创建、签名并序列化 `<saml2:LogoutResponse>`。它使用从端点或 `<saml2:LogoutRequest>` 内容推导出的 xref:servlet/saml2/login/overview.adoc#servlet-saml2login-relyingpartyregistration[`RelyingPartyRegistration`] 中的密钥和配置。然后通过 redirect-POST 将 `<saml2:LogoutResponse>` 发送到断言方的 SLO 端点。
+
+浏览器将控制权交给断言方。
+
+image:{icondir}/number_4.png[] 如果验证失败，则 https://github.com/spring-projects/spring-security/pull/14676[返回 400 错误]。
+
+== 配置注销端点
+
+有三种不同端点可触发的行为：
+
+* RP 发起注销：允许认证用户通过 `POST` 触发注销流程，并向断言方发送 `<saml2:LogoutRequest>`
+* AP 发起注销：允许断言方向应用程序发送 `<saml2:LogoutRequest>`
+* AP 注销响应：允许断言方响应 RP 发起的 `<saml2:LogoutRequest>` 时发送 `<saml2:LogoutResponse>`
+
+第一种行为在主体类型为 `Saml2AuthenticatedPrincipal` 时执行普通的 `POST /logout` 触发。
+
+第二种行为通过向 `/logout/saml2/slo` 端点发送由断言方签名的 `SAMLRequest` POST 请求触发。
+
+第三种行为通过向 `/logout/saml2/slo` 端点发送由断言方签名的 `SAMLResponse` POST 请求触发。
+
+由于用户已经登录或原始注销请求已知，`registrationId` 已经明确。因此，默认情况下这些 URL 不包含 `+{registrationId}+`。
+
+这些 URL 可以通过 DSL 自定义。
+
+例如，如果您正在将现有依赖方迁移到 Spring Security，您的断言方可能已指向 `GET /SLOService.saml2`。为了减少对断言方配置的更改，您可以在 DSL 中这样配置过滤器：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .saml2Logout((saml2) -> saml2
+        .logoutRequest((request) -> request.logoutUrl("/SLOService.saml2"))
+        .logoutResponse((response) -> response.logoutUrl("/SLOService.saml2"))
+    );
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    saml2Logout {
+        logoutRequest {
+            logoutUrl = "/SLOService.saml2"
+        }
+        logoutResponse {
+            logoutUrl = "/SLOService.saml2"
+        }
+    }
+}
+----
+======
+
+您还应在 `RelyingPartyRegistration` 中配置这些端点。
+
+此外，您也可以像这样自定义本地触发注销的端点：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .saml2Logout((saml2) -> saml2.logoutUrl("/saml2/logout"));
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    saml2Logout {
+        logoutUrl = "/saml2/logout"
+    }
+}
+----
+======
+
+[[separating-local-saml2-logout]]
+=== 分离本地注销与 SAML 2.0 注销
+
+在某些情况下，您可能希望暴露一个用于本地注销的端点，另一个用于 RP 发起的 SLO。与其他注销机制类似，只要每个端点不同，您可以注册多个注销机制。
+
+例如，您可以这样配置 DSL：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .logout((logout) -> logout.logoutUrl("/logout"))
+    .saml2Logout((saml2) -> saml2.logoutUrl("/saml2/logout"));
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    logout {
+        logoutUrl = "/logout"
+    }
+    saml2Logout {
+        logoutUrl = "/saml2/logout"
+    }
+}
+----
+======
+
+现在，如果客户端发送 `POST /logout`，会话将被清除，但不会向断言方发送 `<saml2:LogoutRequest>`。但如果客户端发送 `POST /saml2/logout`，应用程序将正常启动 SAML 2.0 SLO。
+
+== 自定义 `<saml2:LogoutRequest>` 解析
+
+通常需要在 `<saml2:LogoutRequest>` 中设置除 Spring Security 提供默认值之外的其他值。
+
+默认情况下，Spring Security 会发出 `<saml2:LogoutRequest>` 并提供以下内容：
+
+* `Destination` 属性 —— 来自 `RelyingPartyRegistration#getAssertingPartyDetails#getSingleLogoutServiceLocation`
+* `ID` 属性 —— 一个 GUID
+* `<Issuer>` 元素 —— 来自 `RelyingPartyRegistration#getEntityId`
+* `<NameID>` 元素 —— 来自 `Authentication#getName`
+
+要添加其他值，可以使用委托模式，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+Saml2LogoutRequestResolver logoutRequestResolver(RelyingPartyRegistrationRepository registrations) {
+	OpenSaml4LogoutRequestResolver logoutRequestResolver =
+			new OpenSaml4LogoutRequestResolver(registrations);
+	logoutRequestResolver.setParametersConsumer((parameters) -> {
+		String name = ((Saml2AuthenticatedPrincipal) parameters.getAuthentication().getPrincipal()).getFirstAttribute("CustomAttribute");
+		String format = "urn:oasis:names:tc:SAML:2.0:nameid-format:transient";
+		LogoutRequest logoutRequest = parameters.getLogoutRequest();
+		NameID nameId = logoutRequest.getNameID();
+		nameId.setValue(name);
+		nameId.setFormat(format);
+	});
+	return logoutRequestResolver;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+open fun logoutRequestResolver(registrations:RelyingPartyRegistrationRepository?): Saml2LogoutRequestResolver {
+    val logoutRequestResolver = OpenSaml4LogoutRequestResolver(registrations)
+    logoutRequestResolver.setParametersConsumer { parameters: LogoutRequestParameters ->
+        val name: String = (parameters.getAuthentication().getPrincipal() as Saml2AuthenticatedPrincipal).getFirstAttribute("CustomAttribute")
+        val format = "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
+        val logoutRequest: LogoutRequest = parameters.getLogoutRequest()
+        val nameId: NameID = logoutRequest.getNameID()
+        nameId.setValue(name)
+        nameId.setFormat(format)
+    }
+    return logoutRequestResolver
+}
+----
+======
+
+然后，您可以在 DSL 中提供自定义的 `Saml2LogoutRequestResolver`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .saml2Logout((saml2) -> saml2
+        .logoutRequest((request) -> request
+            .logoutRequestResolver(this.logoutRequestResolver)
+        )
+    );
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    saml2Logout {
+        logoutRequest {
+            logoutRequestResolver = this.logoutRequestResolver
+        }
+    }
+}
+----
+======
+
+== 自定义 `<saml2:LogoutResponse>` 解析
+
+通常需要在 `<saml2:LogoutResponse>` 中设置除 Spring Security 提供默认值之外的其他值。
+
+默认情况下，Spring Security 会发出 `<saml2:LogoutResponse>` 并提供以下内容：
+
+* `Destination` 属性 —— 来自 `RelyingPartyRegistration#getAssertingPartyDetails#getSingleLogoutServiceResponseLocation`
+* `ID` 属性 —— 一个 GUID
+* `<Issuer>` 元素 —— 来自 `RelyingPartyRegistration#getEntityId`
+* `<Status>` 元素 —— `SUCCESS`
+
+要添加其他值，可以使用委托模式，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public Saml2LogoutResponseResolver logoutResponseResolver(RelyingPartyRegistrationRepository registrations) {
+	OpenSaml4LogoutResponseResolver logoutRequestResolver =
+			new OpenSaml4LogoutResponseResolver(registrations);
+	logoutRequestResolver.setParametersConsumer((parameters) -> {
+		if (checkOtherPrevailingConditions(parameters.getRequest())) {
+			parameters.getLogoutRequest().getStatus().getStatusCode().setCode(StatusCode.PARTIAL_LOGOUT);
+		}
+	});
+	return logoutRequestResolver;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+open fun logoutResponseResolver(registrations: RelyingPartyRegistrationRepository?): Saml2LogoutResponseResolver {
+    val logoutRequestResolver = OpenSaml4LogoutResponseResolver(registrations)
+    logoutRequestResolver.setParametersConsumer { LogoutResponseParameters parameters ->
+        if (checkOtherPrevailingConditions(parameters.getRequest())) {
+            parameters.getLogoutRequest().getStatus().getStatusCode().setCode(StatusCode.PARTIAL_LOGOUT)
+        }
+    }
+    return logoutRequestResolver
+}
+----
+======
+
+然后，您可以在 DSL 中提供自定义的 `Saml2LogoutResponseResolver`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .saml2Logout((saml2) -> saml2
+        .logoutRequest((request) -> request
+            .logoutRequestResolver(this.logoutRequestResolver)
+        )
+    );
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    saml2Logout {
+        logoutRequest {
+            logoutRequestResolver = this.logoutRequestResolver
+        }
+    }
+}
+----
+======
+
+== 自定义 `<saml2:LogoutRequest>` 认证
+
+若要自定义验证逻辑，您可以实现自己的 `Saml2LogoutRequestValidator`。目前验证较为基础，因此您可以先委托给默认的 `Saml2LogoutRequestValidator`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class MyOpenSamlLogoutRequestValidator implements Saml2LogoutRequestValidator {
+	private final Saml2LogoutRequestValidator delegate = new OpenSamlLogoutRequestValidator();
+
+	@Override
+    public Saml2LogoutRequestValidator logout(Saml2LogoutRequestValidatorParameters parameters) {
+		 // verify signature, issuer, destination, and principal name
+		Saml2LogoutValidatorResult result = delegate.authenticate(authentication);
+
+		LogoutRequest logoutRequest = // ... parse using OpenSAML
+        // perform custom validation
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+open class MyOpenSamlLogoutRequestValidator: Saml2LogoutRequestValidator {
+	private val delegate = OpenSamlLogoutRequestValidator()
+
+	@Override
+    fun logout(parameters: Saml2LogoutRequestValidatorParameters): Saml2LogoutRequestValidator {
+		 // verify signature, issuer, destination, and principal name
+		val result = delegate.authenticate(authentication)
+
+		val logoutRequest: LogoutRequest = // ... parse using OpenSAML
+        // perform custom validation
+    }
+}
+----
+======
+
+然后，您可以在 DSL 中提供自定义的 `Saml2LogoutRequestValidator`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .saml2Logout((saml2) -> saml2
+        .logoutRequest((request) -> request
+            .logoutRequestValidator(myOpenSamlLogoutRequestValidator)
+        )
+    );
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    saml2Logout {
+        logoutRequest {
+            logoutRequestValidator = myOpenSamlLogoutRequestValidator
+        }
+    }
+}
+----
+======
+
+== 自定义 `<saml2:LogoutResponse>` 认证
+
+若要自定义验证逻辑，您可以实现自己的 `Saml2LogoutResponseValidator`。目前验证较为基础，因此您可以先委托给默认的 `Saml2LogoutResponseValidator`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class MyOpenSamlLogoutResponseValidator implements Saml2LogoutResponseValidator {
+	private final Saml2LogoutResponseValidator delegate = new OpenSamlLogoutResponseValidator();
+
+	@Override
+    public Saml2LogoutValidatorResult logout(Saml2LogoutResponseValidatorParameters parameters) {
+		// verify signature, issuer, destination, and status
+		Saml2LogoutValidatorResult result = delegate.authenticate(parameters);
+
+		LogoutResponse logoutResponse = // ... parse using OpenSAML
+        // perform custom validation
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+open class MyOpenSamlLogoutResponseValidator: Saml2LogoutResponseValidator {
+	private val delegate = OpenSamlLogoutResponseValidator()
+
+	@Override
+    fun logout(parameters: Saml2LogoutResponseValidatorParameters): Saml2LogoutResponseValidator {
+		// verify signature, issuer, destination, and status
+		val result = delegate.authenticate(authentication)
+
+		val logoutResponse: LogoutResponse = // ... parse using OpenSAML
+        // perform custom validation
+    }
+}
+----
+======
+
+然后，您可以在 DSL 中提供自定义的 `Saml2LogoutResponseValidator`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .saml2Logout((saml2) -> saml2
+        .logoutResponse((response) -> response
+            .logoutResponseAuthenticator(myOpenSamlLogoutResponseAuthenticator)
+        )
+    );
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    saml2Logout {
+        logoutResponse {
+            logoutResponseValidator = myOpenSamlLogoutResponseValidator
+        }
+    }
+}
+----
+======
+
+== 自定义 `<saml2:LogoutRequest>` 存储
+
+当您的应用程序发送 `<saml2:LogoutRequest>` 时，该值会被存储在会话中，以便验证 `<saml2:LogoutResponse>` 中的 `RelayState` 参数和 `InResponseTo` 属性。
+
+如果您希望将注销请求存储在非会话位置，可以在 DSL 中提供自定义实现，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+http
+    .saml2Logout((saml2) -> saml2
+        .logoutRequest((request) -> request
+            .logoutRequestRepository(myCustomLogoutRequestRepository)
+        )
+    );
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+http {
+    saml2Logout {
+        logoutRequest {
+            logoutRequestRepository = myCustomLogoutRequestRepository
+        }
+    }
+}
+----
+======
+
+[[jc-logout-references]]
+== 更多相关注销参考资料
+
+- xref:servlet/test/mockmvc/logout.adoc#test-logout[测试注销]
+- xref:servlet/integrations/servlet-api.adoc#servletapi-logout[HttpServletRequest.logout()]
+- xref:servlet/exploits/csrf.adoc#csrf-considerations-logout[注销] 在 CSRF 注意事项一节中

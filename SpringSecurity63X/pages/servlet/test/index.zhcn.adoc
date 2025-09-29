@@ -1,0 +1,9 @@
+[[test]]
+= 测试
+:page-section-summary-toc: 1
+
+本节介绍 Spring Security 提供的测试支持。
+
+要使用 Spring Security 的测试支持，必须将 `spring-security-test-{spring-security-version}.jar` 作为项目的依赖项包含进来。
+
+总体而言，Spring Security 的测试支持提供了以下集成：

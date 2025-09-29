@@ -1,0 +1,248 @@
+Remember-me（记住我）或持久登录认证，是指网站能够在会话之间记住主体的身份。
+这通常通过向浏览器发送一个 Cookie 来实现，在后续的会话中检测到该
+Cookie，并自动触发登录过程。 Spring Security
+为此类操作提供了必要的钩子（hooks），并提供了两种具体的 remember-me
+实现方式： 一种使用哈希来保证基于 Cookie
+的令牌安全性；另一种则使用数据库或其他持久化存储机制来保存生成的令牌。
+
+请注意，这两种实现方式都要求提供一个 `UserDetailsService`。
+如果你使用的认证提供者不依赖于 `UserDetailsService`（例如 LDAP
+提供者），那么除非你的应用上下文中也存在一个 `UserDetailsService`
+Bean，否则 remember-me 功能将无法正常工作。
+
+# 基于简单哈希的令牌方法 {#remember-me-hash-token}
+
+这种方法使用哈希技术来实现一种有效的 remember-me 策略。
+本质上，在用户成功完成交互式认证后，服务器会向浏览器发送一个 Cookie，该
+Cookie 的内容结构如下：
+
+``` txt
+base64(username + ":" + expirationTime + ":" + algorithmName + ":"
+algorithmHex(username + ":" + expirationTime + ":" password + ":" + key))
+
+username:          可被 UserDetailsService 识别的用户名
+password:          与检索出的 UserDetails 中密码匹配的密码
+expirationTime:    记住我令牌过期的时间点，以毫秒表示
+key:               用于防止 remember-me 令牌被篡改的私钥
+algorithmName:     用于生成和验证 remember-me 令牌签名的算法名称
+```
+
+该 remember-me
+令牌仅在指定时间段内有效，且前提是用户名、密码和密钥未发生更改。
+值得注意的是，这种方式存在潜在的安全风险：一旦 remember-me
+令牌被截获，攻击者可以在任何用户代理上使用它，直到令牌过期为止。
+这一点与摘要认证（digest authentication）存在的问题类似。
+如果用户意识到其令牌已被窃取，他们可以立即更改密码，从而立刻使所有已发出的
+remember-me 令牌失效。
+如果需要更高的安全性，你应该使用下一节中描述的方法。 或者干脆不要使用
+remember-me 服务。
+
+如果你熟悉
+[命名空间配置](servlet/configuration/xml-namespace.xml#ns-config)
+章节中讨论的主题，可以通过添加 `<remember-me>` 元素来启用 remember-me
+认证：
+
+``` xml
+<http>
+...
+<remember-me key="myAppKey"/>
+</http>
+```
+
+`UserDetailsService` 通常会被自动选择。 如果你的应用上下文中存在多个
+`UserDetailsService`，你需要通过 `user-service-ref`
+属性明确指定应使用哪一个，其值为你的 `UserDetailsService` Bean 的名称。
+
+# 持久化令牌方法 {#remember-me-persistent-token}
+
+此方法基于文章 [Improved Persistent Login Cookie Best
+Practice](https://web.archive.org/web/20180819014446/http://jaspan.com/improved_persistent_login_cookie_best_practice)
+所述的最佳实践，并做了一些小的修改 [^1]。
+若要在命名空间配置中使用此方法，需提供一个数据源引用：
+
+``` xml
+<http>
+...
+<remember-me data-source-ref="someDataSource"/>
+</http>
+```
+
+数据库中应包含一个名为 `persistent_logins` 的表，可通过以下 SQL
+语句（或等效语句）创建：
+
+``` ddl
+create table persistent_logins (username varchar(64) not null,
+                                series varchar(64) primary key,
+                                token varchar(64) not null,
+                                last_used timestamp not null)
+```
+
+# Remember-Me 接口与实现 {#remember-me-impls}
+
+Remember-me 被 `UsernamePasswordAuthenticationFilter` 使用，并通过
+`AbstractAuthenticationProcessingFilter` 父类中的钩子实现。 它也被
+`BasicAuthenticationFilter` 所使用。 这些钩子会在适当的时候调用具体的
+`RememberMeServices` 实现。 以下是该接口的定义：
+
+``` java
+Authentication autoLogin(HttpServletRequest request, HttpServletResponse response);
+
+void loginFail(HttpServletRequest request, HttpServletResponse response);
+
+void loginSuccess(HttpServletRequest request, HttpServletResponse response,
+    Authentication successfulAuthentication);
+```
+
+有关这些方法作用的更详细说明，请参阅
+{security-api-url}org/springframework/security/web/authentication/RememberMeServices.html\[`RememberMeServices`\]
+的 Javadoc 文档。 但需要注意的是，目前阶段
+`AbstractAuthenticationProcessingFilter` 仅调用 `loginFail()` 和
+`loginSuccess()` 方法。 而 `autoLogin()` 方法由
+`RememberMeAuthenticationFilter` 在 `SecurityContextHolder` 不包含
+`Authentication` 时调用。 因此，该接口为底层 remember-me
+实现提供了足够的认证事件通知，并在可能包含 remember-me Cookie 的 Web
+请求到来时委托给具体实现进行处理。 这种设计允许支持任意数量的
+remember-me 实现策略。
+
+我们之前已经看到 Spring Security
+提供了两种实现方式。下面我们逐一介绍它们。
+
+## TokenBasedRememberMeServices {#_tokenbasedremembermeservices}
+
+该实现支持 [基于简单哈希的令牌方法](#remember-me-hash-token)
+中描述的较简单的方案。 `TokenBasedRememberMeServices` 会生成一个
+`RememberMeAuthenticationToken`，由 `RememberMeAuthenticationProvider`
+进行处理。 该认证提供者与 `TokenBasedRememberMeServices` 共享一个
+`key`。 此外，`TokenBasedRememberMeServices` 需要一个
+`UserDetailsService`，以便从中获取用户名和密码用于签名比对，并生成包含正确
+`GrantedAuthority` 实例的 `RememberMeAuthenticationToken`。
+`TokenBasedRememberMeServices` 还实现了 Spring Security 的
+`LogoutHandler` 接口，因此它可以与 `LogoutFilter` 配合使用，自动清除
+remember-me Cookie。
+
+默认情况下，该实现使用 SHA-256 算法对令牌签名进行编码。
+为了验证令牌签名，系统会解析 `algorithmName`
+字段中指定的算法并加以使用。 如果没有提供
+`algorithmName`，则使用默认匹配算法 SHA-256。
+你可以分别为签名编码和签名验证指定不同的算法，这样就可以安全地升级到新的编码算法，同时仍能验证旧的签名（当没有
+`algorithmName` 时）。 为此，你可以将自定义的
+`TokenBasedRememberMeServices` 定义为 Bean 并在配置中使用。
+
+::: informalexample
+
+Java
+
+:   ``` java
+    @Bean
+    SecurityFilterChain securityFilterChain(HttpSecurity http, RememberMeServices rememberMeServices) throws Exception {
+        http
+                .authorizeHttpRequests((authorize) -> authorize
+                        .anyRequest().authenticated()
+                )
+                .rememberMe((remember) -> remember
+                    .rememberMeServices(rememberMeServices)
+                );
+        return http.build();
+    }
+
+    @Bean
+    RememberMeServices rememberMeServices(UserDetailsService userDetailsService) {
+        RememberMeTokenAlgorithm encodingAlgorithm = RememberMeTokenAlgorithm.SHA256;
+        TokenBasedRememberMeServices rememberMe = new TokenBasedRememberMeServices(myKey, userDetailsService, encodingAlgorithm);
+        rememberMe.setMatchingAlgorithm(RememberMeTokenAlgorithm.MD5);
+        return rememberMe;
+    }
+    ```
+
+XML
+
+:   ``` xml
+    <http>
+      <remember-me services-ref="rememberMeServices"/>
+    </http>
+
+    <bean id="rememberMeServices" class=
+    "org.springframework.security.web.authentication.rememberme.TokenBasedRememberMeServices">
+        <property name="userDetailsService" ref="myUserDetailsService"/>
+        <property name="key" value="springRocks"/>
+        <property name="matchingAlgorithm" value="MD5"/>
+        <property name="encodingAlgorithm" value="SHA256"/>
+    </bean>
+    ```
+:::
+
+要在应用上下文中启用 remember-me 服务，需要以下 Bean：
+
+::: informalexample
+
+Java
+
+:   ``` java
+    @Bean
+    RememberMeAuthenticationFilter rememberMeFilter() {
+        RememberMeAuthenticationFilter rememberMeFilter = new RememberMeAuthenticationFilter();
+        rememberMeFilter.setRememberMeServices(rememberMeServices());
+        rememberMeFilter.setAuthenticationManager(theAuthenticationManager);
+        return rememberMeFilter;
+    }
+
+    @Bean
+    TokenBasedRememberMeServices rememberMeServices() {
+        TokenBasedRememberMeServices rememberMeServices = new TokenBasedRememberMeServices();
+        rememberMeServices.setUserDetailsService(myUserDetailsService);
+        rememberMeServices.setKey("springRocks");
+        return rememberMeServices;
+    }
+
+    @Bean
+    RememberMeAuthenticationProvider rememberMeAuthenticationProvider() {
+        RememberMeAuthenticationProvider rememberMeAuthenticationProvider = new RememberMeAuthenticationProvider();
+        rememberMeAuthenticationProvider.setKey("springRocks");
+        return rememberMeAuthenticationProvider;
+    }
+    ```
+
+XML
+
+:   ``` xml
+    <bean id="rememberMeFilter" class=
+    "org.springframework.security.web.authentication.rememberme.RememberMeAuthenticationFilter">
+    <property name="rememberMeServices" ref="rememberMeServices"/>
+    <property name="authenticationManager" ref="theAuthenticationManager" />
+    </bean>
+
+    <bean id="rememberMeServices" class=
+    "org.springframework.security.web.authentication.rememberme.TokenBasedRememberMeServices">
+    <property name="userDetailsService" ref="myUserDetailsService"/>
+    <property name="key" value="springRocks"/>
+    </bean>
+
+    <bean id="rememberMeAuthenticationProvider" class=
+    "org.springframework.security.authentication.RememberMeAuthenticationProvider">
+    <property name="key" value="springRocks"/>
+    </bean>
+    ```
+:::
+
+请确保将你的 `RememberMeServices` 实现实例设置到
+`UsernamePasswordAuthenticationFilter.setRememberMeServices()`
+属性中，将 `RememberMeAuthenticationProvider` 添加到
+`AuthenticationManager.setProviders()` 列表中，并将
+`RememberMeAuthenticationFilter` 插入到 `FilterChainProxy`
+中（通常紧接在 `UsernamePasswordAuthenticationFilter` 之后）。
+
+## PersistentTokenBasedRememberMeServices {#_persistenttokenbasedremembermeservices}
+
+你可以像使用 `TokenBasedRememberMeServices`
+一样使用此类，但它还需要配置一个 `PersistentTokenRepository`
+来存储令牌。
+
+- `InMemoryTokenRepositoryImpl`：仅用于测试。
+
+- `JdbcTokenRepositoryImpl`：将令牌存储在数据库中。
+
+有关数据库表结构，请参见
+[持久化令牌方法](#remember-me-persistent-token)。
+
+[^1]: 主要是不将用户名包含在 Cookie 中，以避免不必要的有效登录名暴露。
+    这篇文章的评论区对此有相关讨论。

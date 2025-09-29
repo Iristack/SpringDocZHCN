@@ -1,0 +1,277 @@
+Servlet 规范为 `HttpServletRequest` 定义了若干可通过 getter
+方法访问的属性，我们可能希望基于这些属性进行匹配。这些属性包括
+`contextPath`、 `servletPath`、 `pathInfo` 和 `queryString`。Spring
+Security 仅关注保护应用内的路径，因此 `contextPath` 会被忽略。
+
+不幸的是，Servlet 规范并未明确定义对于特定请求 URI，`servletPath` 和
+`pathInfo` 应包含的具体内容。例如，URL 的每个路径段都可能包含参数（如
+[RFC 2396](https://www.ietf.org/rfc/rfc2396.txt)
+中所定义）。你可能已经见过这种情况：当浏览器不支持 Cookie
+时，`jsessionid` 参数会被附加到 URL 后面并以分号分隔。然而 RFC
+允许这些参数出现在 URL
+的任意路径段中。规范并未明确说明这些参数是否应包含在 `servletPath` 和
+`pathInfo` 的值中，不同的 Servlet 容器对此行为也各不相同。
+
+存在这样的风险：当应用程序部署在一个不会从这些值中剥离路径参数的容器中时，攻击者可能会在请求的
+URL 中添加路径参数，导致模式匹配意外地成功或失败。（一旦请求离开
+`FilterChainProxy`，原始值仍会被恢复，因此对应用程序仍然可用。）
+
+此外，传入的 URL 还可能出现其他变化。例如，可能包含路径遍历序列（如
+`/../`）或多余的正斜杠（
+`//`），这也可能导致模式匹配失败。某些容器会在执行 Servlet
+映射前规范化这些内容，但另一些则不会。
+
+为了防范此类问题， `FilterChainProxy` 使用一个 `HttpFirewall`
+策略来检查并包装请求。默认情况下，非规范化的请求会被自动拒绝，且路径参数和重复的斜杠在匹配过程中会被移除。（例如，原始请求路径
+`/secure;hack=1/somefile.html;hack=2` 将被转换为
+`/secure/somefile.html`。）因此，使用 `FilterChainProxy`
+来管理安全过滤器链是至关重要的。
+
+需要注意的是， `servletPath` 和 `pathInfo`
+的值是由容器解码的，因此如果你的应用程序中有任何包含分号的有效路径，则不应依赖它们，因为这些部分在匹配过程中会被移除。
+
+如前所述，默认策略是使用 Ant
+风格的路径进行匹配，这对大多数用户来说可能是最佳选择。该策略由
+`AntPathRequestMatcher` 类实现，它使用 Spring 的 `AntPathMatcher`
+对拼接后的 `servletPath` 和 `pathInfo` 进行不区分大小写的匹配，忽略
+`queryString`。
+
+如果你需要更强大的匹配策略，可以使用正则表达式。此时对应的策略实现为
+`RegexRequestMatcher`。更多信息请参见
+{security-api-url}/org/springframework/security/web/util/matcher/RegexRequestMatcher.html\[该类的
+Javadoc\]。
+
+实际上，我们建议你在服务层使用方法级别的安全性来控制对应用程序的访问，而不是完全依赖
+Web 应用级别定义的安全约束。URL
+是易变的，很难考虑到应用程序可能支持的所有潜在 URL
+以及请求可能被操纵的方式。你应该限制自己只使用几个简单易懂的 Ant
+路径，并始终采用"默认拒绝"（deny-by-default）的方法，即最后定义一个通配符（如
+`/` 或 `/**`）来拒绝所有未明确允许的访问。
+
+在服务层定义的安全性更加健壮且难以绕过，因此你应该充分利用 Spring
+Security 提供的方法级安全功能。
+
+`HttpFirewall` 还通过拒绝 HTTP 响应头中的换行符来防止 [HTTP
+响应拆分](https://www.owasp.org/index.php/HTTP_Response_Splitting)
+攻击。
+
+默认情况下，使用的是 `StrictHttpFirewall`
+实现。此实现会拒绝看起来具有恶意的请求。如果它的限制对你来说过于严格，你可以自定义哪些类型的请求应被拒绝。但请注意，这样做可能会使你的应用程序面临攻击风险。
+
+例如，如果你想使用 Spring MVC 的矩阵变量（matrix
+variables），可以使用以下配置：
+
+:::: example
+::: title
+允许矩阵变量
+:::
+
+Java
+
+:   ``` java
+    @Bean
+    public StrictHttpFirewall httpFirewall() {
+        StrictHttpFirewall firewall = new StrictHttpFirewall();
+        firewall.setAllowSemicolon(true);
+        return firewall;
+    }
+    ```
+
+XML
+
+:   ``` xml
+    <b:bean id="httpFirewall" class="org.springframework.security.web.firewall.StrictHttpFirewall" p:allowSemicolon="true"/>
+
+    <http-firewall ref="httpFirewall"/>
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    fun httpFirewall(): StrictHttpFirewall {
+        val firewall = StrictHttpFirewall()
+        firewall.setAllowSemicolon(true)
+        return firewall
+    }
+    ```
+::::
+
+为了防范 [跨站追踪
+(XST)](https://www.owasp.org/index.php/Cross_Site_Tracing) 和 [HTTP
+动词篡改](https://www.owasp.org/index.php/Test_HTTP_Methods_(OTG-CONFIG-006))，
+`StrictHttpFirewall` 提供了一个允许的 HTTP
+方法白名单。默认允许的方法为：`DELETE`、 `GET`、 `HEAD`、 `OPTIONS`、
+`PATCH`、 `POST` 和
+`PUT`。如果你的应用需要修改允许的方法列表，可以通过配置自定义的
+`StrictHttpFirewall` Bean 来实现。以下示例仅允许 HTTP `GET` 和 `POST`
+方法：
+
+:::: example
+::: title
+仅允许 GET 和 POST
+:::
+
+Java
+
+:   ``` java
+    @Bean
+    public StrictHttpFirewall httpFirewall() {
+        StrictHttpFirewall firewall = new StrictHttpFirewall();
+        firewall.setAllowedHttpMethods(Arrays.asList("GET", "POST"));
+        return firewall;
+    }
+    ```
+
+XML
+
+:   ``` xml
+    <b:bean id="httpFirewall" class="org.springframework.security.web.firewall.StrictHttpFirewall" p:allowedHttpMethods="GET,POST"/>
+
+    <http-firewall ref="httpFirewall"/>
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    fun httpFirewall(): StrictHttpFirewall {
+        val firewall = StrictHttpFirewall()
+        firewall.setAllowedHttpMethods(listOf("GET", "POST"))
+        return firewall
+    }
+    ```
+::::
+
+:::: tip
+::: title
+:::
+
+如果你使用 `new MockHttpServletRequest()`，它当前会创建一个空字符串（
+`""`）作为 HTTP 方法。这是一个无效的 HTTP 方法，会被 Spring Security
+拒绝。你可以通过将其替换为 `new MockHttpServletRequest("GET", "")`
+来解决此问题。详见 [SPR-16851](https://jira.spring.io/browse/SPR-16851)
+上的相关问题。
+::::
+
+如果你必须允许任意 HTTP 方法（不推荐），可以调用
+`StrictHttpFirewall.setUnsafeAllowAnyHttpMethod(true)`。这将完全禁用对
+HTTP 方法的验证。
+
+`StrictHttpFirewall`
+还会对请求头名称、头值以及参数名称进行检查。它要求每个字符都有明确定义的码点，且不能是控制字符。
+
+如有必要，可通过以下方法放宽或调整这些要求：
+
+- `StrictHttpFirewall#setAllowedHeaderNames(Predicate)`
+
+- `StrictHttpFirewall#setAllowedHeaderValues(Predicate)`
+
+- `StrictHttpFirewall#setAllowedParameterNames(Predicate)`
+
+:::: note
+::: title
+:::
+
+也可以通过 `setAllowedParameterValues(Predicate)` 控制参数值。
+::::
+
+例如，若要关闭这些检查，可将 `StrictHttpFirewall` 配置为使用始终返回
+`true` 的 `Predicate` 实例：
+
+:::: example
+::: title
+允许任意请求头名、头值和参数名
+:::
+
+Java
+
+:   ``` java
+    @Bean
+    public StrictHttpFirewall httpFirewall() {
+        StrictHttpFirewall firewall = new StrictHttpFirewall();
+        firewall.setAllowedHeaderNames((header) -> true);
+        firewall.setAllowedHeaderValues((header) -> true);
+        firewall.setAllowedParameterNames((parameter) -> true);
+        return firewall;
+    }
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    fun httpFirewall(): StrictHttpFirewall {
+        val firewall = StrictHttpFirewall()
+        firewall.setAllowedHeaderNames { true }
+        firewall.setAllowedHeaderValues { true }
+        firewall.setAllowedParameterNames { true }
+        return firewall
+    }
+    ```
+::::
+
+或者，你可能只需要允许某个特定值。
+
+例如，iPhone Xʀ 使用的 `User-Agent` 包含一个不在 ISO-8859-1
+字符集中的字符。由于这一原因，一些应用服务器会将该值解析成两个独立的字符，其中后者是一个未定义字符。
+
+你可以使用 `setAllowedHeaderValues` 方法来处理这种情况：
+
+:::: example
+::: title
+允许特定 User-Agent
+:::
+
+Java
+
+:   ``` java
+    @Bean
+    public StrictHttpFirewall httpFirewall() {
+        StrictHttpFirewall firewall = new StrictHttpFirewall();
+        Pattern allowed = Pattern.compile("[\\p{IsAssigned}&&[^\\p{IsControl}]]*");
+        Pattern userAgent = ...;
+        firewall.setAllowedHeaderValues((header) -> allowed.matcher(header).matches() || userAgent.matcher(header).matches());
+        return firewall;
+    }
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    @Bean
+    fun httpFirewall(): StrictHttpFirewall {
+        val firewall = StrictHttpFirewall()
+        val allowed = Pattern.compile("[\\p{IsAssigned}&&[^\\p{IsControl}]]*")
+        val userAgent = Pattern.compile(...)
+        firewall.setAllowedHeaderValues { allowed.matcher(it).matches() || userAgent.matcher(it).matches() }
+        return firewall
+    }
+    ```
+::::
+
+对于请求头值，你还可以考虑在验证时将其解析为 UTF-8 编码：
+
+:::: example
+::: title
+将请求头解析为 UTF-8
+:::
+
+Java
+
+:   ``` java
+    firewall.setAllowedHeaderValues((header) -> {
+        String parsed = new String(header.getBytes(ISO_8859_1), UTF_8);
+        return allowed.matcher(parsed).matches();
+    });
+    ```
+
+Kotlin
+
+:   ``` kotlin
+    firewall.setAllowedHeaderValues {
+        val parsed = String(it.toByteArray(ISO_8859_1), UTF_8)
+        allowed.matcher(parsed).matches()
+    }
+    ```
+::::

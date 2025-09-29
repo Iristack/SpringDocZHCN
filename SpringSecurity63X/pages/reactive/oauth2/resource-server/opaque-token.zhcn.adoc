@@ -1,0 +1,846 @@
+= OAuth 2.0 资源服务器不透明令牌
+
+[[webflux-oauth2resourceserver-opaque-minimaldependencies]]
+== 自省功能的最小依赖
+如 xref:servlet/oauth2/resource-server/jwt.adoc#oauth2resourceserver-jwt-minimaldependencies[JWT 的最小依赖] 所述，大多数资源服务器支持都包含在 `spring-security-oauth2-resource-server` 中。
+然而，除非您提供自定义的 <<webflux-oauth2resourceserver-opaque-introspector-bean,`ReactiveOpaqueTokenIntrospector`>>，否则资源服务器会回退到 `NimbusReactiveOpaqueTokenIntrospector`。
+这意味着需要同时引入 `spring-security-oauth2-resource-server` 和 `oauth2-oidc-sdk` 才能构建一个支持不透明 Bearer 令牌的最简资源服务器。
+请参阅 `spring-security-oauth2-resource-server` 以确定 `oauth2-oidc-sdk` 的正确版本。
+
+[[webflux-oauth2resourceserver-opaque-minimalconfiguration]]
+== 自省功能的最小配置
+
+通常情况下，您可以使用由授权服务器托管的 https://tools.ietf.org/html/rfc7662[OAuth 2.0 自省端点] 来验证不透明令牌。
+当需要支持令牌撤销时，这非常有用。
+
+当使用 https://spring.io/projects/spring-boot[Spring Boot] 时，将应用程序配置为使用自省机制的资源服务器包括两个步骤：
+
+. 包含所需的依赖项。
+. 指定自省端点的详细信息。
+
+[[webflux-oauth2resourceserver-opaque-introspectionuri]]
+=== 指定授权服务器
+
+您可以指定自省端点的位置：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        opaquetoken:
+          introspection-uri: https://idp.example.com/introspect
+          client-id: client
+          client-secret: secret
+----
+
+其中 `https://idp.example.com/introspect` 是您的授权服务器托管的自省端点，而 `client-id` 和 `client-secret` 是访问该端点所需的凭据。
+
+资源服务器使用这些属性进行进一步的自我配置，并随后验证传入的 JWT。
+
+[NOTE]
+====
+如果授权服务器响应表明令牌有效，则该令牌就是有效的。
+====
+
+=== 启动期望
+
+当使用此属性和这些依赖项时，资源服务器会自动配置自身以验证不透明 Bearer 令牌。
+
+此启动过程比 JWT 简单得多，因为不需要发现任何端点，也不需要添加额外的验证规则。
+
+=== 运行时期望
+
+一旦应用程序启动，资源服务器会尝试处理任何包含 `Authorization: Bearer` 头的请求：
+
+[source,http]
+----
+GET / HTTP/1.1
+Authorization: Bearer some-token-value # 资源服务器将处理此请求
+----
+
+只要指定了此方案，资源服务器就会根据 Bearer Token 规范尝试处理请求。
+
+对于不透明令牌，资源服务器：
+
+. 使用提供的凭据和令牌查询指定的自省端点。
+. 检查响应中是否存在 `{ 'active' : true }` 属性。
+. 将每个 scope 映射为带有 `SCOPE_` 前缀的权限。
+
+默认情况下，生成的 `Authentication#getPrincipal` 是一个 Spring Security `{security-api-url}org/springframework/security/oauth2/core/OAuth2AuthenticatedPrincipal.html[OAuth2AuthenticatedPrincipal]` 对象，而 `Authentication#getName` 映射到令牌的 `sub` 属性（如果存在）。
+
+接下来，您可能想要跳转至：
+
+* <<webflux-oauth2resourceserver-opaque-attributes>>
+* <<webflux-oauth2resourceserver-opaque-authorization-extraction>>
+* <<webflux-oauth2resourceserver-opaque-jwt-introspector>>
+
+[[webflux-oauth2resourceserver-opaque-attributes]]
+== 认证后查找属性
+
+一旦令牌通过认证，`BearerTokenAuthentication` 实例将被设置到 `SecurityContext` 中。
+
+这意味着当您的配置中使用了 `@EnableWebFlux` 时，可以在 `@Controller` 方法中使用它：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@GetMapping("/foo")
+public Mono<String> foo(BearerTokenAuthentication authentication) {
+    return Mono.just(authentication.getTokenAttributes().get("sub") + " is the subject");
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@GetMapping("/foo")
+fun foo(authentication: BearerTokenAuthentication): Mono<String> {
+    return Mono.just(authentication.tokenAttributes["sub"].toString() + " is the subject")
+}
+----
+======
+
+由于 `BearerTokenAuthentication` 持有 `OAuth2AuthenticatedPrincipal`，因此它也可以在控制器方法中使用：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@GetMapping("/foo")
+public Mono<String> foo(@AuthenticationPrincipal OAuth2AuthenticatedPrincipal principal) {
+    return Mono.just(principal.getAttribute("sub") + " is the subject");
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@GetMapping("/foo")
+fun foo(@AuthenticationPrincipal principal: OAuth2AuthenticatedPrincipal): Mono<String> {
+    return Mono.just(principal.getAttribute<Any>("sub").toString() + " is the subject")
+}
+----
+======
+
+=== 使用 SpEL 查找属性
+
+您可以使用 Spring 表达式语言 (SpEL) 访问属性。
+
+例如，如果您使用 `@EnableReactiveMethodSecurity` 以便可以使用 `@PreAuthorize` 注解，那么您可以这样做：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@PreAuthorize("principal?.attributes['sub'] = 'foo'")
+public Mono<String> forFoosEyesOnly() {
+    return Mono.just("foo");
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@PreAuthorize("principal.attributes['sub'] = 'foo'")
+fun forFoosEyesOnly(): Mono<String> {
+    return Mono.just("foo")
+}
+----
+======
+
+[[webflux-oauth2resourceserver-opaque-sansboot]]
+== 覆盖或替换 Boot 自动配置
+
+Spring Boot 为资源服务器生成两个 `@Bean` 实例。
+
+第一个是 `SecurityWebFilterChain`，用于将应用程序配置为资源服务器。
+当使用不透明令牌时，这个 `SecurityWebFilterChain` 看起来像这样：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+	http
+		.authorizeExchange(exchanges -> exchanges
+			.anyExchange().authenticated()
+		)
+		.oauth2ResourceServer(ServerHttpSecurity.OAuth2ResourceServerSpec::opaqueToken)
+	return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun springSecurityFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    return http {
+        authorizeExchange {
+            authorize(anyExchange, authenticated)
+        }
+        oauth2ResourceServer {
+            opaqueToken { }
+        }
+    }
+}
+----
+======
+
+如果应用程序没有暴露 `SecurityWebFilterChain` bean，Spring Boot 将暴露默认的 bean（如上所示）。
+
+您可以通过在应用程序中暴露该 bean 来替换它：
+
+.替换 SecurityWebFilterChain
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import static org.springframework.security.oauth2.core.authorization.OAuth2ReactiveAuthorizationManagers.hasScope;
+
+@Configuration
+@EnableWebFluxSecurity
+public class MyCustomSecurityConfiguration {
+    @Bean
+    SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+        http
+            .authorizeExchange(exchanges -> exchanges
+                .pathMatchers("/messages/**").access(hasScope("message:read"))
+                .anyExchange().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .opaqueToken(opaqueToken -> opaqueToken
+                    .introspector(myIntrospector())
+                )
+            );
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.oauth2.core.authorization.OAuth2ReactiveAuthorizationManagers.hasScope
+
+@Bean
+fun springSecurityFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    return http {
+        authorizeExchange {
+            authorize("/messages/**", hasScope("message:read"))
+            authorize(anyExchange, authenticated)
+        }
+        oauth2ResourceServer {
+            opaqueToken {
+                introspector = myIntrospector()
+            }
+        }
+    }
+}
+----
+======
+
+上述示例要求对任何以 `/messages/` 开头的 URL 具有 `message:read` 的作用域。
+
+`oauth2ResourceServer` DSL 上的方法还可以覆盖或替换自动配置。
+
+例如，Spring Boot 创建的第二个 `@Bean` 是 `ReactiveOpaqueTokenIntrospector`，它将 `String` 令牌解码为已验证的 `OAuth2AuthenticatedPrincipal` 实例：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public ReactiveOpaqueTokenIntrospector introspector() {
+    return new NimbusReactiveOpaqueTokenIntrospector(introspectionUri, clientId, clientSecret);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun introspector(): ReactiveOpaqueTokenIntrospector {
+    return NimbusReactiveOpaqueTokenIntrospector(introspectionUri, clientId, clientSecret)
+}
+----
+======
+
+如果应用程序未暴露 `ReactiveOpaqueTokenIntrospector` bean，Spring Boot 将暴露默认的 bean（如上所示）。
+
+您可以通过使用 `introspectionUri()` 和 `introspectionClientCredentials()` 来覆盖其配置，或者通过使用 `introspector()` 来完全替换它。
+
+[[webflux-oauth2resourceserver-opaque-introspectionuri-dsl]]
+=== 使用 `introspectionUri()`
+
+您可以将授权服务器的自省 URI 配置为<<webflux-oauth2resourceserver-opaque-introspectionuri,配置属性>>，也可以在 DSL 中提供：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+public class DirectlyConfiguredIntrospectionUri {
+    @Bean
+    SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+        http
+            .authorizeExchange(exchanges -> exchanges
+                .anyExchange().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .opaqueToken(opaqueToken -> opaqueToken
+                    .introspectionUri("https://idp.example.com/introspect")
+                    .introspectionClientCredentials("client", "secret")
+                )
+            );
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun springSecurityFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    return http {
+        authorizeExchange {
+            authorize(anyExchange, authenticated)
+        }
+        oauth2ResourceServer {
+            opaqueToken {
+                introspectionUri = "https://idp.example.com/introspect"
+                introspectionClientCredentials("client", "secret")
+            }
+        }
+    }
+}
+----
+======
+
+使用 `introspectionUri()` 优先于任何配置属性。
+
+[[webflux-oauth2resourceserver-opaque-introspector-dsl]]
+=== 使用 `introspector()`
+
+`introspector()` 比 `introspectionUri()` 更强大。它会完全替换任何 Boot 对 `ReactiveOpaqueTokenIntrospector` 的自动配置：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+public class DirectlyConfiguredIntrospector {
+    @Bean
+    SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+        http
+            .authorizeExchange(exchanges -> exchanges
+                .anyExchange().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .opaqueToken(opaqueToken -> opaqueToken
+                    .introspector(myCustomIntrospector())
+                )
+            );
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun springSecurityFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    return http {
+        authorizeExchange {
+            authorize(anyExchange, authenticated)
+        }
+        oauth2ResourceServer {
+            opaqueToken {
+                introspector = myCustomIntrospector()
+            }
+        }
+    }
+}
+----
+======
+
+当需要更深层次的配置时（例如 <<webflux-oauth2resourceserver-opaque-authorization-extraction,权限映射>> 或 <<webflux-oauth2resourceserver-opaque-jwt-introspector,JWT 撤销>>），这非常有用。
+
+[[webflux-oauth2resourceserver-opaque-introspector-bean]]
+=== 暴露 `ReactiveOpaqueTokenIntrospector` `@Bean`
+
+或者，暴露一个 `ReactiveOpaqueTokenIntrospector` `@Bean` 与使用 `introspector()` 效果相同：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public ReactiveOpaqueTokenIntrospector introspector() {
+    return new NimbusReactiveOpaqueTokenIntrospector(introspectionUri, clientId, clientSecret);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun introspector(): ReactiveOpaqueTokenIntrospector {
+    return NimbusReactiveOpaqueTokenIntrospector(introspectionUri, clientId, clientSecret)
+}
+----
+======
+
+[[webflux-oauth2resourceserver-opaque-authorization]]
+== 配置授权
+
+OAuth 2.0 自省端点通常返回一个 `scope` 属性，表示已授予的作用域（或权限）——例如：
+
+[source,json]
+----
+{ ..., "scope" : "messages contacts"}
+----
+
+在这种情况下，资源服务器会尝试将这些作用域强制转换为授权列表，并为每个作用域添加前缀字符串：`SCOPE_`。
+
+这意味着，要保护从不透明令牌派生出的作用域的端点或方法，相应的表达式应包含此前缀：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import static org.springframework.security.oauth2.core.authorization.OAuth2ReactiveAuthorizationManagers.hasScope;
+
+@Configuration
+@EnableWebFluxSecurity
+public class MappedAuthorities {
+    @Bean
+    SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+        http
+            .authorizeExchange(exchange -> exchange
+                .pathMatchers("/contacts/**").access(hasScope("contacts"))
+                .pathMatchers("/messages/**").access(hasScope("messages"))
+                .anyExchange().authenticated()
+            )
+            .oauth2ResourceServer(ServerHttpSecurity.OAuth2ResourceServerSpec::opaqueToken);
+        return http.build();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.oauth2.core.authorization.OAuth2ReactiveAuthorizationManagers.hasScope
+
+@Bean
+fun springSecurityFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    return http {
+        authorizeExchange {
+            authorize("/contacts/**", hasScope("contacts"))
+            authorize("/messages/**", hasScope("messages"))
+            authorize(anyExchange, authenticated)
+        }
+        oauth2ResourceServer {
+            opaqueToken { }
+        }
+    }
+}
+----
+======
+
+您也可以在方法安全中做类似的事情：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@PreAuthorize("hasAuthority('SCOPE_messages')")
+public Flux<Message> getMessages(...) {}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@PreAuthorize("hasAuthority('SCOPE_messages')")
+fun getMessages(): Flux<Message> { }
+----
+======
+
+[[webflux-oauth2resourceserver-opaque-authorization-extraction]]
+=== 手动提取权限
+
+默认情况下，不透明令牌支持从自省响应中提取作用域声明并将其解析为单独的 `GrantedAuthority` 实例。
+
+考虑以下示例：
+
+[source,json]
+----
+{
+    "active" : true,
+    "scope" : "message:read message:write"
+}
+----
+
+如果自省响应如上面的示例所示，资源服务器将生成一个具有两个权限的 `Authentication`，一个对应 `message:read`，另一个对应 `message:write`。
+
+您可以通过使用自定义的 `ReactiveOpaqueTokenIntrospector` 来定制行为，该实例查看属性集并以自己的方式转换：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class CustomAuthoritiesOpaqueTokenIntrospector implements ReactiveOpaqueTokenIntrospector {
+    private ReactiveOpaqueTokenIntrospector delegate =
+            new NimbusReactiveOpaqueTokenIntrospector("https://idp.example.org/introspect", "client", "secret");
+
+    public Mono<OAuth2AuthenticatedPrincipal> introspect(String token) {
+        return this.delegate.introspect(token)
+                .map(principal -> new DefaultOAuth2AuthenticatedPrincipal(
+                        principal.getName(), principal.getAttributes(), extractAuthorities(principal)));
+    }
+
+    private Collection<GrantedAuthority> extractAuthorities(OAuth2AuthenticatedPrincipal principal) {
+        List<String> scopes = principal.getAttribute(OAuth2IntrospectionClaimNames.SCOPE);
+        return scopes.stream()
+                .map(SimpleGrantedAuthority::new)
+                .collect(Collectors.toList());
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class CustomAuthoritiesOpaqueTokenIntrospector : ReactiveOpaqueTokenIntrospector {
+    private val delegate: ReactiveOpaqueTokenIntrospector = NimbusReactiveOpaqueTokenIntrospector("https://idp.example.org/introspect", "client", "secret")
+    override fun introspect(token: String): Mono<OAuth2AuthenticatedPrincipal> {
+        return delegate.introspect(token)
+                .map { principal: OAuth2AuthenticatedPrincipal ->
+                    DefaultOAuth2AuthenticatedPrincipal(
+                            principal.name, principal.attributes, extractAuthorities(principal))
+                }
+    }
+
+    private fun extractAuthorities(principal: OAuth2AuthenticatedPrincipal): Collection<GrantedAuthority> {
+        val scopes = principal.getAttribute<List<String>>(OAuth2IntrospectionClaimNames.SCOPE)
+        return scopes
+                .map { SimpleGrantedAuthority(it) }
+    }
+}
+----
+======
+
+之后，您可以通过将其作为 `@Bean` 暴露来配置此自定义自省器：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public ReactiveOpaqueTokenIntrospector introspector() {
+    return new CustomAuthoritiesOpaqueTokenIntrospector();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun introspector(): ReactiveOpaqueTokenIntrospector {
+    return CustomAuthoritiesOpaqueTokenIntrospector()
+}
+----
+======
+
+[[webflux-oauth2resourceserver-opaque-jwt-introspector]]
+== 在 JWT 中使用自省
+
+一个常见的问题是自省是否与 JWT 兼容。
+Spring Security 的不透明令牌支持设计为不关心令牌的格式。它乐意将任何令牌传递给提供的自省端点。
+
+因此，假设您需要在每次请求时检查授权服务器，以防 JWT 已被撤销。
+
+即使您使用的是 JWT 格式的令牌，您的验证方法也是自省，这意味着您希望执行以下操作：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        opaquetoken:
+          introspection-uri: https://idp.example.org/introspection
+          client-id: client
+          client-secret: secret
+----
+
+在这种情况下，生成的 `Authentication` 将是 `BearerTokenAuthentication`。
+相应 `OAuth2AuthenticatedPrincipal` 中的任何属性都将是由自省端点返回的内容。
+
+但是，假设出于某种原因，自省端点仅返回令牌是否处于活动状态。
+现在该怎么办？
+
+在这种情况下，您可以创建一个自定义的 `ReactiveOpaqueTokenIntrospector`，它仍然调用端点，但随后更新返回的主体，使其具有 JWT 的声明作为属性：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class JwtOpaqueTokenIntrospector implements ReactiveOpaqueTokenIntrospector {
+	private ReactiveOpaqueTokenIntrospector delegate =
+			new NimbusReactiveOpaqueTokenIntrospector("https://idp.example.org/introspect", "client", "secret");
+	private ReactiveJwtDecoder jwtDecoder = new NimbusReactiveJwtDecoder(new ParseOnlyJWTProcessor());
+
+	public Mono<OAuth2AuthenticatedPrincipal> introspect(String token) {
+		return this.delegate.introspect(token)
+				.flatMap(principal -> this.jwtDecoder.decode(token))
+				.map(jwt -> new DefaultOAuth2AuthenticatedPrincipal(jwt.getClaims(), NO_AUTHORITIES));
+	}
+
+	private static class ParseOnlyJWTProcessor implements Converter<JWT, Mono<JWTClaimsSet>> {
+		public Mono<JWTClaimsSet> convert(JWT jwt) {
+			try {
+				return Mono.just(jwt.getJWTClaimsSet());
+			} catch (Exception ex) {
+				return Mono.error(ex);
+			}
+		}
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class JwtOpaqueTokenIntrospector : ReactiveOpaqueTokenIntrospector {
+    private val delegate: ReactiveOpaqueTokenIntrospector = NimbusReactiveOpaqueTokenIntrospector("https://idp.example.org/introspect", "client", "secret")
+    private val jwtDecoder: ReactiveJwtDecoder = NimbusReactiveJwtDecoder(ParseOnlyJWTProcessor())
+    override fun introspect(token: String): Mono<OAuth2AuthenticatedPrincipal> {
+        return delegate.introspect(token)
+                .flatMap { jwtDecoder.decode(token) }
+                .map { jwt: Jwt -> DefaultOAuth2AuthenticatedPrincipal(jwt.claims, NO_AUTHORITIES) }
+    }
+
+    private class ParseOnlyJWTProcessor : Converter<JWT, Mono<JWTClaimsSet>> {
+        override fun convert(jwt: JWT): Mono<JWTClaimsSet> {
+            return try {
+                Mono.just(jwt.jwtClaimsSet)
+            } catch (e: Exception) {
+                Mono.error(e)
+            }
+        }
+    }
+}
+----
+======
+
+之后，您可以通过将其作为 `@Bean` 暴露来配置此自定义自省器：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public ReactiveOpaqueTokenIntrospector introspector() {
+    return new JwtOpaqueTokenIntropsector();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun introspector(): ReactiveOpaqueTokenIntrospector {
+    return JwtOpaqueTokenIntrospector()
+}
+----
+======
+
+[[webflux-oauth2resourceserver-opaque-userinfo]]
+== 调用 `/userinfo` 端点
+
+一般来说，资源服务器并不关心底层用户，而是关心已被授予的权限。
+
+尽管如此，有时将授权声明与用户关联起来是有价值的。
+
+如果应用程序还使用了 `spring-security-oauth2-client`，并且已经设置了适当的 `ClientRegistrationRepository`，那么您可以通过自定义 `OpaqueTokenIntrospector` 实现这一点。
+下个列表中的实现做了三件事：
+
+* 委托给自省端点，以确认令牌的有效性。
+* 查找与 `/userinfo` 端点关联的适当客户端注册。
+* 调用并返回来自 `/userinfo` 端点的响应。
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class UserInfoOpaqueTokenIntrospector implements ReactiveOpaqueTokenIntrospector {
+	private final ReactiveOpaqueTokenIntrospector delegate =
+			new NimbusReactiveOpaqueTokenIntrospector("https://idp.example.org/introspect", "client", "secret");
+	private final ReactiveOAuth2UserService<OAuth2UserRequest, OAuth2User> oauth2UserService =
+			new DefaultReactiveOAuth2UserService();
+
+	private final ReactiveClientRegistrationRepository repository;
+
+	// ... 构造函数
+
+	@Override
+	public Mono<OAuth2AuthenticatedPrincipal> introspect(String token) {
+		return Mono.zip(this.delegate.introspect(token), this.repository.findByRegistrationId("registration-id"))
+				.map(t -> {
+					OAuth2AuthenticatedPrincipal authorized = t.getT1();
+					ClientRegistration clientRegistration = t.getT2();
+					Instant issuedAt = authorized.getAttribute(ISSUED_AT);
+					Instant expiresAt = authorized.getAttribute(OAuth2IntrospectionClaimNames.EXPIRES_AT);
+					OAuth2AccessToken accessToken = new OAuth2AccessToken(BEARER, token, issuedAt, expiresAt);
+					return new OAuth2UserRequest(clientRegistration, accessToken);
+				})
+				.flatMap(this.oauth2UserService::loadUser);
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class UserInfoOpaqueTokenIntrospector : ReactiveOpaqueTokenIntrospector {
+    private val delegate: ReactiveOpaqueTokenIntrospector = NimbusReactiveOpaqueTokenIntrospector("https://idp.example.org/introspect", "client", "secret")
+    private val oauth2UserService: ReactiveOAuth2UserService<OAuth2UserRequest, OAuth2User> = DefaultReactiveOAuth2UserService()
+    private val repository: ReactiveClientRegistrationRepository? = null
+
+    // ... 构造函数
+    override fun introspect(token: String?): Mono<OAuth2AuthenticatedPrincipal> {
+        return Mono.zip<OAuth2AuthenticatedPrincipal, ClientRegistration>(delegate.introspect(token), repository!!.findByRegistrationId("registration-id"))
+                .map<OAuth2UserRequest> { t: Tuple2<OAuth2AuthenticatedPrincipal, ClientRegistration> ->
+                    val authorized = t.t1
+                    val clientRegistration = t.t2
+                    val issuedAt: Instant? = authorized.getAttribute(ISSUED_AT)
+                    val expiresAt: Instant? = authorized.getAttribute(OAuth2IntrospectionClaimNames.EXPIRES_AT)
+                    val accessToken = OAuth2AccessToken(BEARER, token, issuedAt, expiresAt)
+                    OAuth2UserRequest(clientRegistration, accessToken)
+                }
+                .flatMap { userRequest: OAuth2UserRequest -> oauth2UserService.loadUser(userRequest) }
+    }
+}
+----
+======
+
+如果您不使用 `spring-security-oauth2-client`，也依然很简单。
+您只需用自己的 `WebClient` 实例调用 `/userinfo` 即可：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class UserInfoOpaqueTokenIntrospector implements ReactiveOpaqueTokenIntrospector {
+    private final ReactiveOpaqueTokenIntrospector delegate =
+            new NimbusReactiveOpaqueTokenIntrospector("https://idp.example.org/introspect", "client", "secret");
+    private final WebClient rest = WebClient.create();
+
+    @Override
+    public Mono<OAuth2AuthenticatedPrincipal> introspect(String token) {
+        return this.delegate.introspect(token)
+		        .map(this::makeUserInfoRequest);
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class UserInfoOpaqueTokenIntrospector : ReactiveOpaqueTokenIntrospector {
+    private val delegate: ReactiveOpaqueTokenIntrospector = NimbusReactiveOpaqueTokenIntrospector("https://idp.example.org/introspect", "client", "secret")
+    private val rest: WebClient = WebClient.create()
+
+    override fun introspect(token: String): Mono<OAuth2AuthenticatedPrincipal> {
+        return delegate.introspect(token)
+                .map(this::makeUserInfoRequest)
+    }
+}
+----
+======
+
+无论哪种方式，在创建了 `ReactiveOpaqueTokenIntrospector` 后，您都应该将其发布为 `@Bean` 以覆盖默认值：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+ReactiveOpaqueTokenIntrospector introspector() {
+    return new UserInfoOpaqueTokenIntrospector();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun introspector(): ReactiveOpaqueTokenIntrospector {
+    return UserInfoOpaqueTokenIntrospector()
+}
+----
+======

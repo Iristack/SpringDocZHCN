@@ -1,0 +1,306 @@
+[[oauth2Client-client-auth-support]]
+= 客户端认证支持
+
+[[oauth2Client-client-credentials-auth]]
+== 客户凭证（Client Credentials）
+
+=== 使用 `client_secret_basic` 进行认证
+
+HTTP Basic 方式的客户端认证开箱即用，无需额外配置即可启用。  
+默认实现由 `DefaultOAuth2TokenRequestHeadersConverter` 提供。
+
+对于以下 Spring Boot 的 OAuth 2.0 客户端注册属性：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: client-id
+            client-secret: client-secret
+            client-authentication-method: client_secret_basic
+            authorization-grant-type: authorization_code
+            ...
+----
+
+下面的示例展示了如何配置 `DefaultAuthorizationCodeTokenResponseClient` 来禁用客户端凭证的 URL 编码：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+DefaultOAuth2TokenRequestHeadersConverter<OAuth2AuthorizationCodeGrantRequest> headersConverter =
+		new DefaultOAuth2TokenRequestHeadersConverter<>();
+headersConverter.setEncodeClientCredentials(false);
+
+OAuth2AuthorizationCodeGrantRequestEntityConverter requestEntityConverter =
+		new OAuth2AuthorizationCodeGrantRequestEntityConverter();
+requestEntityConverter.setHeadersConverter(headersConverter);
+
+DefaultAuthorizationCodeTokenResponseClient tokenResponseClient =
+		new DefaultAuthorizationCodeTokenResponseClient();
+tokenResponseClient.setRequestEntityConverter(requestEntityConverter);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val headersConverter = DefaultOAuth2TokenRequestHeadersConverter<OAuth2AuthorizationCodeGrantRequest>()
+headersConverter.setEncodeClientCredentials(false)
+
+val requestEntityConverter = OAuth2AuthorizationCodeGrantRequestEntityConverter()
+requestEntityConverter.setHeadersConverter(headersConverter)
+
+val tokenResponseClient = DefaultAuthorizationCodeTokenResponseClient()
+tokenResponseClient.setRequestEntityConverter(requestEntityConverter)
+----
+======
+
+=== 使用 `client_secret_post` 进行认证
+
+将客户端凭证包含在请求体中的客户端认证方式也开箱即用，无需任何自定义配置即可启用。
+
+以下 Spring Boot 属性展示了 OAuth 2.0 客户端注册的配置示例：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: client-id
+            client-secret: client-secret
+            client-authentication-method: client_secret_post
+            authorization-grant-type: authorization_code
+            ...
+----
+
+[[oauth2Client-jwt-bearer-auth]]
+== JWT Bearer 认证
+
+[NOTE]
+有关 https://datatracker.ietf.org/doc/html/rfc7523#section-2.2[JWT Bearer] 客户端认证的更多细节，请参考《OAuth 2.0 客户端认证和授权许可的 JSON Web Token (JWT) 规范》。
+
+JWT Bearer 客户端认证的默认实现是 `NimbusJwtClientAuthenticationParametersConverter`，这是一个 `Converter`，通过在 `client_assertion` 参数中添加一个已签名的 JSON Web Token（JWS）来定制令牌请求参数。
+
+用于签名 JWS 的 `java.security.PrivateKey` 或 `javax.crypto.SecretKey` 由与 `NimbusJwtClientAuthenticationParametersConverter` 关联的 `com.nimbusds.jose.jwk.JWK` 解析器提供。
+
+=== 使用 `private_key_jwt` 进行认证
+
+给定以下 Spring Boot 的 OAuth 2.0 客户端注册属性：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-authentication-method: private_key_jwt
+            authorization-grant-type: authorization_code
+            ...
+----
+
+以下示例展示如何配置 `DefaultAuthorizationCodeTokenResponseClient`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+Function<ClientRegistration, JWK> jwkResolver = (clientRegistration) -> {
+	if (clientRegistration.getClientAuthenticationMethod().equals(ClientAuthenticationMethod.PRIVATE_KEY_JWT)) {
+		// 假设使用 RSA 密钥类型
+		RSAPublicKey publicKey = ...
+		RSAPrivateKey privateKey = ...
+		return new RSAKey.Builder(publicKey)
+				.privateKey(privateKey)
+				.keyID(UUID.randomUUID().toString())
+				.build();
+	}
+	return null;
+};
+
+OAuth2AuthorizationCodeGrantRequestEntityConverter requestEntityConverter =
+		new OAuth2AuthorizationCodeGrantRequestEntityConverter();
+requestEntityConverter.addParametersConverter(
+		new NimbusJwtClientAuthenticationParametersConverter<>(jwkResolver));
+
+DefaultAuthorizationCodeTokenResponseClient tokenResponseClient =
+		new DefaultAuthorizationCodeTokenResponseClient();
+tokenResponseClient.setRequestEntityConverter(requestEntityConverter);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val jwkResolver: Function<ClientRegistration, JWK> =
+    Function<ClientRegistration, JWK> { clientRegistration ->
+        if (clientRegistration.clientAuthenticationMethod.equals(ClientAuthenticationMethod.PRIVATE_KEY_JWT)) {
+            // 假设使用 RSA 密钥类型
+            var publicKey: RSAPublicKey
+            var privateKey: RSAPrivateKey
+            RSAKey.Builder(publicKey) = //...
+                .privateKey(privateKey) = //...
+                .keyID(UUID.randomUUID().toString())
+                .build()
+        }
+        null
+    }
+
+val requestEntityConverter = OAuth2AuthorizationCodeGrantRequestEntityConverter()
+requestEntityConverter.addParametersConverter(
+    NimbusJwtClientAuthenticationParametersConverter(jwkResolver)
+)
+
+val tokenResponseClient = DefaultAuthorizationCodeTokenResponseClient()
+tokenResponseClient.setRequestEntityConverter(requestEntityConverter)
+----
+======
+
+=== 使用 `client_secret_jwt` 进行认证
+
+给定以下 Spring Boot 的 OAuth 2.0 客户端注册属性：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-secret: okta-client-secret
+            client-authentication-method: client_secret_jwt
+            authorization-grant-type: client_credentials
+            ...
+----
+
+以下示例展示如何配置 `DefaultClientCredentialsTokenResponseClient`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+Function<ClientRegistration, JWK> jwkResolver = (clientRegistration) -> {
+	if (clientRegistration.getClientAuthenticationMethod().equals(ClientAuthenticationMethod.CLIENT_SECRET_JWT)) {
+		SecretKeySpec secretKey = new SecretKeySpec(
+				clientRegistration.getClientSecret().getBytes(StandardCharsets.UTF_8),
+				"HmacSHA256");
+		return new OctetSequenceKey.Builder(secretKey)
+				.keyID(UUID.randomUUID().toString())
+				.build();
+	}
+	return null;
+};
+
+OAuth2ClientCredentialsGrantRequestEntityConverter requestEntityConverter =
+		new OAuth2ClientCredentialsGrantRequestEntityConverter();
+requestEntityConverter.addParametersConverter(
+		new NimbusJwtClientAuthenticationParametersConverter<>(jwkResolver));
+
+DefaultClientCredentialsTokenResponseClient tokenResponseClient =
+		new DefaultClientCredentialsTokenResponseClient();
+tokenResponseClient.setRequestEntityConverter(requestEntityConverter);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val jwkResolver = Function<ClientRegistration, JWK?> { clientRegistration: ClientRegistration ->
+    if (clientRegistration.clientAuthenticationMethod == ClientAuthenticationMethod.CLIENT_SECRET_JWT) {
+        val secretKey = SecretKeySpec(
+            clientRegistration.clientSecret.toByteArray(StandardCharsets.UTF_8),
+            "HmacSHA256"
+        )
+        OctetSequenceKey.Builder(secretKey)
+            .keyID(UUID.randomUUID().toString())
+            .build()
+    }
+    null
+}
+
+val requestEntityConverter = OAuth2ClientCredentialsGrantRequestEntityConverter()
+requestEntityConverter.addParametersConverter(
+    NimbusJwtClientAuthenticationParametersConverter(jwkResolver)
+)
+
+val tokenResponseClient = DefaultClientCredentialsTokenResponseClient()
+tokenResponseClient.setRequestEntityConverter(requestEntityConverter)
+----
+======
+
+=== 自定义 JWT 断言（Assertion）
+
+`NimbusJwtClientAuthenticationParametersConverter` 生成的 JWT 默认包含 `iss`、`sub`、`aud`、`jti`、`iat` 和 `exp` 声明。你可以通过向 `setJwtClientAssertionCustomizer()` 方法传入一个 `Consumer<NimbusJwtClientAuthenticationParametersConverter.JwtClientAuthenticationContext<T>>` 来自定义 JWT 的头部和/或声明。以下示例展示如何自定义 JWT 的声明：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+Function<ClientRegistration, JWK> jwkResolver = ...
+
+NimbusJwtClientAuthenticationParametersConverter<OAuth2ClientCredentialsGrantRequest> converter =
+		new NimbusJwtClientAuthenticationParametersConverter<>(jwkResolver);
+converter.setJwtClientAssertionCustomizer((context) -> {
+	context.getHeaders().header("custom-header", "header-value");
+	context.getClaims().claim("custom-claim", "claim-value");
+});
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val jwkResolver = ...
+
+val converter: NimbusJwtClientAuthenticationParametersConverter<OAuth2ClientCredentialsGrantRequest> =
+    NimbusJwtClientAuthenticationParametersConverter(jwkResolver)
+converter.setJwtClientAssertionCustomizer { context ->
+    context.headers.header("custom-header", "header-value")
+    context.claims.claim("custom-claim", "claim-value")
+}
+----
+======
+
+[[oauth2Client-public-auth]]
+== 公共客户端认证（Public Authentication）
+
+公共客户端认证开箱即用，无需任何自定义配置即可启用。
+
+以下 Spring Boot 属性展示了 OAuth 2.0 客户端注册的配置示例：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: client-id
+            client-authentication-method: none
+            authorization-grant-type: authorization_code
+            ...
+----
+
+[NOTE]
+当 `client-authentication-method` 设置为 "none" (`ClientAuthenticationMethod.NONE`) 时，系统会自动使用 https://tools.ietf.org/html/rfc7636[Proof Key for Code Exchange] (PKCE) 支持公共客户端。

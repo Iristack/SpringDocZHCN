@@ -1,0 +1,23 @@
+[[migration]]
+= 迁移到 6.2 版本
+:spring-security-reference-base-url: https://docs.spring.io/spring-security/reference
+
+本指南提供了从 Spring Security 6.1 升级到 Spring Security 6.2 的操作说明。
+
+== 升级到 Spring Security 6.2
+
+在升级到新的小版本时，重要的是你当前使用的必须是前一个小版本的最新补丁版本。  
+例如，如果你正在升级到 Spring Security 6.2，则应确保已经使用了 Spring Security 6.1 的最新补丁版本。  
+这样做有助于更清晰地识别新版本中引入的任何变更。
+
+因此，第一步是确保你已升级到 Spring Boot 3.1 的最新补丁版本。  
+接着，确保你已升级到 Spring Security 6.1 的最新补丁版本。  
+通常情况下，Spring Boot 的最新补丁版本会使用 Spring Security 的最新补丁版本。
+
+完成以上两步后，你现在可以升级到 Spring Security 6.2。
+
+== 快速参考
+
+以下列表提供了本指南中所述变更的快速参考：
+
+- xref:migration/authorization.adoc#compile-with-parameters[你在 `@PreAuthorize`、`@PostAuthorize` 或其他方法安全注解中使用了方法参数名称]

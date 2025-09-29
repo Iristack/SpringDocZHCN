@@ -1,0 +1,263 @@
+= OIDC 注销
+
+当最终用户能够登录到你的应用程序后，考虑他们如何注销同样重要。
+
+通常来说，你需要考虑以下三种使用场景：
+
+1. 我只想执行本地注销
+2. 我希望在应用程序端发起，同时注销我的应用和 OIDC 提供方（Provider）
+3. 我希望在 OIDC 提供方端发起，同时注销我的应用和 OIDC 提供方
+
+[[configure-local-logout]]
+== 本地注销
+
+要执行本地注销，无需特殊的 OIDC 配置。  
+Spring Security 会自动配置一个本地注销端点，你可以通过 `logout()` DSL 对其进行 xref:reactive/authentication/logout.adoc[配置]。
+
+[[configure-client-initiated-oidc-logout]]
+[[oauth2login-advanced-oidc-logout]]
+== OpenID Connect 1.0 客户端发起的注销（Client-Initiated Logout）
+
+OpenID Connect Session Management 1.0 允许客户端通过调用提供方来注销最终用户。其中一种可用策略是 https://openid.net/specs/openid-connect-rpinitiated-1_0.html[RP-Initiated Logout]。
+
+如果 OpenID 提供方同时支持会话管理和 https://openid.net/specs/openid-connect-discovery-1_0.html[发现机制（Discovery）]，客户端就可以从 OpenID 提供方的 https://openid.net/specs/openid-connect-session-1_0.html#OPMetadata[发现元数据]中获取 `end_session_endpoint` URL。你可以通过为 `ClientRegistration` 配置 `issuer-uri` 来实现这一点，如下所示：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-secret: okta-client-secret
+            ...
+        provider:
+          okta:
+            issuer-uri: https://dev-1234.oktapreview.com
+----
+
+此外，你还应配置 `OidcClientInitiatedServerLogoutSuccessHandler`，该处理器实现了 RP-Initiated Logout，配置方式如下：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+public class OAuth2LoginSecurityConfig {
+
+	@Autowired
+	private ReactiveClientRegistrationRepository clientRegistrationRepository;
+
+	@Bean
+	public SecurityWebFilterChain filterChain(ServerHttpSecurity http) throws Exception {
+		http
+			.authorizeExchange((authorize) -> authorize
+				.anyExchange().authenticated()
+			)
+			.oauth2Login(withDefaults())
+			.logout((logout) -> logout
+				.logoutSuccessHandler(oidcLogoutSuccessHandler())
+			);
+		return http.build();
+	}
+
+	private ServerLogoutSuccessHandler oidcLogoutSuccessHandler() {
+		OidcClientInitiatedServerLogoutSuccessHandler oidcLogoutSuccessHandler =
+				new OidcClientInitiatedServerLogoutSuccessHandler(this.clientRegistrationRepository);
+
+		// 设置在提供方完成注销后，
+		// 最终用户的用户代理将被重定向的目标地址
+		oidcLogoutSuccessHandler.setPostLogoutRedirectUri("{baseUrl}");
+
+		return oidcLogoutSuccessHandler;
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+class OAuth2LoginSecurityConfig {
+    @Autowired
+    private lateinit var clientRegistrationRepository: ReactiveClientRegistrationRepository
+
+    @Bean
+    open fun filterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+        http {
+            authorizeExchange {
+                authorize(anyExchange, authenticated)
+            }
+            oauth2Login { }
+            logout {
+                logoutSuccessHandler = oidcLogoutSuccessHandler()
+            }
+        }
+        return http.build()
+    }
+
+    private fun oidcLogoutSuccessHandler(): ServerLogoutSuccessHandler {
+        val oidcLogoutSuccessHandler = OidcClientInitiatedServerLogoutSuccessHandler(clientRegistrationRepository)
+
+        // 设置在提供方完成注销后，
+        // 最终用户的用户代理将被重定向的目标地址
+        oidcLogoutSuccessHandler.setPostLogoutRedirectUri("{baseUrl}")
+        return oidcLogoutSuccessHandler
+    }
+}
+----
+======
+
+[NOTE]
+====
+`OidcClientInitiatedServerLogoutSuccessHandler` 支持 `+{baseUrl}+` 占位符。
+如果使用了该占位符，在请求时它会被替换为应用程序的基础 URL，例如 `https://app.example.org`。
+====
+
+[[configure-provider-initiated-oidc-logout]]
+== OpenID Connect 1.0 后通道注销（Back-Channel Logout）
+
+OpenID Connect Session Management 1.0 允许提供方通过向客户端发起 API 调用来注销最终用户。这被称为 https://openid.net/specs/openid-connect-backchannel-1_0.html[OIDC Back-Channel Logout]。
+
+要启用此功能，你可以在 DSL 中配置后通道注销端点，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public SecurityWebFilterChain filterChain(ServerHttpSecurity http) throws Exception {
+    http
+        .authorizeExchange((authorize) -> authorize
+            .anyExchange().authenticated()
+        )
+        .oauth2Login(withDefaults())
+        .oidcLogout((logout) -> logout
+            .backChannel(Customizer.withDefaults())
+        );
+    return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+open fun filterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    http {
+        authorizeExchange {
+            authorize(anyExchange, authenticated)
+        }
+        oauth2Login { }
+        oidcLogout {
+            backChannel { }
+        }
+    }
+    return http.build()
+}
+----
+======
+
+就这样！
+
+这将创建一个端点：`+/logout/connect/back-channel/{registrationId}+`，OIDC 提供方可调用该端点以使你在应用中的某个用户会话失效。
+
+[NOTE]
+`oidcLogout` 要求必须同时配置 `oauth2Login`。
+
+[NOTE]
+`oidcLogout` 要求会话 Cookie 的名称必须为 `JSESSIONID`，才能通过后通道正确地注销每个会话。
+
+=== 后通道注销架构
+
+假设有一个标识符为 `registrationId` 的 `ClientRegistration`。
+
+后通道注销的整体流程如下：
+
+1. 在用户登录时，Spring Security 会在其 `ReactiveOidcSessionRegistry` 实现中，将 ID Token、CSRF Token 和提供方会话 ID（如果有）与你应用的会话 ID 关联起来。
+2. 当用户注销时，你的 OIDC 提供方会调用 `/logout/connect/back-channel/registrationId` 接口，并附带一个注销令牌（Logout Token），该令牌指明了需要注销的是 `sub`（最终用户）还是 `sid`（提供方会话 ID）。
+3. Spring Security 会验证该令牌的签名和声明。
+4. 如果令牌包含 `sid` 声明，则仅终止与该提供方会话相关联的客户端会话。
+5. 否则，如果令牌包含 `sub` 声明，则终止该最终用户在客户端的所有会话。
+
+[NOTE]
+请记住，Spring Security 的 OIDC 支持是多租户的。  
+这意味着它只会终止那些客户端与注销令牌中 `aud` 声明匹配的会话。
+
+=== 自定义 OIDC 提供方会话注册表
+
+默认情况下，Spring Security 将 OIDC 提供方会话与客户端会话之间的所有关联信息存储在内存中。
+
+在某些情况下（例如集群部署的应用程序），最好将这些信息存储在外部位置，比如数据库中。
+
+你可以通过配置自定义的 `ReactiveOidcSessionRegistry` 来实现这一目标，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public final class MySpringDataOidcSessionRegistry implements ReactiveOidcSessionRegistry {
+    private final OidcProviderSessionRepository sessions;
+
+    // ...
+
+    @Override
+    public Mono<Void> saveSessionInformation(OidcSessionInformation info) {
+        return this.sessions.save(info);
+    }
+
+    @Override
+    public Mono<OidcSessionInformation> removeSessionInformation(String clientSessionId) {
+       return this.sessions.removeByClientSessionId(clientSessionId);
+    }
+
+    @Override
+    public Flux<OidcSessionInformation> removeSessionInformation(OidcLogoutToken token) {
+        return token.getSessionId() != null ?
+            this.sessions.removeBySessionIdAndIssuerAndAudience(...) :
+            this.sessions.removeBySubjectAndIssuerAndAudience(...);
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+class MySpringDataOidcSessionRegistry : ReactiveOidcSessionRegistry {
+    val sessions: OidcProviderSessionRepository
+
+    // ...
+
+    override fun saveSessionInformation(info: OidcSessionInformation): Mono<Void> {
+        return this.sessions.save(info)
+    }
+
+    override fun removeSessionInformation(clientSessionId: String): Mono<OidcSessionInformation> {
+       return this.sessions.removeByClientSessionId(clientSessionId)
+    }
+
+    override fun removeSessionInformation(token: OidcLogoutToken): Flux<OidcSessionInformation> {
+        return if (token.sessionId != null) {
+            this.sessions.removeBySessionIdAndIssuerAndAudience(...)
+        } else {
+            this.sessions.removeBySubjectAndIssuerAndAudience(...)
+        }
+    }
+}
+----
+======

@@ -1,0 +1,237 @@
+[[nsa-ldap]]
+= LDAP 命名空间选项
+LDAP 的详细内容在 xref:servlet/authentication/passwords/ldap.adoc#servlet-authentication-ldap[其独立章节] 中已有介绍。  
+本节将在此基础上进一步说明命名空间选项如何映射到 Spring Bean。  
+LDAP 实现大量使用了 Spring LDAP，因此了解该项目的 API 可能会有所帮助。
+
+[[nsa-ldap-server]]
+== 使用 `<ldap-server>` 元素定义 LDAP 服务器
+该元素用于设置一个 Spring LDAP 的 `ContextSource`，供其他 LDAP Bean 使用，用于定义 LDAP 服务器的位置以及其他连接信息（例如用户名和密码，如果服务器不允许匿名访问的话）。  
+它也可用于创建嵌入式服务器以进行测试。  
+两种用法的具体语法细节请参见 xref:servlet/authentication/passwords/ldap.adoc#servlet-authentication-ldap[LDAP 章节]。  
+实际使用的 `ContextSource` 实现类是 `DefaultSpringSecurityContextSource`，它继承自 Spring LDAP 的 `LdapContextSource` 类。  
+其中 `manager-dn` 和 `manager-password` 属性分别对应后者的 `userDn` 和 `password` 属性。
+
+如果你的应用上下文中只定义了一个服务器，其他由命名空间定义的 LDAP Bean 将自动使用它。  
+否则，你可以为该元素指定一个 "id" 属性，并通过其他命名空间 Bean 的 `server-ref` 属性来引用它。  
+这实际上就是 `ContextSource` 实例的 Bean ID，如果你希望在其他传统的 Spring Bean 中使用它时也可以直接引用。
+
+[[nsa-ldap-server-attributes]]
+=== `<ldap-server>` 属性
+
+[[nsa-ldap-server-mode]]
+* **mode**  
+显式指定应使用的嵌入式 LDAP 服务器类型。可选值为 `apacheds` 和 `unboundid`。默认情况下，系统会根据类路径中是否存在相应库自动决定。
+
+[[nsa-ldap-server-id]]
+* **id**  
+Bean 标识符，用于在上下文中其他位置引用此 Bean。
+
+[[nsa-ldap-server-ldif]]
+* **ldif**  
+显式指定要加载到嵌入式 LDAP 服务器中的 LDIF 文件资源。  
+LDIF 应为一个 Spring 资源模式（例如：`classpath:init.ldif`）。  
+默认值为 `classpath*:*.ldif`。
+
+[[nsa-ldap-server-manager-dn]]
+* **manager-dn**  
+用于认证到（非嵌入式）LDAP 服务器的“管理员”用户身份的用户名（DN）。  
+若省略，则使用匿名访问。
+
+[[nsa-ldap-server-manager-password]]
+* **manager-password**  
+管理员 DN 对应的密码。  
+如果指定了 `manager-dn`，则必须提供此属性。
+
+[[nsa-ldap-server-port]]
+* **port**  
+指定 IP 端口号。例如用于配置嵌入式 LDAP 服务器。  
+默认值为 33389。
+
+[[nsa-ldap-server-root]]
+* **root**  
+嵌入式 LDAP 服务器的可选根后缀。  
+默认值为 "dc=springframework,dc=org"。
+
+[[nsa-ldap-server-url]]
+* **url**  
+当不使用嵌入式 LDAP 服务器时，用于指定 LDAP 服务器的 URL。
+
+[[nsa-ldap-authentication-provider]]
+== `<ldap-authentication-provider>`
+该元素是创建 `LdapAuthenticationProvider` 实例的简写方式。  
+默认情况下，它将配置一个 `BindAuthenticator` 实例和一个 `DefaultAuthoritiesPopulator`。  
+与所有命名空间中的认证提供者一样，它必须作为 `authentication-provider` 元素的子元素包含进去。
+
+[[nsa-ldap-authentication-provider-parents]]
+=== `<ldap-authentication-provider>` 的父元素
+
+* xref:servlet/appendix/namespace/authentication-manager.adoc#nsa-authentication-manager[authentication-manager]
+
+[[nsa-ldap-authentication-provider-attributes]]
+=== `<ldap-authentication-provider>` 属性
+
+[[nsa-ldap-authentication-provider-group-role-attribute]]
+* **group-role-attribute**  
+包含角色名称的 LDAP 属性名，该名称将在 Spring Security 中使用。  
+对应 `DefaultLdapAuthoritiesPopulator` 的 `groupRoleAttribute` 属性。  
+默认值为 "cn"。
+
+[[nsa-ldap-authentication-provider-group-search-base]]
+* **group-search-base**  
+组成员搜索的基础路径（search base）。  
+对应 `DefaultLdapAuthoritiesPopulator` 构造函数的 `groupSearchBase` 参数。  
+默认为空字符串 ""（从根开始搜索）。
+
+[[nsa-ldap-authentication-provider-group-search-filter]]
+* **group-search-filter**  
+组搜索过滤器。  
+对应 `DefaultLdapAuthoritiesPopulator` 的 `groupSearchFilter` 属性。  
+默认值为 `+(uniqueMember={0})+`。  
+其中替换的参数是用户的 DN。
+
+[[nsa-ldap-authentication-provider-role-prefix]]
+* **role-prefix**  
+一个非空字符串前缀，将被添加到从持久化数据中加载的角色字符串上。  
+对应 `DefaultLdapAuthoritiesPopulator` 的 `rolePrefix` 属性。  
+默认值为 "ROLE_"。  
+若不需要前缀且默认值非空时，可设为 "none"。
+
+[[nsa-ldap-authentication-provider-server-ref]]
+* **server-ref**  
+可选的服务器引用。  
+若省略，且已注册默认 LDAP 服务器（使用无 ID 的 `<ldap-server>`），则使用该服务器。
+
+[[nsa-ldap-authentication-provider-user-context-mapper-ref]]
+* **user-context-mapper-ref**  
+允许通过指定一个 `UserDetailsContextMapper` Bean 来显式自定义加载的用户对象，该 Bean 将接收来自用户目录条目的上下文信息并进行处理。
+
+[[nsa-ldap-authentication-provider-user-details-class]]
+* **user-details-class**  
+允许指定用户条目的 objectClass。  
+若设置，框架会尝试将所定义类的标准属性加载到返回的 `UserDetails` 对象中。
+
+[[nsa-ldap-authentication-provider-user-dn-pattern]]
+* **user-dn-pattern**  
+如果你的用户在目录中有固定位置（即可以直接根据用户名计算出 DN 而无需执行目录搜索），你可以使用此属性直接映射到 DN。  
+它直接对应 `AbstractLdapAuthenticator` 的 `userDnPatterns` 属性。  
+值是一个用于构建用户 DN 的特定模式，例如 `uid={0},ou=people`。  
+关键部分 `{0}` 必须存在，并会被替换成用户名。
+
+[[nsa-ldap-authentication-provider-user-search-base]]
+* **user-search-base**  
+用户搜索的基础路径。  
+默认为空字符串 ""。  
+仅与 `user-search-filter` 配合使用。
+
++
+如果你需要通过搜索来定位目录中的用户，则可以设置这些属性来控制搜索行为。  
+`BindAuthenticator` 将被配置为使用 `FilterBasedLdapUserSearch`，这些属性值将直接映射到该 Bean 构造函数的前两个参数。  
+如果未设置这些属性，也未提供替代的 `user-dn-pattern`，则默认搜索值为 `user-search-filter="(uid={0})"` 和 `user-search-base=""`。
+
+[[nsa-ldap-authentication-provider-user-search-filter]]
+* **user-search-filter**  
+用于搜索用户的 LDAP 过滤器（可选）。  
+例如 `+(uid={0})+`。  
+其中替换的参数是用户的登录名。
+
++
+如果你需要通过搜索来定位目录中的用户，则可以设置这些属性来控制搜索行为。  
+`BindAuthenticator` 将被配置为使用 `FilterBasedLdapUserSearch`，这些属性值将直接映射到该 Bean 构造函数的前两个参数。  
+如果未设置这些属性，也未提供替代的 `user-dn-pattern`，则默认搜索值为 `user-search-filter="(uid={0})"` 和 `user-search-base=""`。
+
+[[nsa-ldap-authentication-provider-children]]
+=== `<ldap-authentication-provider>` 的子元素
+
+* <<nsa-password-compare,password-compare>>
+
+[[nsa-password-compare]]
+== `<password-compare>`
+该元素作为 `<ldap-authentication-provider>` 的子元素使用，用于将认证策略从 `BindAuthenticator` 切换为 `PasswordComparisonAuthenticator`。
+
+[[nsa-password-compare-parents]]
+=== `<password-compare>` 的父元素
+
+* <<nsa-ldap-authentication-provider,ldap-authentication-provider>>
+
+[[nsa-password-compare-attributes]]
+=== `<password-compare>` 属性
+
+[[nsa-password-compare-hash]]
+* **hash**  
+定义用户密码所使用的哈希算法。  
+我们强烈建议不要使用 MD4，因为它是一种非常弱的哈希算法。
+
+[[nsa-password-compare-password-attribute]]
+* **password-attribute**  
+目录中包含用户密码的属性名。  
+默认值为 "userPassword"。
+
+[[nsa-password-compare-children]]
+=== `<password-compare>` 的子元素
+
+* xref:servlet/appendix/namespace/authentication-manager.adoc#nsa-password-encoder[password-encoder]
+
+[[nsa-ldap-user-service]]
+== `<ldap-user-service>`
+该元素用于配置一个 LDAP `UserDetailsService`。  
+所使用的类是 `LdapUserDetailsService`，它是 `FilterBasedLdapUserSearch` 和 `DefaultLdapAuthoritiesPopulator` 的组合。  
+其支持的属性与 `<ldap-authentication-provider>` 中的用法相同。
+
+[[nsa-ldap-user-service-attributes]]
+=== `<ldap-user-service>` 属性
+
+[[nsa-ldap-user-service-cache-ref]]
+* **cache-ref**  
+定义对 UserDetailsService 所用缓存的引用。
+
+[[nsa-ldap-user-service-group-role-attribute]]
+* **group-role-attribute**  
+包含角色名称的 LDAP 属性名，该名称将在 Spring Security 中使用。  
+默认值为 "cn"。
+
+[[nsa-ldap-user-service-group-search-base]]
+* **group-search-base**  
+组成员搜索的基础路径。  
+默认为空字符串 ""（从根开始搜索）。
+
+[[nsa-ldap-user-service-group-search-filter]]
+* **group-search-filter**  
+组搜索过滤器。  
+默认值为 `+(uniqueMember={0})+`。  
+其中替换的参数是用户的 DN。
+
+[[nsa-ldap-user-service-id]]
+* **id**  
+Bean 标识符，用于在上下文中其他位置引用此 Bean。
+
+[[nsa-ldap-user-service-role-prefix]]
+* **role-prefix**  
+一个非空字符串前缀，将被添加到从持久化存储中加载的角色字符串上（例如 "ROLE_"）。  
+若不需要前缀且默认值非空时，可设为 "none"。
+
+[[nsa-ldap-user-service-server-ref]]
+* **server-ref**  
+可选的服务器引用。  
+若省略，且已注册默认 LDAP 服务器（使用无 ID 的 `<ldap-server>`），则使用该服务器。
+
+[[nsa-ldap-user-service-user-context-mapper-ref]]
+* **user-context-mapper-ref**  
+允许通过指定一个 `UserDetailsContextMapper` Bean 来显式自定义加载的用户对象，该 Bean 将接收来自用户目录条目的上下文信息并进行处理。
+
+[[nsa-ldap-user-service-user-details-class]]
+* **user-details-class**  
+允许指定用户条目的 objectClass。  
+若设置，框架会尝试将所定义类的标准属性加载到返回的 `UserDetails` 对象中。
+
+[[nsa-ldap-user-service-user-search-base]]
+* **user-search-base**  
+用户搜索的基础路径。  
+默认为空字符串 ""。  
+仅与 `user-search-filter` 配合使用。
+
+[[nsa-ldap-user-service-user-search-filter]]
+* **user-search-filter**  
+用于搜索用户的 LDAP 过滤器（可选）。  
+例如 `+(uid={0})+`。  
+其中替换的参数是用户的登录名。

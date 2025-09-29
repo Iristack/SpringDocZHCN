@@ -1,0 +1,6 @@
+[[features]]
+= 功能特性
+:page-section-summary-toc: 1
+
+Spring Security 提供了对 xref:features/authentication/index.adoc[认证]、xref:features/authorization/index.adoc[授权] 以及针对 xref:features/exploits/index.adoc#exploits[常见攻击手段] 的全面防护支持。  
+此外，它还提供了与其他库的集成，以简化其使用方式。

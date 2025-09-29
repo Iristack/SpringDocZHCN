@@ -1,0 +1,77 @@
+[[test-erms]]
+= 测试方法安全性
+
+例如，我们可以使用与 xref:servlet/test/method.adoc#test-method[测试方法安全] 中相同的配置和注解，来测试在 xref:reactive/authorization/method.adoc#jc-erms[启用响应式方法安全] 中提到的示例。以下是最小化的测试样例，展示了我们可以进行的操作：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@ExtendWith(SpringExtension.class)
+@ContextConfiguration(classes = HelloWebfluxMethodApplication.class)
+public class HelloWorldMessageServiceTests {
+	@Autowired
+	HelloWorldMessageService messages;
+
+	@Test
+	public void messagesWhenNotAuthenticatedThenDenied() {
+		StepVerifier.create(this.messages.findMessage())
+			.expectError(AccessDeniedException.class)
+			.verify();
+	}
+
+	@Test
+	@WithMockUser
+	public void messagesWhenUserThenDenied() {
+		StepVerifier.create(this.messages.findMessage())
+			.expectError(AccessDeniedException.class)
+			.verify();
+	}
+
+	@Test
+	@WithMockUser(roles = "ADMIN")
+	public void messagesWhenAdminThenOk() {
+		StepVerifier.create(this.messages.findMessage())
+			.expectNext("Hello World!")
+			.verifyComplete();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@ExtendWith(SpringExtension.class)
+@ContextConfiguration(classes = [HelloWebfluxMethodApplication::class])
+class HelloWorldMessageServiceTests {
+    @Autowired
+    lateinit var messages: HelloWorldMessageService
+
+    @Test
+    fun messagesWhenNotAuthenticatedThenDenied() {
+        StepVerifier.create(messages.findMessage())
+            .expectError(AccessDeniedException::class.java)
+            .verify()
+    }
+
+    @Test
+    @WithMockUser
+    fun messagesWhenUserThenDenied() {
+        StepVerifier.create(messages.findMessage())
+            .expectError(AccessDeniedException::class.java)
+            .verify()
+    }
+
+    @Test
+    @WithMockUser(roles = ["ADMIN"])
+    fun messagesWhenAdminThenOk() {
+        StepVerifier.create(messages.findMessage())
+            .expectNext("Hello World!")
+            .verifyComplete()
+    }
+}
+----
+======

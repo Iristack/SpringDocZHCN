@@ -1,0 +1,76 @@
+[[webflux-cors]]
+= 跨域资源共享（CORS）
+
+Spring 框架为 CORS 提供了 https://docs.spring.io/spring/docs/current/spring-framework-reference/web-reactive.html#webflux-cors-intro[一流支持]。  
+在 Spring Security 之前必须处理 CORS，因为预检请求（pre-flight request）不会包含任何 Cookie（例如 `JSESSIONID`）。  
+如果请求中没有 Cookie，并且 Spring Security 先于 CORS 处理，那么请求会被判定为未认证（由于请求中无 Cookie），从而被拒绝。
+
+确保 CORS 优先处理的最简单方法是使用 `CorsWebFilter`。  
+用户可以通过提供一个 `CorsConfigurationSource` 将 `CorsWebFilter` 与 Spring Security 集成。  
+例如，以下配置将在 Spring Security 中集成 CORS 支持：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+UrlBasedCorsConfigurationSource corsConfigurationSource() {
+	CorsConfiguration configuration = new CorsConfiguration();
+	configuration.setAllowedOrigins(Arrays.asList("https://example.com"));
+	configuration.setAllowedMethods(Arrays.asList("GET","POST"));
+	UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+	source.registerCorsConfiguration("/**", configuration);
+	return source;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun corsConfigurationSource(): UrlBasedCorsConfigurationSource {
+    val configuration = CorsConfiguration()
+    configuration.allowedOrigins = listOf("https://example.com")
+    configuration.allowedMethods = listOf("GET", "POST")
+    val source = UrlBasedCorsConfigurationSource()
+    source.registerCorsConfiguration("/**", configuration)
+    return source
+}
+----
+======
+
+以下配置将禁用 Spring Security 中的 CORS 集成功能：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+	http
+		// ...
+		.cors(cors -> cors.disable());
+	return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun springSecurityFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    return http {
+        // ...
+        cors {
+            disable()
+        }
+    }
+}
+----
+======

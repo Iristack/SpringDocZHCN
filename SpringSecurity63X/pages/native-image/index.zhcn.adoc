@@ -1,0 +1,8 @@
+= GraalVM 原生镜像支持
+
+Spring Boot 3.0 提供了对使用 GraalVM 生成原生镜像的 https://docs.spring.io/spring-boot/docs/current/reference/html/native-image.html#native-image.introducing-graalvm-native-images[支持]。  
+Spring Security 与该功能集成，并使其各项特性可适用于原生镜像。
+
+然而，正如 https://docs.spring.io/spring-boot/docs/current/reference/html/native-image.html#native-image.introducing-graalvm-native-images.understanding-aot-processing.hint-file-generation[Spring Boot 文档] 中提到的，在某些情况下，我们需要向 GraalVM 提供额外的提示（hints）。
+
+本节旨在为一些可能需要应用程序提供额外提示的 Spring Security 特性提供指导。

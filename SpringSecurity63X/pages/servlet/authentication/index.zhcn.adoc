@@ -1,0 +1,20 @@
+[[servlet-authentication]]
+= 认证
+
+Spring Security 为 xref:features/authentication/index.adoc#authentication[认证] 提供了全面的支持。我们首先讨论整体的 xref:servlet/authentication/architecture.adoc[Servlet 认证架构]。正如你所预期的，本节内容较为抽象，主要描述架构本身，而不会深入具体流程的实际应用。
+
+如果你更倾向于直接了解用户如何进行认证，可以参考 <<servlet-authentication-mechanisms, 认证机制>>，其中介绍了具体的认证方式。这些章节聚焦于特定的认证方法，并会回溯到架构部分，解释各个具体流程的工作原理。
+
+[[servlet-authentication-mechanisms]]
+== 认证机制
+
+// FIXME: 简要描述
+
+* xref:servlet/authentication/passwords/index.adoc#servlet-authentication-unpwd[用户名和密码] - 如何使用用户名/密码进行认证
+* xref:servlet/oauth2/login/index.adoc#oauth2login[OAuth 2.0 登录] - 使用 OpenID Connect 或非标准 OAuth 2.0（例如 GitHub）进行登录
+* xref:servlet/saml2/index.adoc#servlet-saml2[SAML 2.0 登录] - SAML 2.0 登录
+* xref:servlet/authentication/cas.adoc#servlet-cas[中央认证服务 (CAS)] - 支持中央认证服务 (CAS)
+* xref:servlet/authentication/rememberme.adoc#servlet-rememberme[记住我] - 如何在会话过期后仍保持用户登录状态
+* xref:servlet/authentication/jaas.adoc#servlet-jaas[JAAS 认证] - 使用 JAAS 进行认证
+* xref:servlet/authentication/preauth.adoc#servlet-preauth[预认证场景] - 使用外部机制（如 https://www.siteminder.com/[SiteMinder] 或 Java EE 安全机制）进行认证，但仍使用 Spring Security 进行授权以及防御常见攻击。
+* xref:servlet/authentication/x509.adoc#servlet-x509[X509 认证] - X509 认证

@@ -1,0 +1,12 @@
+[[servlet-authorization]]
+= 授权
+:page-section-summary-toc: 1
+
+在确定了用户如何进行 xref:servlet/authentication/index.adoc[身份认证] 后，你还需要配置应用程序的授权规则。
+
+Spring Security 中强大的授权功能是其广受欢迎的重要原因之一。  
+无论你选择何种方式进行身份认证（无论是使用 Spring Security 提供的机制和提供者，还是集成容器或其他非 Spring Security 的认证服务），都可以以一致且简单的方式在应用程序中使用其授权服务。
+
+你可以从为 xref:servlet/authorization/authorize-http-requests.adoc[请求 URI] 和 xref:servlet/authorization/method-security.adoc[方法] 添加授权规则开始。  
+在这两种情况下，你都可以监听并响应每次授权检查所发布的 xref:servlet/authorization/events.adoc[授权事件]。  
+下文还详细介绍了 xref:servlet/authorization/architecture.adoc[Spring Security 授权的工作原理]，以及在建立基本模型后如何对其进行精细化调整。

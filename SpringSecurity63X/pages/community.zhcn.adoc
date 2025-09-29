@@ -1,0 +1,36 @@
+[[community]]
+= Spring Security 社区
+
+欢迎加入 Spring Security 社区！
+本节将介绍如何充分利用我们庞大的社区资源。
+
+[[community-help]]
+== 获取帮助
+如果您在使用 Spring Security 时需要帮助，我们随时为您提供支持。  
+以下是一些获取帮助的最佳方式：
+
+* 阅读本文档。
+* 尝试我们的多个 xref:samples.adoc#samples[示例应用程序]。
+* 在 https://stackoverflow.com/questions/tagged/spring-security[https://stackoverflow.com] 上提出问题，并添加 `spring-security` 标签。
+* 在 https://github.com/spring-projects/spring-security/issues 提交 Bug 报告或功能增强请求。
+
+[[community-becoming-involved]]
+== 参与贡献
+我们非常欢迎您参与 Spring Security 项目。  
+有多种方式可以为项目做出贡献，包括在 Stack Overflow 上回答问题、编写新代码、改进现有代码、协助文档编写、开发示例或教程、报告 Bug 或提出建议。  
+更多信息，请参阅我们的 https://github.com/spring-projects/spring-security/blob/main/CONTRIBUTING.adoc[贡献指南] 文档。
+
+[[community-source]]
+== 源代码
+
+您可以在 GitHub 上找到 Spring Security 的源代码：https://github.com/spring-projects/spring-security/
+
+[[community-license]]
+== Apache 2 许可证
+
+Spring Security 是开源软件，遵循 https://www.apache.org/licenses/LICENSE-2.0.html[Apache 2.0 许可证] 发布。
+
+== 社交媒体
+
+您可以通过关注 Twitter 上的 https://twitter.com/SpringSecurity[@SpringSecurity] 和 https://twitter.com/SpringSecurity/lists/team[Spring Security 团队] 来获取最新动态。  
+此外，您还可以关注 https://twitter.com/SpringCentral[@SpringCentral] 以了解整个 Spring 产品组合的最新信息。

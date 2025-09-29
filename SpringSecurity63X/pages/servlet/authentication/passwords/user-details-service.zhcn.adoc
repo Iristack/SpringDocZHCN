@@ -1,0 +1,44 @@
+[[servlet-authentication-userdetailsservice]]
+= UserDetailsService
+
+{security-api-url}org/springframework/security/core/userdetails/UserDetailsService.html[`UserDetailsService`] 被 xref:servlet/authentication/passwords/dao-authentication-provider.adoc#servlet-authentication-daoauthenticationprovider[`DaoAuthenticationProvider`] 使用，用于检索用户名、密码以及其他与基于用户名和密码的身份验证相关的属性。  
+Spring Security 提供了 `UserDetailsService` 的多种实现方式，包括 xref:servlet/authentication/passwords/in-memory.adoc#servlet-authentication-inmemory[内存中存储]、xref:servlet/authentication/passwords/jdbc.adoc#servlet-authentication-jdbc[JDBC 存储] 以及 xref:servlet/authentication/passwords/caching.adoc#servlet-authentication-caching-user-details[缓存] 实现。
+
+您可以通过将自定义的 `UserDetailsService` 声明为一个 Bean 来实现自定义身份验证。  
+例如，以下代码示例展示了如何进行自定义认证，假设 `CustomUserDetailsService` 实现了 `UserDetailsService` 接口：
+
+[NOTE]
+====
+此方法仅在 `AuthenticationManagerBuilder` 尚未配置且未定义 `AuthenticationProviderBean` 时生效。
+====
+  
+自定义 UserDetailsService Bean
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+CustomUserDetailsService customUserDetailsService() {
+	return new CustomUserDetailsService();
+}
+----
+
+XML::
++
+[source,java,role="secondary"]
+----
+<b:bean class="example.CustomUserDetailsService"/>
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun customUserDetailsService() = CustomUserDetailsService()
+----
+======
+
+// FIXME: 添加带有 @AuthenticationPrincipal 链接的 CustomUserDetails 示例

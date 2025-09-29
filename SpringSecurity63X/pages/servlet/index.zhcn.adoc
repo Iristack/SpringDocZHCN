@@ -1,0 +1,5 @@
+[[servlet-applications]]
+= Servlet 应用程序
+:page-section-summary-toc: 1
+
+Spring Security 通过使用标准的 Servlet `Filter` 与 Servlet 容器集成。这意味着它可以在任何运行于 Servlet 容器中的应用程序中使用。更具体地说，你的基于 Servlet 的应用程序无需使用 Spring 框架，也可以利用 Spring Security 提供的功能。

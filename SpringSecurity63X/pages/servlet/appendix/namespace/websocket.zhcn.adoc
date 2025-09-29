@@ -1,0 +1,75 @@
+[[nsa-websocket-security]]
+= WebSocket 安全
+
+Spring Security 4.0+ 提供了对消息授权的支持。  
+一个具体的应用示例是在基于 WebSocket 的应用程序中提供授权功能。
+
+[[nsa-websocket-message-broker]]
+== `<websocket-message-broker>`
+
+`<websocket-message-broker>` 元素有两种不同的模式。  
+如果未指定 <<nsa-websocket-message-broker-id, websocket-message-broker@id>>，则会执行以下操作：
+
+* 确保任何 `SimpAnnotationMethodMessageHandler` 都注册了 `AuthenticationPrincipalArgumentResolver` 作为自定义参数解析器。这使得可以使用 `@AuthenticationPrincipal` 注解来解析当前 `Authentication` 的主体（principal）。
+* 确保为 `clientInboundChannel` 自动注册 `SecurityContextChannelInterceptor`。该拦截器会从消息中提取用户并填充到 `SecurityContextHolder` 中。
+* 确保为 `clientInboundChannel` 注册 `ChannelSecurityInterceptor`。这允许为消息指定授权规则。
+* 确保为 `clientInboundChannel` 注册 `CsrfChannelInterceptor`。这确保只允许来自原始域的请求。
+* 确保将 `CsrfTokenHandshakeInterceptor` 注册到 `WebSocketHttpRequestHandler`、`TransportHandlingSockJsService` 或 `DefaultSockJsService` 上。这确保从 `HttpServletRequest` 中获取预期的 `CsrfToken` 并复制到 WebSocket 会话属性中。
+
+如果需要更精细的控制，可以指定 `id`，此时会将一个 `ChannelSecurityInterceptor` 分配给指定的 ID。  
+然后可以手动完成与 Spring 消息基础设施的所有配置。这种方式更为繁琐，但提供了更高的配置灵活性。
+
+[[nsa-websocket-message-broker-attributes]]
+=== `<websocket-message-broker>` 属性
+
+[[nsa-websocket-message-broker-id]]
+* **id**：一个 Bean 标识符，用于在上下文中其他位置引用 `ChannelSecurityInterceptor` Bean。  
+  如果指定了该属性，Spring Security 要求在 Spring Messaging 中进行显式配置。  
+  如果未指定，则 Spring Security 将自动集成到消息基础设施中，如 <<nsa-websocket-message-broker>> 所述。
+
+[[nsa-websocket-message-broker-same-origin-disabled]]
+* **same-origin-disabled**：禁用在 STOMP 头部中必须存在 CSRF Token 的要求（默认为 `false`）。  
+  修改默认值在需要允许其他源建立 SockJS 连接时非常有用。
+
+[[nsa-websocket-message-broker-authorization-manager-ref]]
+* **authorization-manager-ref**：使用指定的 `AuthorizationManager` 实例；设置后，`use-authorization-manager` 将被忽略，并视为 `true`。
+
+[[nsa-websocket-message-broker-use-authorization-manager]]
+* **use-authorization-manager**：使用 `AuthorizationManager` API 而不是 `SecurityMetadataSource` API（默认为 `true`）。
+
+[[nsa-websocket-message-broker-security-context-holder-strategy-ref]]
+* **security-context-holder-strategy-ref**：使用指定的 `SecurityContextHolderStrategy`（注意：仅在配合 `AuthorizationManager` API 使用时支持）。
+
+[[nsa-websocket-message-broker-children]]
+=== `<websocket-message-broker>` 的子元素
+
+* xref:servlet/appendix/namespace/http.adoc#nsa-expression-handler[expression-handler]
+* <<nsa-intercept-message, intercept-message>>
+
+[[nsa-intercept-message]]
+== `<intercept-message>`
+
+定义一条针对消息的授权规则。
+
+[[nsa-intercept-message-parents]]
+=== `<intercept-message>` 的父元素
+
+* <<nsa-websocket-message-broker, websocket-message-broker>>
+
+[[nsa-intercept-message-attributes]]
+=== `<intercept-message>` 属性
+
+[[nsa-intercept-message-pattern]]
+* **pattern**：基于 Ant 风格的路径匹配模式，用于匹配消息的目标地址（destination）。  
+  例如：`"/**"` 匹配所有具有目标地址的消息；`"/admin/**"` 匹配所有目标地址以 `/admin/` 开头的消息。
+
+[[nsa-intercept-message-type]]
+* **type**：要匹配的消息类型。  
+  有效值定义在 `SimpMessageType` 枚举中，包括：CONNECT、CONNECT_ACK、HEARTBEAT、MESSAGE、SUBSCRIBE、UNSUBSCRIBE、DISCONNECT、DISCONNECT_ACK、OTHER。
+
+[[nsa-intercept-message-access]]
+* **access**：用于保护消息的表达式。  
+  例如：
+  * `"denyAll"` 表示拒绝所有匹配消息的访问；
+  * `"permitAll"` 表示允许所有匹配消息的访问；
+  * `"hasRole('ADMIN')"` 表示匹配的消息要求当前用户拥有 `'ROLE_ADMIN'` 角色。

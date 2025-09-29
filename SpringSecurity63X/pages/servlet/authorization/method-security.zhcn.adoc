@@ -1,0 +1,2938 @@
+[[jc-method]]
+= 方法安全
+:figures: servlet/authorization
+
+除了在请求级别建模授权之外，Spring Security 还支持在方法级别进行建模。
+
+[[activate-method-security]]
+您可以通过将任何 `@Configuration` 类用 `@EnableMethodSecurity` 注解，或向任何 XML 配置文件中添加 `<method-security>` 来激活它，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableMethodSecurity
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@EnableMethodSecurity
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<sec:method-security/>
+----
+======
+
+然后，您可以立即使用 <<use-preauthorize, `@PreAuthorize`>>、<<use-postauthorize,`@PostAuthorize`>>、<<use-prefilter,`@PreFilter`>> 和 <<use-postfilter,`@PostFilter`>> 注解任何 Spring 管理的类或方法，以授权方法调用，包括输入参数和返回值。
+
+[NOTE]
+{spring-boot-reference-url}using.html#using.build-systems.starters[Spring Boot Starter Security] 默认不激活方法级授权。
+
+方法安全还支持许多其他用例，包括 <<use-aspectj, AspectJ 支持>>、<<use-programmatic-authorization,自定义注解>> 以及多个配置点。
+考虑学习以下用例：
+
+* <<migration-enableglobalmethodsecurity, 从 `@EnableGlobalMethodSecurity` 迁移>>
+* 理解 <<method-security-architecture,方法安全的工作原理>> 及其使用原因
+* 比较 <<request-vs-method,请求级和方法级授权>>
+* 使用 <<use-preauthorize,`@PreAuthorize`>> 和 <<use-postauthorize,`@PostAuthorize`>> 授权方法
+* 在授权被拒绝时提供 <<fallback-values-authorization-denied,回退值>>
+* 使用 <<use-prefilter,`@PreFilter`>> 和 <<use-postfilter,`@PostFilter`>> 过滤方法
+* 使用 <<use-jsr250,JSR-250 注解>> 授权方法
+* 使用 <<use-aspectj,AspectJ 表达式>> 授权方法
+* 集成 <<weave-aspectj,AspectJ 字节码编织>>
+* 与 <<changing-the-order,@Transactional 和其他基于 AOP 的注解>> 协调
+* 自定义 <<customizing-expression-handling,SpEL 表达式处理>>
+* 集成 <<custom-authorization-managers,自定义授权系统>>
+
+[[method-security-architecture]]
+== 方法安全如何工作
+
+Spring Security 的方法授权支持适用于：
+
+* 提取细粒度的授权逻辑；例如，当方法参数和返回值影响授权决策时。
+* 在服务层强制执行安全性
+* 在风格上更倾向于基于注解而不是基于 `HttpSecurity` 的配置
+
+由于方法安全是使用 {spring-framework-reference-url}core.html#aop-api[Spring AOP] 构建的，因此您可以访问其所有表达能力，以根据需要覆盖 Spring Security 的默认设置。
+
+如前所述，您首先通过将 `@EnableMethodSecurity` 添加到 `@Configuration` 类或在 Spring XML 配置文件中添加 `<sec:method-security/>` 来开始。
+
+[[use-method-security]]
+[NOTE]
+====
+此注解和 XML 元素分别取代了 `@EnableGlobalMethodSecurity` 和 `<sec:global-method-security/>`。
+它们提供了以下改进：
+
+1. 使用简化的 `AuthorizationManager` API 而不是元数据源、配置属性、决策管理器和投票者。
+这简化了重用和定制。
+2. 更倾向于直接基于 Bean 的配置，而不是要求扩展 `GlobalMethodSecurityConfiguration` 来定制 Bean
+3. 使用原生 Spring AOP 构建，减少了抽象，并允许您使用 Spring AOP 构建块进行定制
+4. 检查冲突的注解以确保安全配置明确无误
+5. 符合 JSR-250
+6. 默认启用 `@PreAuthorize`、`@PostAuthorize`、`@PreFilter` 和 `@PostFilter`
+
+如果您正在使用 `@EnableGlobalMethodSecurity` 或 `<global-method-security/>`，这些现在已弃用，建议您迁移。
+====
+
+方法授权是方法前和方法后授权的组合。
+考虑一个以以下方式注解的服务 Bean：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Service
+public class MyCustomerService {
+    @PreAuthorize("hasAuthority('permission:read')")
+    @PostAuthorize("returnObject.owner == authentication.name")
+    public Customer readCustomer(String id) { ... }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Service
+open class MyCustomerService {
+    @PreAuthorize("hasAuthority('permission:read')")
+    @PostAuthorize("returnObject.owner == authentication.name")
+    fun readCustomer(val id: String): Customer { ... }
+}
+----
+======
+
+当方法安全 <<activate-method-security,激活>> 时，对 `MyCustomerService#readCustomer` 的给定调用可能如下所示：
+
+[.invert-dark]
+image::{figures}/methodsecurity.png[]
+
+1. Spring AOP 调用其代理方法 `readCustomer`。在代理的其他顾问中，它调用一个匹配 <<annotation-method-pointcuts,`@PreAuthorize` 切入点>> 的 {security-api-url}org/springframework/security/authorization/method/AuthorizationManagerBeforeMethodInterceptor.html[`AuthorizationManagerBeforeMethodInterceptor`]
+2. 拦截器调用 {security-api-url}org/springframework/security/authorization/method/PreAuthorizeAuthorizationManager.html[`PreAuthorizeAuthorizationManager#check`]
+3. 授权管理器使用 `MethodSecurityExpressionHandler` 解析注解的 <<authorization-expressions,SpEL 表达式>>，并从包含 xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[a `Supplier<Authentication>`] 和 `MethodInvocation` 的 `MethodSecurityExpressionRoot` 构造相应的 `EvaluationContext`
+4. 拦截器使用此上下文评估表达式；具体来说，它从 `Supplier` 中读取 xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[the `Authentication`] 并检查其是否在其 xref:servlet/authorization/architecture.adoc#authz-authorities[authorities] 集合中有 `permission:read`
+5. 如果评估通过，则 Spring AOP 继续调用该方法。
+6. 如果没有通过，拦截器发布一个 `AuthorizationDeniedEvent` 并抛出一个 {security-api-url}org/springframework/security/access/AccessDeniedException.html[`AccessDeniedException`]，xref:servlet/architecture.adoc#servlet-exceptiontranslationfilter[the `ExceptionTranslationFilter`] 会捕获该异常并向响应返回 403 状态码
+7. 方法返回后，Spring AOP 调用一个匹配 <<annotation-method-pointcuts,the `@PostAuthorize` pointcut>> 的 {security-api-url}org/springframework/security/authorization/method/AuthorizationManagerAfterMethodInterceptor.html[`AuthorizationManagerAfterMethodInterceptor`]，操作与上述相同，但使用 {security-api-url}org/springframework/security/authorization/method/PostAuthorizeAuthorizationManager.html[`PostAuthorizeAuthorizationManager`]
+8. 如果评估通过（在这种情况下，返回值属于登录用户），则处理正常继续
+9. 如果没有通过，拦截器发布一个 `AuthorizationDeniedEvent` 并抛出一个 {security-api-url}org/springframework/security/access/AccessDeniedException.html[`AccessDeniedException`]，xref:servlet/architecture.adoc#servlet-exceptiontranslationfilter[the `ExceptionTranslationFilter`] 会捕获该异常并向响应返回 403 状态码
+
+[NOTE]
+如果方法不是在 HTTP 请求的上下文中调用的，您可能需要自己处理 `AccessDeniedException`
+
+[[unanimous-based-authorization-decisions]]
+=== 多个注解按顺序计算
+
+如上所述，如果方法调用涉及多个 <<authorizing-with-annotations,方法安全注解>>，每个注解都会依次处理。
+这意味着它们可以被视为“与”在一起。
+换句话说，要使调用获得授权，所有注解检查都需要通过授权。
+
+[[repeated-annotations]]
+=== 不支持重复注解
+
+也就是说，不支持在同一方法上重复相同的注解。
+例如，您不能在同一方法上放置两次 `@PreAuthorize`。
+
+相反，请使用 SpEL 的布尔支持或其对委托给单独 Bean 的支持。
+
+[[annotation-method-pointcuts]]
+=== 每个注解都有自己的切入点
+
+每个注解都有自己的切入点实例，该实例在整个对象层次结构中查找该注解或其 <<meta-annotations,元注解>> 对应物，从 <<class-or-interface-annotations,方法及其封闭类>> 开始。
+
+您可以在 {security-api-url}org/springframework/security/authorization/method/AuthorizationMethodPointcuts.html[`AuthorizationMethodPointcuts`] 中查看此功能的具体细节。
+
+[[annotation-method-interceptors]]
+=== 每个注解都有自己的方法拦截器
+
+每个注解都有其专用的方法拦截器。
+这样做的原因是使其更具可组合性。
+例如，如果需要，您可以禁用 Spring Security 的默认设置并 <<_enabling_certain_annotations,仅发布 `@PostAuthorize` 方法拦截器>>。
+
+方法拦截器如下：
+
+* 对于 <<use-preauthorize,`@PreAuthorize`>>，Spring Security 使用 {security-api-url}org/springframework/security/authorization/method/AuthorizationManagerBeforeMethodInterceptor.html[`AuthorizationManagerBeforeMethodInterceptor#preAuthorize`]，进而使用 {security-api-url}org/springframework/security/authorization/method/PreAuthorizeAuthorizationManager.html[`PreAuthorizeAuthorizationManager`]
+* 对于 <<use-postauthorize,`@PostAuthorize`>>，Spring Security 使用 {security-api-url}org/springframework/security/authorization/method/AuthorizationManagerAfterMethodInterceptor.html[`AuthorizationManagerBeforeMethodInterceptor#postAuthorize`]，进而使用 {security-api-url}org/springframework/security/authorization/method/PostAuthorizeAuthorizationManager.html[`PostAuthorizeAuthorizationManager`]
+* 对于 <<use-prefilter,`@PreFilter`>>，Spring Security 使用 {security-api-url}org/springframework/security/authorization/method/PreFilterAuthorizationMethodInterceptor.html[`PreFilterAuthorizationMethodInterceptor`]
+* 对于 <<use-postfilter,`@PostFilter`>>，Spring Security 使用 {security-api-url}org/springframework/security/authorization/method/PostFilterAuthorizationMethodInterceptor.html[`PostFilterAuthorizationMethodInterceptor`]
+* 对于 <<use-secured,`@Secured`>>，Spring Security 使用 {security-api-url}org/springframework/security/authorization/method/AuthorizationManagerBeforeMethodInterceptor.html[`AuthorizationManagerBeforeMethodInterceptor#secured`]，进而使用 {security-api-url}org/springframework/security/authorization/method/SecuredAuthorizationManager.html[`SecuredAuthorizationManager`]
+* 对于 JSR-250 注解，Spring Security 使用 {security-api-url}org/springframework/security/authorization/method/AuthorizationManagerBeforeMethodInterceptor.html[`AuthorizationManagerBeforeMethodInterceptor#jsr250`]，进而使用 {security-api-url}org/springframework/security/authorization/method/Jsr250AuthorizationManager.html[`Jsr250AuthorizationManager`]
+
+一般来说，您可以将以下列表视为在添加 `@EnableMethodSecurity` 时 Spring Security 发布的拦截器的代表性示例：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+static Advisor preAuthorizeMethodInterceptor() {
+    return AuthorizationManagerBeforeMethodInterceptor.preAuthorize();
+}
+
+@Bean
+@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+static Advisor postAuthorizeMethodInterceptor() {
+    return AuthorizationManagerAfterMethodInterceptor.postAuthorize();
+}
+
+@Bean
+@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+static Advisor preFilterMethodInterceptor() {
+    return AuthorizationManagerBeforeMethodInterceptor.preFilter();
+}
+
+@Bean
+@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+static Advisor postFilterMethodInterceptor() {
+    return AuthorizationManagerAfterMethodInterceptor.postFilter();
+}
+----
+======
+
+[[favor-granting-authorities]]
+=== 倾向于授予权限而非复杂的 SpEL 表达式
+
+很多时候，引入像下面这样的复杂 SpEL 表达式可能会很诱人：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@PreAuthorize("hasAuthority('permission:read') || hasRole('ADMIN')")
+----
+======
+
+.Kotlin
+[source,kotlin,role="kotlin"]
+----
+@PreAuthorize("hasAuthority('permission:read') || hasRole('ADMIN')")
+----
+
+然而，您也可以将 `permission:read` 授予具有 `ROLE_ADMIN` 的人。
+一种方法是使用 `RoleHierarchy`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+static RoleHierarchy roleHierarchy() {
+    return RoleHierarchyImpl.fromHierarchy("ROLE_ADMIN > permission:read");
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+companion object {
+    @Bean
+    fun roleHierarchy(): RoleHierarchy {
+        return RoleHierarchyImpl.fromHierarchy("ROLE_ADMIN > permission:read")
+    }
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<bean id="roleHierarchy"
+        class="org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl" factory-method="fromHierarchy">
+    <constructor-arg value="ROLE_ADMIN > permission:read"/>
+</bean>
+----
+======
+
+然后 <<customizing-expression-handling,将其设置在 `MethodSecurityExpressionHandler` 实例中>>。
+这允许您拥有更简单的 <<use-preauthorize,`@PreAuthorize`>> 表达式，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@PreAuthorize("hasAuthority('permission:read')")
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@PreAuthorize("hasAuthority('permission:read')")
+----
+======
+
+或者，在可能的情况下，将应用程序特定的授权逻辑适应为登录时授予的权限。
+
+[[request-vs-method]]
+== 比较请求级与方法级授权
+
+何时应该优先选择方法级授权而不是 xref:servlet/authorization/authorize-http-requests.adoc[请求级授权]？
+部分取决于个人喜好；但是，考虑以下每种情况的优点列表以帮助您决定。
+
+|===
+|| *请求级* | *方法级*
+| *授权类型* | 粗粒度 | 细粒度
+| *配置位置* | 在配置类中声明 | 在方法声明中局部
+| *配置风格* | DSL | 注解
+| *授权定义* | 编程式 | SpEL
+|===
+
+主要权衡似乎在于您希望授权规则存在于何处。
+
+[NOTE]
+重要的是要记住，当您使用基于注解的方法安全时，未注解的方法不会受到保护。
+为了防止这种情况，请在您的 xref:servlet/configuration/java.adoc#jc-httpsecurity[`HttpSecurity`] 实例中声明一个 xref:servlet/authorization/authorize-http-requests.adoc#activate-request-security[捕获所有授权规则]。
+
+[[authorizing-with-annotations]]
+== 使用注解进行授权
+
+Spring Security 启用方法级授权支持的主要方式是通过您可以添加到方法、类和接口的注解。
+
+[[use-preauthorize]]
+=== 使用 `@PreAuthorize` 授权方法调用
+
+当 <<activate-method-security,方法安全处于活动状态>> 时，您可以像这样使用 {security-api-url}org/springframework/security/access/prepost/PreAuthorize.html[`@PreAuthorize`] 注解来注解一个方法：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class BankService {
+	@PreAuthorize("hasRole('ADMIN')")
+	public Account readAccount(Long id) {
+        // ... 仅当 `Authentication` 拥有 `ROLE_ADMIN` 权限时才会调用
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+open class BankService {
+	@PreAuthorize("hasRole('ADMIN')")
+	fun readAccount(val id: Long): Account {
+        // ... 仅当 `Authentication` 拥有 `ROLE_ADMIN` 权限时才会调用
+	}
+}
+----
+======
+
+这表示只有当提供的表达式 `hasRole('ADMIN')` 通过时，该方法才能被调用。
+
+然后，您可以 xref:servlet/test/method.adoc[测试该类] 以确认它正在强制执行授权规则，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Autowired
+BankService bankService;
+
+@WithMockUser(roles="ADMIN")
+@Test
+void readAccountWithAdminRoleThenInvokes() {
+    Account account = this.bankService.readAccount("12345678");
+    // ... 断言
+}
+
+@WithMockUser(roles="WRONG")
+@Test
+void readAccountWithWrongRoleThenAccessDenied() {
+    assertThatExceptionOfType(AccessDeniedException.class).isThrownBy(
+        () -> this.bankService.readAccount("12345678"));
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@WithMockUser(roles="ADMIN")
+@Test
+fun readAccountWithAdminRoleThenInvokes() {
+    val account: Account = this.bankService.readAccount("12345678")
+    // ... 断言
+}
+
+@WithMockUser(roles="WRONG")
+@Test
+fun readAccountWithWrongRoleThenAccessDenied() {
+    assertThatExceptionOfType(AccessDeniedException::class.java).isThrownBy {
+        this.bankService.readAccount("12345678")
+    }
+}
+----
+======
+
+[TIP]
+`@PreAuthorize` 也可以是 <<meta-annotations, 元注解>>，可以在 <<class-or-interface-annotations,类或接口级别>> 定义，并使用 <<authorization-expressions, SpEL 授权表达式>>。
+
+虽然 `@PreAuthorize` 对于声明所需权限非常有用，但它也可以用于评估涉及方法参数的更复杂的 <<using_method_parameters,表达式>>。
+
+[[use-postauthorize]]
+=== 使用 `@PostAuthorize` 授权方法结果
+
+当方法安全处于活动状态时，您可以像这样使用 {security-api-url}org/springframework/security/access/prepost/PostAuthorize.html[`@PostAuthorize`] 注解来注解一个方法：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class BankService {
+	@PostAuthorize("returnObject.owner == authentication.name")
+	public Account readAccount(Long id) {
+        // ... 仅当 `Account` 属于登录用户时才会返回
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+open class BankService {
+	@PostAuthorize("returnObject.owner == authentication.name")
+	fun readAccount(val id: Long): Account {
+        // ... 仅当 `Account` 属于登录用户时才会返回
+	}
+}
+----
+======
+
+这表示只有当提供的表达式 `returnObject.owner == authentication.name` 通过时，该方法才能返回值。
+`returnObject` 表示要返回的 `Account` 对象。
+
+然后，您可以 xref:servlet/test/method.adoc[测试该类] 以确认它正在强制执行授权规则：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Autowired
+BankService bankService;
+
+@WithMockUser(username="owner")
+@Test
+void readAccountWhenOwnedThenReturns() {
+    Account account = this.bankService.readAccount("12345678");
+    // ... 断言
+}
+
+@WithMockUser(username="wrong")
+@Test
+void readAccountWhenNotOwnedThenAccessDenied() {
+    assertThatExceptionOfType(AccessDeniedException.class).isThrownBy(
+        () -> this.bankService.readAccount("12345678"));
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@WithMockUser(username="owner")
+@Test
+fun readAccountWhenOwnedThenReturns() {
+    val account: Account = this.bankService.readAccount("12345678")
+    // ... 断言
+}
+
+@WithMockUser(username="wrong")
+@Test
+fun readAccountWhenNotOwnedThenAccessDenied() {
+    assertThatExceptionOfType(AccessDeniedException::class.java).isThrownBy {
+        this.bankService.readAccount("12345678")
+    }
+}
+----
+======
+
+[TIP]
+`@PostAuthorize` 也可以是 <<meta-annotations,元注解>>，可以在 <<class-or-interface-annotations,类或接口级别>> 定义，并使用 <<authorization-expressions, SpEL 授权表达式>>。
+
+`@PostAuthorize` 特别有助于防御 https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html[不安全的直接对象引用]。
+事实上，它可以被定义为一个 <<meta-annotations,元注解>>，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Target({ ElementType.METHOD, ElementType.TYPE })
+@Retention(RetentionPolicy.RUNTIME)
+@PostAuthorize("returnObject.owner == authentication.name")
+public @interface RequireOwnership {}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Target(ElementType.METHOD, ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@PostAuthorize("returnObject.owner == authentication.name")
+annotation class RequireOwnership
+----
+======
+
+允许您以以下方式注解服务：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class BankService {
+	@RequireOwnership
+	public Account readAccount(Long id) {
+        // ... 仅当 `Account` 属于登录用户时才会返回
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+open class BankService {
+	@RequireOwnership
+	fun readAccount(val id: Long): Account {
+        // ... 仅当 `Account` 属于登录用户时才会返回
+	}
+}
+----
+======
+
+结果是，上述方法只有在 `owner` 属性与登录用户的 `name` 匹配时才会返回 `Account`。
+否则，Spring Security 将抛出一个 `AccessDeniedException` 并返回 403 状态码。
+
+[[use-prefilter]]
+=== 使用 `@PreFilter` 过滤方法参数
+
+[NOTE]
+`@PreFilter` 尚不支持 Kotlin 特有的数据类型；因此，仅显示 Java 代码片段
+
+当方法安全处于活动状态时，您可以像这样使用 {security-api-url}org/springframework/security/access/prepost/PreFilter.html[`@PreFilter`] 注解来注解一个方法：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class BankService {
+	@PreFilter("filterObject.owner == authentication.name")
+	public Collection<Account> updateAccounts(Account... accounts) {
+        // ... `accounts` 将只包含由登录用户拥有的账户
+        return updated;
+	}
+}
+----
+======
+
+这意味着将过滤掉 `accounts` 中表达式 `filterObject.owner == authentication.name` 失败的任何值。
+`filterObject` 表示 `accounts` 中的每个 `account`，并用于测试每个 `account`。
+
+然后，您可以按以下方式测试该类以确认它正在强制执行授权规则：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Autowired
+BankService bankService;
+
+@WithMockUser(username="owner")
+@Test
+void updateAccountsWhenOwnedThenReturns() {
+    Account ownedBy = ...
+    Account notOwnedBy = ...
+    Collection<Account> updated = this.bankService.updateAccounts(ownedBy, notOwnedBy);
+    assertThat(updated).containsOnly(ownedBy);
+}
+----
+======
+
+[TIP]
+`@PreFilter` 也可以是 <<meta-annotations,元注解>>，可以在 <<class-or-interface-annotations,类或接口级别>> 定义，并使用 <<authorization-expressions, SpEL 授权表达式>>。
+
+`@PreFilter` 支持数组、集合、映射和流（只要流仍然打开）。
+
+例如，上述 `updateAccounts` 声明将与以下其他四种方式功能相同：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@PreFilter("filterObject.owner == authentication.name")
+public Collection<Account> updateAccounts(Account[] accounts)
+
+@PreFilter("filterObject.owner == authentication.name")
+public Collection<Account> updateAccounts(Collection<Account> accounts)
+
+@PreFilter("filterObject.value.owner == authentication.name")
+public Collection<Account> updateAccounts(Map<String, Account> accounts)
+
+@PreFilter("filterObject.owner == authentication.name")
+public Collection<Account> updateAccounts(Stream<Account> accounts)
+----
+======
+
+结果是，上述方法将只包含其 `owner` 属性与登录用户 `name` 匹配的 `Account` 实例。
+
+[[use-postfilter]]
+=== 使用 `@PostFilter` 过滤方法结果
+
+[NOTE]
+`@PostFilter` 尚不支持 Kotlin 特有的数据类型；因此，仅显示 Java 代码片段
+
+当方法安全处于活动状态时，您可以像这样使用 {security-api-url}org/springframework/security/access/prepost/PostFilter.html[`@PostFilter`] 注解来注解一个方法：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class BankService {
+	@PostFilter("filterObject.owner == authentication.name")
+	public Collection<Account> readAccounts(String... ids) {
+        // ... 返回值将被过滤，只包含由登录用户拥有的账户
+        return accounts;
+	}
+}
+----
+======
+
+这意味着将过滤掉返回值中表达式 `filterObject.owner == authentication.name` 失败的任何值。
+`filterObject` 表示 `accounts` 中的每个 `account`，并用于测试每个 `account`。
+
+然后，您可以像这样测试该类以确认它正在强制执行授权规则：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Autowired
+BankService bankService;
+
+@WithMockUser(username="owner")
+@Test
+void readAccountsWhenOwnedThenReturns() {
+    Collection<Account> accounts = this.bankService.updateAccounts("owner", "not-owner");
+    assertThat(accounts).hasSize(1);
+    assertThat(accounts.get(0).getOwner()).isEqualTo("owner");
+}
+----
+======
+
+[TIP]
+`@PostFilter` 也可以是 <<meta-annotations,元注解>>，可以在 <<class-or-interface-annotations,类或接口级别>> 定义，并使用 <<authorization-expressions, SpEL 授权表达式>>。
+
+`@PostFilter` 支持数组、集合、映射和流（只要流仍然打开）。
+
+例如，上述 `readAccounts` 声明将与以下其他三种方式功能相同：
+
+```java
+@PostFilter("filterObject.owner == authentication.name")
+public Account[] readAccounts(String... ids)
+
+@PostFilter("filterObject.value.owner == authentication.name")
+public Map<String, Account> readAccounts(String... ids)
+
+@PostFilter("filterObject.owner == authentication.name")
+public Stream<Account> readAccounts(String... ids)
+```
+
+结果是，上述方法将返回其 `owner` 属性与登录用户 `name` 匹配的 `Account` 实例。
+
+[NOTE]
+内存中的过滤显然可能很昂贵，因此请考虑是否最好改为在数据层 xref:servlet/integrations/data.adoc[过滤数据]。
+
+[[use-secured]]
+=== 使用 `@Secured` 授权方法调用
+
+{security-api-url}org/springframework/security/access/annotation/Secured.html[`@Secured`] 是用于授权调用的遗留选项。
+<<use-preauthorize,`@PreAuthorize`>> 取代了它，因此推荐使用。
+
+要使用 `@Secured` 注解，您应首先更改方法安全声明以启用它，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableMethodSecurity(securedEnabled = true)
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@EnableMethodSecurity(securedEnabled = true)
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<sec:method-security secured-enabled="true"/>
+----
+======
+
+这将导致 Spring Security 发布 <<annotation-method-interceptors,相应的方法拦截器>>，该拦截器对使用 `@Secured` 注解的方法、类和接口进行授权。
+
+[[use-jsr250]]
+=== 使用 JSR-250 注解授权方法调用
+
+如果您想使用 https://jcp.org/en/jsr/detail?id=250[JSR-250] 注解，Spring Security 也支持这一点。
+<<use-preauthorize,`@PreAuthorize`>> 具有更强的表达能力，因此推荐使用。
+
+要使用 JSR-250 注解，您应首先更改方法安全声明以启用它们，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableMethodSecurity(jsr250Enabled = true)
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@EnableMethodSecurity(jsr250Enabled = true)
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<sec:method-security jsr250-enabled="true"/>
+----
+======
+
+这将导致 Spring Security 发布 <<annotation-method-interceptors,相应的方法拦截器>>，该拦截器对使用 `@RolesAllowed`、`@PermitAll` 和 `@DenyAll` 注解的方法、类和接口进行授权。
+
+[[class-or-interface-annotations]]
+=== 在类或接口级别声明注解
+
+也支持在类和接口级别使用方法安全注解。
+
+如果在类级别如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Controller
+@PreAuthorize("hasAuthority('ROLE_USER')")
+public class MyController {
+    @GetMapping("/endpoint")
+    public String endpoint() { ... }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Controller
+@PreAuthorize("hasAuthority('ROLE_USER')")
+open class MyController {
+    @GetMapping("/endpoint")
+    fun endpoint(): String { ... }
+}
+----
+======
+
+那么所有方法都继承类级别的行为。
+
+或者，如果在类和方法级别都声明如下：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Controller
+@PreAuthorize("hasAuthority('ROLE_USER')")
+public class MyController {
+    @GetMapping("/endpoint")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public String endpoint() { ... }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Controller
+@PreAuthorize("hasAuthority('ROLE_USER')")
+open class MyController {
+    @GetMapping("/endpoint")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    fun endpoint(): String { ... }
+}
+----
+======
+
+那么声明注解的方法会覆盖类级别的注解。
+
+接口也是如此，但有一个例外：如果一个类从两个不同的接口继承注解，则启动将失败。
+这是因为 Spring Security 无法判断您想使用哪一个。
+
+在这种情况下，您可以通过在具体方法上添加注解来解决歧义。
+
+[[meta-annotations]]
+=== 使用元注解
+
+方法安全支持元注解。
+这意味着您可以采用任何注解并根据您的特定应用用例提高可读性。
+
+例如，您可以将 `@PreAuthorize("hasRole('ADMIN')")` 简化为 `@IsAdmin`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Target({ ElementType.METHOD, ElementType.TYPE })
+@Retention(RetentionPolicy.RUNTIME)
+@PreAuthorize("hasRole('ADMIN')")
+public @interface IsAdmin {}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Target(ElementType.METHOD, ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@PreAuthorize("hasRole('ADMIN')")
+annotation class IsAdmin
+----
+======
+
+结果是，在您的安全方法上，您现在可以这样做：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class BankService {
+	@IsAdmin
+	public Account readAccount(Long id) {
+        // ... 仅当 `Account` 属于登录用户时才返回
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+open class BankService {
+	@IsAdmin
+	fun readAccount(val id: Long): Account {
+        // ... 仅当 `Account` 属于登录用户时才返回
+	}
+}
+----
+======
+
+这使得方法定义更具可读性。
+
+==== 模板化元注解表达式
+
+您还可以选择使用元注解模板，这允许更强大的注解定义。
+
+首先，发布以下 Bean：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+static PrePostTemplateDefaults prePostTemplateDefaults() {
+	return new PrePostTemplateDefaults();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+companion object {
+    @Bean
+    fun prePostTemplateDefaults(): PrePostTemplateDefaults {
+        return PrePostTemplateDefaults()
+    }
+}
+----
+======
+
+现在，您可以创建比 `@IsAdmin` 更强大的东西，比如 `@HasRole`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Target({ ElementType.METHOD, ElementType.TYPE })
+@Retention(RetentionPolicy.RUNTIME)
+@PreAuthorize("hasRole('{value}')")
+public @interface HasRole {
+	String value();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Target(ElementType.METHOD, ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@PreAuthorize("hasRole('{value}')")
+annotation class HasRole(val value: String)
+----
+======
+
+结果是，在您的安全方法上，您现在可以这样做：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class BankService {
+	@HasRole("ADMIN")
+	public Account readAccount(Long id) {
+        // ... 仅当 `Account` 属于登录用户时才返回
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+open class BankService {
+	@HasRole("ADMIN")
+	fun readAccount(val id: Long): Account {
+        // ... 仅当 `Account` 属于登录用户时才返回
+	}
+}
+----
+======
+
+请注意，这也适用于方法变量和所有注解类型，尽管您需要注意正确处理引号，以便生成的 SpEL 表达式是正确的。
+
+例如，考虑以下 `@HasAnyRole` 注解：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Target({ ElementType.METHOD, ElementType.TYPE })
+@Retention(RetentionPolicy.RUNTIME)
+@PreAuthorize("hasAnyRole({roles})")
+public @interface HasAnyRole {
+	String[] roles();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Target(ElementType.METHOD, ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@PreAuthorize("hasAnyRole({roles})")
+annotation class HasAnyRole(val roles: Array<String>)
+----
+======
+
+在这种情况下，您会注意到不应在表达式中使用引号，而应在参数值中使用，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class BankService {
+	@HasAnyRole(roles = { "'USER'", "'ADMIN'" })
+	public Account readAccount(Long id) {
+        // ... 仅当 `Account` 属于登录用户时才返回
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+open class BankService {
+	@HasAnyRole(roles = arrayOf("'USER'", "'ADMIN'"))
+	fun readAccount(val id: Long): Account {
+        // ... 仅当 `Account` 属于登录用户时才返回
+	}
+}
+----
+======
+
+以便替换后，表达式变为 `@PreAuthorize("hasAnyRole('USER', 'ADMIN')")`。
+
+[[enable-annotation]]
+=== 启用特定注解
+
+您可以关闭 ``@EnableMethodSecurity`` 的预配置并替换为您自己的配置。
+如果要 <<custom-authorization-managers,自定义 `AuthorizationManager`>> 或 `Pointcut`，可以选择这样做。
+或者您可能只想启用特定的注解，比如 `@PostAuthorize`。
+
+您可以通过以下方式实现：
+
+.仅 @PostAuthorize 配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableMethodSecurity(prePostEnabled = false)
+class MethodSecurityConfig {
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	Advisor postAuthorize() {
+		return AuthorizationManagerAfterMethodInterceptor.postAuthorize();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableMethodSecurity(prePostEnabled = false)
+class MethodSecurityConfig {
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	fun postAuthorize() : Advisor {
+		return AuthorizationManagerAfterMethodInterceptor.postAuthorize()
+	}
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<sec:method-security pre-post-enabled="false"/>
+
+<aop:config/>
+
+<bean id="postAuthorize"
+	class="org.springframework.security.authorization.method.AuthorizationManagerBeforeMethodInterceptor"
+	factory-method="postAuthorize"/>
+----
+======
+
+上述代码片段通过首先禁用方法安全的预配置，然后发布 <<annotation-method-interceptors, `@PostAuthorize` 拦截器>> 本身来实现这一点。
+
+[[use-intercept-methods]]
+== 使用 `<intercept-methods>` 进行授权
+
+虽然使用 Spring Security 的 <<authorizing-with-annotations,基于注解的支持>> 是方法安全的首选方式，但您也可以使用 XML 声明 Bean 授权规则。
+
+如果需要在 XML 配置中声明，可以使用 xref:servlet/appendix/namespace/method-security.adoc#nsa-intercept-methods[`<intercept-methods>`]，如下所示：
+
+[tabs]
+======
+Xml::
++
+[source,xml,role="primary"]
+----
+<bean class="org.mycompany.MyController">
+    <intercept-methods>
+        <protect method="get*" access="hasAuthority('read')"/>
+        <protect method="*" access="hasAuthority('write')"/>
+    </intercept-methods>
+</bean>
+----
+======
+
+[NOTE]
+这仅支持按前缀或名称匹配方法。
+如果您的需求比这更复杂，请改用 <<authorizing-with-annotations,使用注解支持>>。
+
+[[use-programmatic-authorization]]
+== 编程方式授权方法
+
+正如您已经看到的，有几种方法可以使用 <<authorization-expressions, 方法安全 SpEL 表达式>> 指定非平凡的授权规则。
+
+还有几种方法可以让您的逻辑基于 Java 而不是基于 SpEL。
+这使我们能够访问整个 Java 语言，以增强可测试性和流程控制。
+
+=== 在 SpEL 中使用自定义 Bean
+
+编程方式授权方法的第一种方法是两步过程。
+
+首先，声明一个 Bean，该 Bean 有一个接受 `MethodSecurityExpressionOperations` 实例的方法，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component("authz")
+public class AuthorizationLogic {
+    public boolean decide(MethodSecurityExpressionOperations operations) {
+        // ... 授权逻辑
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component("authz")
+open class AuthorizationLogic {
+    fun decide(val operations: MethodSecurityExpressionOperations): boolean {
+        // ... 授权逻辑
+    }
+}
+----
+======
+
+然后，以以下方式在注解中引用该 Bean：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Controller
+public class MyController {
+    @PreAuthorize("@authz.decide(#root)")
+    @GetMapping("/endpoint")
+    public String endpoint() {
+        // ...
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Controller
+open class MyController {
+    @PreAuthorize("@authz.decide(#root)")
+    @GetMapping("/endpoint")
+    fun String endpoint() {
+        // ...
+    }
+}
+----
+======
+
+对于每次方法调用，Spring Security 都会调用该 Bean 上的给定方法。
+
+这样做的好处是，所有授权逻辑都在一个独立的类中，可以独立进行单元测试和验证其正确性。
+它还可以访问完整的 Java 语言。
+
+[TIP]
+除了返回 `Boolean` 外，您还可以返回 `null` 以表示代码放弃做出决定。
+
+如果您想包含更多关于决策性质的信息，可以返回自定义的 `AuthorizationDecision`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component("authz")
+public class AuthorizationLogic {
+    public AuthorizationDecision decide(MethodSecurityExpressionOperations operations) {
+        // ... 授权逻辑
+        return new MyAuthorizationDecision(false, details);
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component("authz")
+open class AuthorizationLogic {
+    fun decide(val operations: MethodSecurityExpressionOperations): AuthorizationDecision {
+        // ... 授权逻辑
+        return MyAuthorizationDecision(false, details)
+    }
+}
+----
+======
+
+或者抛出一个自定义的 `AuthorizationDeniedException` 实例。
+不过请注意，返回对象是首选，因为这样不会产生生成堆栈跟踪的开销。
+
+然后，当您 <<fallback-values-authorization-denied,自定义如何处理授权结果>> 时，可以访问自定义详细信息。
+
+[[custom-authorization-managers]]
+=== 使用自定义授权管理器
+
+编程方式授权方法的第二种方法是创建一个自定义的 xref:servlet/authorization/architecture.adoc#_the_authorizationmanager[`AuthorizationManager`]。
+
+首先，声明一个授权管理器实例，也许像这样：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class MyAuthorizationManager implements AuthorizationManager<MethodInvocation>, AuthorizationManager<MethodInvocationResult> {
+    @Override
+    public AuthorizationDecision check(Supplier<Authentication> authentication, MethodInvocation invocation) {
+        // ... 授权逻辑
+    }
+
+    @Override
+    public AuthorizationDecision check(Supplier<Authentication> authentication, MethodInvocationResult invocation) {
+        // ... 授权逻辑
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+class MyAuthorizationManager : AuthorizationManager<MethodInvocation>, AuthorizationManager<MethodInvocationResult> {
+    override fun check(authentication: Supplier<Authentication>, invocation: MethodInvocation): AuthorizationDecision {
+        // ... 授权逻辑
+    }
+
+    override fun check(authentication: Supplier<Authentication>, invocation: MethodInvocationResult): AuthorizationDecision {
+        // ... 授权逻辑
+    }
+}
+----
+======
+
+然后，发布带有切点的方法拦截器，该切点对应于您希望 `AuthorizationManager` 运行的时间。
+例如，您可以像这样替换 `@PreAuthorize` 和 `@PostAuthorize` 的工作方式：
+
+.仅 @PreAuthorize 和 @PostAuthorize 配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableMethodSecurity(prePostEnabled = false)
+class MethodSecurityConfig {
+    @Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	Advisor preAuthorize(MyAuthorizationManager manager) {
+		return AuthorizationManagerBeforeMethodInterceptor.preAuthorize(manager);
+	}
+
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	Advisor postAuthorize(MyAuthorizationManager manager) {
+		return AuthorizationManagerAfterMethodInterceptor.postAuthorize(manager);
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableMethodSecurity(prePostEnabled = false)
+class MethodSecurityConfig {
+   	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	fun preAuthorize(val manager: MyAuthorizationManager) : Advisor {
+		return AuthorizationManagerBeforeMethodInterceptor.preAuthorize(manager)
+	}
+
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	fun postAuthorize(val manager: MyAuthorizationManager) : Advisor {
+		return AuthorizationManagerAfterMethodInterceptor.postAuthorize(manager)
+	}
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<sec:method-security pre-post-enabled="false"/>
+
+<aop:config/>
+
+<bean id="preAuthorize"
+	class="org.springframework.security.authorization.method.AuthorizationManagerBeforeMethodInterceptor"
+	factory-method="preAuthorize">
+    <constructor-arg ref="myAuthorizationManager"/>
+</bean>
+
+<bean id="postAuthorize"
+	class="org.springframework.security.authorization.method.AuthorizationManagerAfterMethodInterceptor"
+	factory-method="postAuthorize">
+    <constructor-arg ref="myAuthorizationManager"/>
+</bean>
+----
+======
+
+[TIP]
+====
+您可以使用 `AuthorizationInterceptorsOrder` 中指定的顺序常量将拦截器放在 Spring Security 方法拦截器之间。
+====
+
+[[customizing-expression-handling]]
+=== 自定义表达式处理
+
+第三，您可以自定义每个 SpEL 表达式的处理方式。
+为此，您可以暴露一个自定义的 {security-api-url}org.springframework.security.access.expression.method.MethodSecurityExpressionHandler.html[`MethodSecurityExpressionHandler`]，如下所示：
+
+.自定义 MethodSecurityExpressionHandler
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+static MethodSecurityExpressionHandler methodSecurityExpressionHandler(RoleHierarchy roleHierarchy) {
+	DefaultMethodSecurityExpressionHandler handler = new DefaultMethodSecurityExpressionHandler();
+	handler.setRoleHierarchy(roleHierarchy);
+	return handler;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+companion object {
+	@Bean
+	fun methodSecurityExpressionHandler(val roleHierarchy: RoleHierarchy) : MethodSecurityExpressionHandler {
+		val handler = DefaultMethodSecurityExpressionHandler()
+		handler.setRoleHierarchy(roleHierarchy)
+		return handler
+	}
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<sec:method-security>
+	<sec:expression-handler ref="myExpressionHandler"/>
+</sec:method-security>
+
+<bean id="myExpressionHandler"
+		class="org.springframework.security.messaging.access.expression.DefaultMessageSecurityExpressionHandler">
+	<property name="roleHierarchy" ref="roleHierarchy"/>
+</bean>
+----
+======
+
+[TIP]
+====
+我们使用 `static` 方法暴露 `MethodSecurityExpressionHandler`，以确保 Spring 在初始化 Spring Security 的方法安全 `@Configuration` 类之前发布它
+====
+
+您还可以 <<subclass-defaultmethodsecurityexpressionhandler,子类化 `DefaultMessageSecurityExpressionHandler`>> 以添加超出默认值的自定义授权表达式。
+
+[[use-aspectj]]
+== 使用 AspectJ 进行授权
+
+[[match-by-pointcut]]
+=== 使用自定义切点匹配方法
+
+基于 Spring AOP 构建，您可以声明与注解无关的模式，类似于 xref:servlet/authorization/authorize-http-requests.adoc[请求级授权]。
+这有可能集中方法级授权规则。
+
+例如，您可以发布自己的 `Advisor` 或使用 xref:servlet/appendix/namespace/method-security.adoc#nsa-protect-pointcut[`<protect-pointcut>`] 将 AOP 表达式与服务层的授权规则匹配，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import static org.springframework.security.authorization.AuthorityAuthorizationManager.hasRole
+
+@Bean
+@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+static Advisor protectServicePointcut() {
+    AspectJExpressionPointcut pattern = new AspectJExpressionPointcut()
+    pattern.setExpression("execution(* com.mycompany.*Service.*(..))")
+    return new AuthorizationManagerBeforeMethodInterceptor(pattern, hasRole("USER"))
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import static org.springframework.security.authorization.AuthorityAuthorizationManager.hasRole
+
+companion object {
+    @Bean
+    @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+    fun protectServicePointcut(): Advisor {
+        val pattern = AspectJExpressionPointcut()
+        pattern.setExpression("execution(* com.mycompany.*Service.*(..))")
+        return new AuthorizationManagerBeforeMethodInterceptor(pattern, hasRole("USER"))
+    }
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<sec:method-security>
+    <protect-pointcut expression="execution(* com.mycompany.*Service.*(..))" access="hasRole('USER')"/>
+</sec:method-security>
+----
+======
+
+[[weave-aspectj]]
+=== 集成 AspectJ 字节码编织
+
+有时，通过使用 AspectJ 将 Spring Security 建议编织到 Bean 的字节码中，可以提高性能。
+
+设置好 AspectJ 后，您可以在 `@EnableMethodSecurity` 注解或 `<method-security>` 元素中简单地声明您正在使用 AspectJ：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableMethodSecurity(mode=AdviceMode.ASPECTJ)
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@EnableMethodSecurity(mode=AdviceMode.ASPECTJ)
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<sec:method-security mode="aspectj"/>
+----
+======
+
+结果将是 Spring Security 将其顾问发布为 AspectJ 建议，以便相应地进行编织。
+
+[[changing-the-order]]
+== 指定顺序
+
+如前所述，每个注解都有一个 Spring AOP 方法拦截器，每个拦截器在 Spring AOP 顾问链中都有一个位置。
+
+即，`@PreFilter` 方法拦截器的顺序是 100，`@PreAuthorize` 的顺序是 200，依此类推。
+
+注意这一点很重要，因为还有其他基于 AOP 的注解，如 `@EnableTransactionManagement`，其顺序为 `Integer.MAX_VALUE`。
+换句话说，默认情况下它们位于顾问链的末尾。
+
+有时，让其他建议在 Spring Security 之前执行是有价值的。
+例如，如果有一个方法同时使用 `@Transactional` 和 `@PostAuthorize` 注解，您可能希望事务在 `@PostAuthorize` 运行时仍然打开，以便 `AccessDeniedException` 会导致回滚。
+
+为了让 `@EnableTransactionManagement` 在方法授权建议运行之前打开事务，您可以像这样设置 `@EnableTransactionManagement` 的顺序：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableTransactionManagement(order = 0)
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@EnableTransactionManagement(order = 0)
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<tx:annotation-driven ref="txManager" order="0"/>
+----
+======
+
+由于最早的拦截器（`@PreFilter`）的顺序设置为 100，因此零的设置意味着事务建议将在所有 Spring Security 建议之前运行。
+
+[[authorization-expressions]]
+== 使用 SpEL 表达授权
+
+您已经看到了几个使用 SpEL 的例子，现在让我们更深入地了解 API。
+
+Spring Security 将其所有授权字段和方法封装在一组根对象中。
+最通用的根对象称为 `SecurityExpressionRoot`，它是 `MethodSecurityExpressionRoot` 的基础。
+Spring Security 在准备评估授权表达式时，会将此根对象提供给 `MethodSecurityEvaluationContext`。
+
+[[using-authorization-expression-fields-and-methods]]
+=== 使用授权表达式字段和方法
+
+这首先为您的 SpEL 表达式提供了一组增强的授权字段和方法。
+以下是常见方法的快速概述：
+
+* `permitAll` - 该方法调用不需要任何授权；请注意，在这种情况下，xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[the `Authentication`] 从未从会话中检索
+* `denyAll` - 在任何情况下都不允许该方法；请注意，在这种情况下，`Authentication` 从未从会话中检索
+* `hasAuthority` - 该方法要求 `Authentication` 拥有与给定值匹配的 xref:servlet/authorization/architecture.adoc#authz-authorities[a `GrantedAuthority`]
+* `hasRole` - `hasAuthority` 的快捷方式，前缀为 `ROLE_` 或配置的任何默认前缀
+* `hasAnyAuthority` - 该方法要求 `Authentication` 拥有与任何给定值匹配的 `GrantedAuthority`
+* `hasAnyRole` - `hasAnyAuthority` 的快捷方式，前缀为 `ROLE_` 或配置的任何默认前缀
+* `hasPermission` - 连接到您的 `PermissionEvaluator` 实例，用于对象级授权
+
+以下是常见字段的简要介绍：
+
+* `authentication` - 与此方法调用关联的 `Authentication` 实例
+* `principal` - 与此方法调用关联的 `Authentication#getPrincipal`
+
+现在了解了模式、规则以及它们如何配对，您应该能够理解这个更复杂示例中发生的情况：
+
+.授权请求
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class MyService {
+    @PreAuthorize("denyAll") <1>
+    MyResource myDeprecatedMethod(...);
+
+    @PreAuthorize("hasRole('ADMIN')") <2>
+    MyResource writeResource(...)
+
+    @PreAuthorize("hasAuthority('db') and hasRole('ADMIN')") <3>
+    MyResource deleteResource(...)
+
+    @PreAuthorize("principal.claims['aud'] == 'my-audience'") <4>
+    MyResource readResource(...);
+
+	@PreAuthorize("@authz.check(authentication, #root)")
+    MyResource shareResource(...);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+open class MyService {
+    @PreAuthorize("denyAll") <1>
+    fun myDeprecatedMethod(...): MyResource
+
+    @PreAuthorize("hasRole('ADMIN')") <2>
+    fun writeResource(...): MyResource
+
+    @PreAuthorize("hasAuthority('db') and hasRole('ADMIN')") <3>
+    fun deleteResource(...): MyResource
+
+    @PreAuthorize("principal.claims['aud'] == 'my-audience'") <4>
+    fun readResource(...): MyResource
+
+    @PreAuthorize("@authz.check(#root)")
+    fun shareResource(...): MyResource
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<sec:method-security>
+    <protect-pointcut expression="execution(* com.mycompany.*Service.myDeprecatedMethod(..))" access="denyAll"/> <1>
+    <protect-pointcut expression="execution(* com.mycompany.*Service.writeResource(..))" access="hasRole('ADMIN')"/> <2>
+    <protect-pointcut expression="execution(* com.mycompany.*Service.deleteResource(..))" access="hasAuthority('db') and hasRole('ADMIN')"/> <3>
+    <protect-pointcut expression="execution(* com.mycompany.*Service.readResource(..))" access="principal.claims['aud'] == 'my-audience'"/> <4>
+    <protect-pointcut expression="execution(* com.mycompany.*Service.shareResource(..))" access="@authz.check(#root)"/> <5>
+</sec:method-security>
+----
+======
+<1> 此方法任何人都不得出于任何原因调用
+<2> 此方法只能由授予 `ROLE_ADMIN` 权限的 ``Authentication`` 调用
+<3> 此方法只能由授予 `db` 和 `ROLE_ADMIN` 权限的 ``Authentication`` 调用
+<4> 此方法只能由 `aud` 声明等于 "my-audience" 的 ``Princpal`` 调用
+<5> 此方法只能在 bean ``authz`` 的 `check` 方法返回 `true` 时调用
+
+[TIP]
+====
+您可以使用像上面 `authz` 这样的 Bean 来 <<_using_a_custom_bean_in_spel,添加编程式授权>>。
+====
+
+[[using_method_parameters]]
+=== 使用方法参数
+
+此外，Spring Security 提供了一种机制来发现方法参数，以便它们也可以在 SpEL 表达式中访问。
+
+有关完整参考，Spring Security 使用 `DefaultSecurityParameterNameDiscoverer` 来发现参数名称。
+默认情况下，对于一个方法，会尝试以下选项。
+
+1. 如果 Spring Security 的 `@P` 注解存在于方法的单个参数上，则使用该值。
+以下示例使用 `@P` 注解：
+
++
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import org.springframework.security.access.method.P;
+
+...
+
+@PreAuthorize("hasPermission(#c, 'write')")
+public void updateContact(@P("c") Contact contact);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.access.method.P
+
+...
+
+@PreAuthorize("hasPermission(#c, 'write')")
+fun doSomething(@P("c") contact: Contact?)
+----
+======
++
+此表达式的意图是要求当前 `Authentication` 对此 `Contact` 实例具有 `write` 权限。
++
+在后台，这是通过使用 `AnnotationParameterNameDiscoverer` 实现的，您可以自定义以支持任何指定注解的值属性。
+
+* 如果 xref:servlet/integrations/data.adoc[Spring Data 的] `@Param` 注解至少存在于方法的一个参数上，则使用该值。
+以下示例使用 `@Param` 注解：
++
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import org.springframework.data.repository.query.Param;
+
+...
+
+@PreAuthorize("#n == authentication.name")
+Contact findContactByName(@Param("n") String name);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.data.repository.query.Param
+
+...
+
+@PreAuthorize("#n == authentication.name")
+fun findContactByName(@Param("n") name: String?): Contact?
+----
+======
++
+此表达式的意图是要求 `name` 等于 `Authentication#getName` 才能授权调用。
++
+在后台，这是通过使用 `AnnotationParameterNameDiscoverer` 实现的，您可以自定义以支持任何指定注解的值属性。
+
+* 如果您使用 `-parameters` 参数编译代码，则使用标准 JDK 反射 API 发现参数名称。
+这在类和接口上都有效。
+
+* 最后，如果您使用调试符号编译代码，则通过调试符号发现参数名称。
+这不适用于接口，因为它们没有关于参数名称的调试信息。
+对于接口，必须使用注解或 `-parameters` 方法。
+
+[[authorize-object]]
+== 授权任意对象
+
+Spring Security 还支持包装任何使用其方法安全注解注解的对象。
+
+最简单的方法是在您希望授权的对象返回的方法上标记 `@AuthorizeReturnObject` 注解。
+
+例如，考虑以下 `User` 类：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class User {
+	private String name;
+	private String email;
+
+	public User(String name, String email) {
+		this.name = name;
+		this.email = email;
+	}
+
+	public String getName() {
+		return this.name;
+	}
+
+    @PreAuthorize("hasAuthority('user:read')")
+    public String getEmail() {
+		return this.email;
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class User (val name:String, @get:PreAuthorize("hasAuthority('user:read')") val email:String)
+----
+======
+
+给定这样一个接口：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class UserRepository {
+	@AuthorizeReturnObject
+    Optional<User> findByName(String name) {
+		// ...
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class UserRepository {
+    @AuthorizeReturnObject
+    fun findByName(name:String?): Optional<User?>? {
+        // ...
+    }
+}
+----
+======
+
+然后，从 `findById` 返回的任何 `User` 都将像其他 Spring Security 保护的组件一样受到保护：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Autowired
+UserRepository users;
+
+@Test
+void getEmailWhenProxiedThenAuthorizes() {
+    Optional<User> securedUser = users.findByName("name");
+    assertThatExceptionOfType(AccessDeniedException.class).isThrownBy(() -> securedUser.get().getEmail());
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+
+import jdk.incubator.vector.VectorOperators.Test
+import java.nio.file.AccessDeniedException
+import java.util.*
+
+@Autowired
+var users:UserRepository? = null
+
+@Test
+fun getEmailWhenProxiedThenAuthorizes() {
+    val securedUser: Optional<User> = users.findByName("name")
+    assertThatExceptionOfType(AccessDeniedException::class.java).isThrownBy{securedUser.get().getEmail()}
+}
+----
+======
+
+=== 在类级别使用 `@AuthorizeReturnObject`
+
+`@AuthorizeReturnObject` 可以放在类级别。但请注意，这意味着 Spring Security 将尝试代理任何返回对象，包括 ``String``、``Integer`` 和其他类型。
+这通常不是您想要的。
+
+如果您想在方法返回值类型的类或接口上使用 `@AuthorizeReturnObject`，比如 `int`、`String`、`Double` 或这些类型的集合，那么您还应该发布适当的 `AuthorizationAdvisorProxyFactory.TargetVisitor`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+static Customizer<AuthorizationAdvisorProxyFactory> skipValueTypes() {
+    return (factory) -> factory.setTargetVisitor(TargetVisitor.defaultsSkipValueTypes());
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+open fun skipValueTypes() = Customizer<AuthorizationAdvisorProxyFactory> {
+    it.setTargetVisitor(TargetVisitor.defaultsSkipValueTypes())
+}
+----
+======
+
+[TIP]
+====
+您可以设置自己的 `AuthorizationAdvisorProxyFactory.TargetVisitor` 来自定义任何类型集的代理
+====
+
+=== 编程方式代理
+
+您还可以编程方式代理给定对象。
+
+为此，您可以自动装配提供的 `AuthorizationProxyFactory` 实例，该实例基于您配置的方法安全拦截器。
+如果您使用 `@EnableMethodSecurity`，则默认情况下它将具有 `@PreAuthorize`、`@PostAuthorize`、`@PreFilter` 和 `@PostFilter` 的拦截器。
+
+您可以通过以下方式代理用户实例：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Autowired
+AuthorizationProxyFactory proxyFactory;
+
+@Test
+void getEmailWhenProxiedThenAuthorizes() {
+    User user = new User("name", "email");
+    assertThat(user.getEmail()).isNotNull();
+    User securedUser = proxyFactory.proxy(user);
+    assertThatExceptionOfType(AccessDeniedException.class).isThrownBy(securedUser::getEmail);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Autowired
+var proxyFactory:AuthorizationProxyFactory? = null
+
+@Test
+fun getEmailWhenProxiedThenAuthorizes() {
+    val user: User = User("name", "email")
+    assertThat(user.getEmail()).isNotNull()
+    val securedUser: User = proxyFactory.proxy(user)
+    assertThatExceptionOfType(AccessDeniedException::class.java).isThrownBy(securedUser::getEmail)
+}
+----
+======
+
+=== 手动构造
+
+如果您需要与 Spring Security 默认值不同的东西，也可以定义自己的实例。
+
+例如，如果您像这样定义一个 `AuthorizationProxyFactory` 实例：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import org.springframework.security.authorization.method.AuthorizationAdvisorProxyFactory.TargetVisitor;
+import static org.springframework.security.authorization.method.AuthorizationManagerBeforeMethodInterceptor.preAuthorize;
+// ...
+
+AuthorizationProxyFactory proxyFactory = AuthorizationAdvisorProxyFactory.withDefaults();
+// and if needing to skip value types
+proxyFactory.setTargetVisitor(TargetVisitor.defaultsSkipValueTypes());
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.authorization.method.AuthorizationAdvisorProxyFactory.TargetVisitor;
+import org.springframework.security.authorization.method.AuthorizationManagerBeforeMethodInterceptor.preAuthorize
+
+// ...
+
+val proxyFactory: AuthorizationProxyFactory = AuthorizationProxyFactory(preAuthorize())
+// and if needing to skip value types
+proxyFactory.setTargetVisitor(TargetVisitor.defaultsSkipValueTypes())
+----
+======
+
+然后您可以按如下方式包装任何 `User` 实例：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Test
+void getEmailWhenProxiedThenAuthorizes() {
+	AuthorizationProxyFactory proxyFactory = AuthorizationAdvisorProxyFactory.withDefaults();
+    User user = new User("name", "email");
+    assertThat(user.getEmail()).isNotNull();
+    User securedUser = proxyFactory.proxy(user);
+    assertThatExceptionOfType(AccessDeniedException.class).isThrownBy(securedUser::getEmail);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Test
+fun getEmailWhenProxiedThenAuthorizes() {
+    val proxyFactory: AuthorizationProxyFactory = AuthorizationAdvisorProxyFactory.withDefaults()
+    val user: User = User("name", "email")
+    assertThat(user.getEmail()).isNotNull()
+    val securedUser: User = proxyFactory.proxy(user)
+    assertThatExceptionOfType(AccessDeniedException::class.java).isThrownBy(securedUser::getEmail)
+}
+----
+======
+
+[NOTE]
+====
+此功能尚不支持 Spring AOT
+====
+
+=== 代理集合
+
+`AuthorizationProxyFactory` 通过代理元素类型支持 Java 集合、流、数组、可选类型和迭代器，并通过代理值类型支持映射。
+
+这意味着当代理 `List` 对象时，以下内容也适用：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Test
+void getEmailWhenProxiedThenAuthorizes() {
+	AuthorizationProxyFactory proxyFactory = AuthorizationAdvisorProxyFactory.withDefaults();
+    List<User> users = List.of(ada, albert, marie);
+    List<User> securedUsers = proxyFactory.proxy(users);
+	securedUsers.forEach((securedUser) ->
+        assertThatExceptionOfType(AccessDeniedException.class).isThrownBy(securedUser::getEmail));
+}
+----
+======
+
+=== 代理类
+
+在有限的情况下，代理 `Class` 本身可能是有价值的，`AuthorizationProxyFactory` 也支持这一点。
+这大致相当于在 Spring Framework 的代理创建支持中调用 `ProxyFactory#getProxyClass`。
+
+一个方便的地方是当您需要提前构建代理类时，比如使用 Spring AOT。
+
+=== 支持所有方法安全注解
+
+`AuthorizationProxyFactory` 支持在您的应用程序中启用的任何方法安全注解。
+它基于作为 Bean 发布的任何 `AuthorizationAdvisor` 类。
+
+由于 `@EnableMethodSecurity` 默认发布 `@PreAuthorize`、`@PostAuthorize`、`@PreFilter` 和 `@PostFilter` 顾问，您通常不需要做任何事情来激活此功能。
+
+[NOTE]
+====
+使用 `returnObject` 或 `filterObject` 的 SpEL 表达式位于代理后面，因此可以完全访问对象。
+====
+
+[#custom_advice]
+=== 自定义建议
+
+如果您有其他安全建议也希望应用，可以像这样发布自己的 `AuthorizationAdvisor`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableMethodSecurity
+class SecurityConfig {
+    @Bean
+    static AuthorizationAdvisor myAuthorizationAdvisor() {
+        return new AuthorizationAdvisor();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@EnableMethodSecurity
+internal class SecurityConfig {
+    @Bean
+    fun myAuthorizationAdvisor(): AuthorizationAdvisor {
+        return AuthorizationAdvisor()
+    }
+]
+----
+======
+
+Spring Security 将把该顾问添加到 `AuthorizationProxyFactory` 在代理对象时添加的一组建议中。
+
+=== 与 Jackson 一起工作
+
+此功能的一个强大用途是从控制器返回一个安全值，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@RestController
+public class UserController {
+	@Autowired
+    AuthorizationProxyFactory proxyFactory;
+
+	@GetMapping
+    User currentUser(@AuthenticationPrincipal User user) {
+        return this.proxyFactory.proxy(user);
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@RestController
+class UserController  {
+    @Autowired
+    var proxyFactory: AuthorizationProxyFactory? = null
+
+    @GetMapping
+    fun currentUser(@AuthenticationPrincipal user:User?): User {
+        return proxyFactory.proxy(user)
+    }
+}
+----
+======
+
+但是，如果您使用 Jackson，这可能会导致序列化错误，如下所示：
+
+[source,bash]
+====
+com.fasterxml.jackson.databind.exc.InvalidDefinitionException: Direct self-reference leading to cycle
+====
+
+这是由于 Jackson 如何处理 CGLIB 代理。
+为了解决这个问题，请将以下注解添加到 `User` 类的顶部：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@JsonSerialize(as = User.class)
+public class User {
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@JsonSerialize(`as` = User::class)
+class User
+----
+======
+
+最后，您需要发布一个 <<custom_advice, 自定义拦截器>> 来捕获每个字段抛出的 `AccessDeniedException`，您可以这样做：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class AccessDeniedExceptionInterceptor implements AuthorizationAdvisor {
+    private final AuthorizationAdvisor advisor = AuthorizationManagerBeforeMethodInterceptor.preAuthorize();
+
+	@Override
+	public Object invoke(MethodInvocation invocation) throws Throwable {
+		try {
+			return invocation.proceed();
+		} catch (AccessDeniedException ex) {
+			return null;
+		}
+	}
+
+	@Override
+	public Pointcut getPointcut() {
+		return this.advisor.getPointcut();
+	}
+
+	@Override
+	public Advice getAdvice() {
+		return this;
+	}
+
+	@Override
+	public int getOrder() {
+		return this.advisor.getOrder() - 1;
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+class AccessDeniedExceptionInterceptor: AuthorizationAdvisor {
+    var advisor: AuthorizationAdvisor = AuthorizationManagerBeforeMethodInterceptor.preAuthorize()
+
+    @Throws(Throwable::class)
+    fun invoke(invocation: MethodInvocation): Any? {
+        return try  {
+            invocation.proceed()
+        } catch (ex:AccessDeniedException) {
+            null
+        }
+    }
+
+     val pointcut: Pointcut
+     get() = advisor.getPointcut()
+
+     val advice: Advice
+     get() = this
+
+     val order: Int
+     get() = advisor.getOrder() - 1
+}
+----
+======
+
+然后，您将根据用户的授权级别看到不同的 JSON 序列化。
+如果他们没有 `user:read` 权限，他们将看到：
+
+[source,json]
+----
+{
+    "name" : "name",
+    "email" : null
+}
+----
+
+如果他们有该权限，他们将看到：
+
+[source,json]
+----
+{
+    "name" : "name",
+    "email" : "email"
+}
+----
+
+[TIP]
+====
+您还可以添加 Spring Boot 属性 `spring.jackson.default-property-inclusion=non_null` 以排除空值，如果您也不希望向未经授权的用户透露 JSON 键。
+====
+
+[[fallback-values-authorization-denied]]
+== 授权被拒绝时提供回退值
+
+在某些场景中，您可能不希望在方法被调用且没有所需权限时抛出 `AuthorizationDeniedException`。
+相反，您可能希望返回一个后处理的结果，比如一个掩码结果，或者在调用方法之前发生授权拒绝时返回一个默认值。
+
+Spring Security 通过使用 {security-api-url}org/springframework/security/authorization/method/HandleAuthorizationDenied.html[`@HandleAuthorizationDenied`] 支持在方法调用时处理授权拒绝。
+该处理器适用于发生在 <<authorizing-with-annotations,`@PreAuthorize` 和 `@PostAuthorize` 注解>> 中的授权拒绝，以及方法调用本身抛出的 {security-api-url}org/springframework/security/authorization/AuthorizationDeniedException.html[`AuthorizationDeniedException`]。
+
+让我们考虑 <<authorize-object,前一节>> 的示例，但不再创建 `AccessDeniedExceptionInterceptor` 将 `AccessDeniedException` 转换为 `null` 返回值，而是使用 `@HandleAuthorizationDenied` 的 `handlerClass` 属性：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class NullMethodAuthorizationDeniedHandler implements MethodAuthorizationDeniedHandler { <1>
+
+    @Override
+    public Object handleDeniedInvocation(MethodInvocation methodInvocation, AuthorizationResult authorizationResult) {
+        return null;
+    }
+
+}
+
+@Configuration
+@EnableMethodSecurity
+public class SecurityConfig {
+
+    @Bean <2>
+    public NullMethodAuthorizationDeniedHandler nullMethodAuthorizationDeniedHandler() {
+        return new NullMethodAuthorizationDeniedHandler();
+    }
+
+}
+
+public class User {
+    // ...
+
+    @PreAuthorize(value = "hasAuthority('user:read')")
+    @HandleAuthorizationDenied(handlerClass = NullMethodAuthorizationDeniedHandler.class)
+    public String getEmail() {
+        return this.email;
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class NullMethodAuthorizationDeniedHandler : MethodAuthorizationDeniedHandler { <1>
+
+    override fun handleDeniedInvocation(methodInvocation: MethodInvocation, authorizationResult: AuthorizationResult): Any {
+        return null
+    }
+
+}
+
+@Configuration
+@EnableMethodSecurity
+class SecurityConfig {
+
+    @Bean <2>
+    fun nullMethodAuthorizationDeniedHandler(): NullMethodAuthorizationDeniedHandler {
+        return MaskMethodAuthorizationDeniedHandler()
+    }
+
+}
+
+class User (val name:String, @PreAuthorize(value = "hasAuthority('user:read')") @HandleAuthorizationDenied(handlerClass = NullMethodAuthorizationDeniedHandler::class) val email:String) <3>
+----
+======
+
+<1> 创建一个返回 `null` 值的 `MethodAuthorizationDeniedHandler` 实现
+<2> 将 `NullMethodAuthorizationDeniedHandler` 注册为 Bean
+<3> 使用 `@HandleAuthorizationDenied` 注解方法并将 `NullMethodAuthorizationDeniedHandler` 传递给 `handlerClass` 属性
+
+然后，您可以验证返回的是 `null` 值而不是 `AccessDeniedException`：
+
+[TIP]
+====
+您也可以使用 `@Component` 注解您的类，而不是创建 `@Bean` 方法
+====
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Autowired
+UserRepository users;
+
+@Test
+void getEmailWhenProxiedThenNullEmail() {
+    Optional<User> securedUser = users.findByName("name");
+    assertThat(securedUser.get().getEmail()).isNull();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Autowired
+var users:UserRepository? = null
+
+@Test
+fun getEmailWhenProxiedThenNullEmail() {
+    val securedUser: Optional<User> = users.findByName("name")
+    assertThat(securedUser.get().getEmail()).isNull()
+}
+----
+======
+
+=== 使用方法调用的拒绝结果
+
+在某些场景中，您可能希望返回一个从拒绝结果派生的安全结果。
+例如，如果用户未被授权查看电子邮件地址，您可能希望对原始电子邮件地址应用一些掩码，即 _useremail@example.com_ 将变为 _use\\******@example.com_。
+
+对于这些场景，您可以覆盖 `MethodAuthorizationDeniedHandler` 的 `handleDeniedInvocationResult`，该方法将 {security-api-url}org/springframework/security/authorization/method/MethodInvocationResult.html[`MethodInvocationResult`] 作为参数。
+让我们继续前面的示例，但不是返回 `null`，而是返回电子邮件的掩码值：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class EmailMaskingMethodAuthorizationDeniedHandler implements MethodAuthorizationDeniedHandler { <1>
+
+    @Override
+    public Object handleDeniedInvocation(MethodInvocation methodInvocation, AuthorizationResult authorizationResult) {
+        return "***";
+    }
+
+    @Override
+    public Object handleDeniedInvocationResult(MethodInvocationResult methodInvocationResult, AuthorizationResult authorizationResult) {
+        String email = (String) methodInvocationResult.getResult();
+        return email.replaceAll("(^[^@]{3}|(?!^)\\G)[^@]", "$1*");
+    }
+
+}
+
+@Configuration
+@EnableMethodSecurity
+public class SecurityConfig {
+
+    @Bean <2>
+    public EmailMaskingMethodAuthorizationDeniedHandler emailMaskingMethodAuthorizationDeniedHandler() {
+        return new EmailMaskingMethodAuthorizationDeniedHandler();
+    }
+
+}
+
+public class User {
+    // ...
+
+    @PostAuthorize(value = "hasAuthority('user:read')")
+    @HandleAuthorizationDenied(handlerClass = EmailMaskingMethodAuthorizationDeniedHandler.class)
+    public String getEmail() {
+        return this.email;
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class EmailMaskingMethodAuthorizationDeniedHandler : MethodAuthorizationDeniedHandler {
+
+    override fun handleDeniedInvocation(methodInvocation: MethodInvocation, authorizationResult: AuthorizationResult): Any {
+        return "***"
+    }
+
+    override fun handleDeniedInvocationResult(methodInvocationResult: MethodInvocationResult, authorizationResult: AuthorizationResult): Any {
+        val email = methodInvocationResult.result as String
+        return email.replace("(^[^@]{3}|(?!^)\\G)[^@]".toRegex(), "$1*")
+    }
+
+}
+
+@Configuration
+@EnableMethodSecurity
+class SecurityConfig {
+
+    @Bean
+    fun emailMaskingMethodAuthorizationDeniedHandler(): EmailMaskingMethodAuthorizationDeniedHandler {
+        return EmailMaskingMethodAuthorizationDeniedHandler()
+    }
+
+}
+
+class User (val name:String, @PostAuthorize(value = "hasAuthority('user:read')") @HandleAuthorizationDenied(handlerClass = EmailMaskingMethodAuthorizationDeniedHandler::class) val email:String) <3>
+----
+======
+
+<1> 创建一个返回未经授权结果值的掩码值的 `MethodAuthorizationDeniedHandler` 实现
+<2> 将 `EmailMaskingMethodAuthorizationDeniedHandler` 注册为 Bean
+<3> 使用 `@HandleAuthorizationDenied` 注解方法并将 `EmailMaskingMethodAuthorizationDeniedHandler` 传递给 `handlerClass` 属性
+
+然后，您可以验证返回的是掩码电子邮件而不是 `AccessDeniedException`：
+
+[WARNING]
+====
+由于您可以访问原始的拒绝值，请确保正确处理它并且不要将其返回给调用者。
+====
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Autowired
+UserRepository users;
+
+@Test
+void getEmailWhenProxiedThenMaskedEmail() {
+    Optional<User> securedUser = users.findByName("name");
+    // email is useremail@example.com
+    assertThat(securedUser.get().getEmail()).isEqualTo("use******@example.com");
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Autowired
+var users:UserRepository? = null
+
+@Test
+fun getEmailWhenProxiedThenMaskedEmail() {
+    val securedUser: Optional<User> = users.findByName("name")
+    // email is useremail@example.com
+    assertThat(securedUser.get().getEmail()).isEqualTo("use******@example.com")
+}
+----
+======
+
+在实现 `MethodAuthorizationDeniedHandler` 时，您有几个返回类型的选择：
+
+- 一个 `null` 值。
+- 一个非空值，尊重方法的返回类型。
+- 抛出一个异常，通常是 `AuthorizationDeniedException` 的实例。这是默认行为。
+- 一个 `Mono` 类型用于响应式应用程序。
+
+请注意，由于处理程序必须在您的应用程序上下文中注册为 Bean，如果需要更复杂的逻辑，您可以将依赖项注入其中。
+除此之外，您还可以使用 `MethodInvocation` 或 `MethodInvocationResult` 以及 `AuthorizationResult` 获取更多与授权决策相关的详细信息。
+
+[[deciding-return-based-parameters]]
+=== 根据可用参数决定返回什么
+
+考虑一个可能存在多种掩码值的场景，如果我们必须为每个方法创建一个处理程序，效率可能不高，尽管这样做完全可以。
+在这种情况下，我们可以使用通过参数传递的信息来决定做什么。
+例如，我们可以创建一个自定义的 `@Mask` 注解和一个检测该注解以决定返回什么掩码值的处理程序：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+import org.springframework.core.annotation.AnnotationUtils;
+
+@Target({ ElementType.METHOD, ElementType.TYPE })
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Mask {
+
+    String value();
+
+}
+
+public class MaskAnnotationDeniedHandler implements MethodAuthorizationDeniedHandler {
+
+    @Override
+    public Object handleDeniedInvocation(MethodInvocation methodInvocation, AuthorizationResult authorizationResult) {
+        Mask mask = AnnotationUtils.getAnnotation(methodInvocation.getMethod(), Mask.class);
+        return mask.value();
+    }
+
+}
+
+@Configuration
+@EnableMethodSecurity
+public class SecurityConfig {
+
+    @Bean
+    public MaskAnnotationDeniedHandler maskAnnotationDeniedHandler() {
+        return new MaskAnnotationDeniedHandler();
+    }
+
+}
+
+@Component
+public class MyService {
+
+    @PreAuthorize(value = "hasAuthority('user:read')")
+    @HandleAuthorizationDenied(handlerClass = MaskAnnotationDeniedHandler.class)
+    @Mask("***")
+    public String foo() {
+        return "foo";
+    }
+
+    @PreAuthorize(value = "hasAuthority('user:read')")
+    @HandleAuthorizationDenied(handlerClass = MaskAnnotationDeniedHandler.class)
+    @Mask("???")
+    public String bar() {
+        return "bar";
+    }
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.core.annotation.AnnotationUtils
+
+@Target(AnnotationTarget.FUNCTION, AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Mask(val value: String)
+
+class MaskAnnotationDeniedHandler : MethodAuthorizationDeniedHandler {
+
+    override fun handleDeniedInvocation(methodInvocation: MethodInvocation, authorizationResult: AuthorizationResult): Any {
+        val mask = AnnotationUtils.getAnnotation(methodInvocation.method, Mask::class.java)
+        return mask.value
+    }
+
+}
+
+@Configuration
+@EnableMethodSecurity
+class SecurityConfig {
+
+    @Bean
+    fun maskAnnotationDeniedHandler(): MaskAnnotationDeniedHandler {
+        return MaskAnnotationDeniedHandler()
+    }
+
+}
+
+@Component
+class MyService {
+
+    @PreAuthorize(value = "hasAuthority('user:read')")
+    @HandleAuthorizationDenied(handlerClass = MaskAnnotationDeniedHandler::class)
+    @Mask("***")
+    fun foo(): String {
+        return "foo"
+    }
+
+    @PreAuthorize(value = "hasAuthority('user:read')")
+    @HandleAuthorizationDenied(handlerClass = MaskAnnotationDeniedHandler::class)
+    @Mask("???")
+    fun bar(): String {
+        return "bar"
+    }
+
+}
+----
+======
+
+现在，当访问被拒绝时，返回值将基于 `@Mask` 注解决定：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Autowired
+MyService myService;
+
+@Test
+void fooWhenDeniedThenReturnStars() {
+    String value = this.myService.foo();
+    assertThat(value).isEqualTo("***");
+}
+
+@Test
+void barWhenDeniedThenReturnQuestionMarks() {
+    String value = this.myService.foo();
+    assertThat(value).isEqualTo("???");
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Autowired
+var myService: MyService
+
+@Test
+fun fooWhenDeniedThenReturnStars() {
+    val value: String = myService.foo()
+    assertThat(value).isEqualTo("***")
+}
+
+@Test
+fun barWhenDeniedThenReturnQuestionMarks() {
+    val value: String = myService.foo()
+    assertThat(value).isEqualTo("???")
+}
+----
+======
+
+=== 与元注解支持结合
+
+您还可以将 `@HandleAuthorizationDenied` 与其他注解结合，以减少和简化方法中的注解。
+让我们考虑 <<deciding-return-based-parameters,前一节的示例>> 并将 `@HandleAuthorizationDenied` 与 `@Mask` 合并：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Target({ ElementType.METHOD, ElementType.TYPE })
+@Retention(RetentionPolicy.RUNTIME)
+@HandleAuthorizationDenied(handlerClass = MaskAnnotationDeniedHandler.class)
+public @interface Mask {
+
+    String value();
+
+}
+
+@Mask("***")
+public String myMethod() {
+    // ...
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Target(AnnotationTarget.FUNCTION, AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+@HandleAuthorizationDenied(handlerClass = MaskAnnotationDeniedHandler::class)
+annotation class Mask(val value: String)
+
+@Mask("***")
+fun myMethod(): String {
+    // ...
+}
+----
+======
+
+现在，当您的方法需要掩码行为时，您不必记住同时添加这两个注解。
+请务必阅读 <<meta-annotations,元注解支持>> 部分以获取更多使用详情。
+
+[[migration-enableglobalmethodsecurity]]
+== 从 `@EnableGlobalMethodSecurity` 迁移
+
+如果您正在使用 `@EnableGlobalMethodSecurity`，则应迁移到 `@EnableMethodSecurity`。
+
+[[servlet-replace-globalmethodsecurity-with-methodsecurity]]
+=== 将 xref:servlet/authorization/method-security.adoc#jc-enable-global-method-security[全局方法安全] 替换为 xref:servlet/authorization/method-security.adoc#jc-enable-method-security[方法安全]
+
+{security-api-url}org/springframework/security/config/annotation/method/configuration/EnableGlobalMethodSecurity.html[`@EnableGlobalMethodSecurity`] 和 xref:servlet/appendix/namespace/method-security.adoc#nsa-global-method-security[`<global-method-security>`] 已弃用，取而代之的是 {security-api-url}org/springframework/security/config/annotation/method/configuration/EnableMethodSecurity.html[`@EnableMethodSecurity`] 和 xref:servlet/appendix/namespace/method-security.adoc#nsa-method-security[`<method-security>`]。
+新注解和 XML 元素默认激活 Spring 的 xref:servlet/authorization/method-security.adoc#jc-enable-method-security[预后注解]，并在内部使用 `AuthorizationManager`。
+
+这意味着以下两个列表在功能上是等效的：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableGlobalMethodSecurity(prePostEnabled = true)
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@EnableGlobalMethodSecurity(prePostEnabled = true)
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<global-method-security pre-post-enabled="true"/>
+----
+======
+
+和：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableMethodSecurity
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@EnableMethodSecurity
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<method-security/>
+----
+======
+
+对于不使用预后注解的应用程序，请确保将其关闭以避免激活不需要的行为。
+
+例如，像这样的列表：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableGlobalMethodSecurity(securedEnabled = true)
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@EnableGlobalMethodSecurity(securedEnabled = true)
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<global-method-security secured-enabled="true"/>
+----
+======
+
+应更改为：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@EnableMethodSecurity(securedEnabled = true, prePostEnabled = false)
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@EnableMethodSecurity(securedEnabled = true, prePostEnabled = false)
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<method-security secured-enabled="true" pre-post-enabled="false"/>
+----
+======
+
+=== 使用自定义 `@Bean` 而不是子类化 `DefaultMethodSecurityExpressionHandler`
+
+作为一种性能优化，`MethodSecurityExpressionHandler` 引入了一个新方法，该方法接受 `Supplier<Authentication>` 而不是 `Authentication`。
+
+这允许 Spring Security 延迟查找 `Authentication`，并且当您使用 `@EnableMethodSecurity` 而不是 `@EnableGlobalMethodSecurity` 时会自动利用这一点。
+
+然而，假设您的代码扩展了 `DefaultMethodSecurityExpressionHandler` 并重写了 `createSecurityExpressionRoot(Authentication, MethodInvocation)` 以返回自定义的 `SecurityExpressionRoot` 实例。
+这将不再起作用，因为 `@EnableMethodSecurity` 设置的安排调用了 `createEvaluationContext(Supplier<Authentication>, MethodInvocation)` 而不是。
+
+幸运的是，这种级别的定制通常没有必要。
+相反，您可以创建一个具有所需授权方法的自定义 Bean。
+
+例如，假设您想要自定义评估 `@PostAuthorize("hasAuthority('ADMIN')")`。
+您可以创建一个像这样的自定义 `@Bean`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+class MyAuthorizer {
+	boolean isAdmin(MethodSecurityExpressionOperations root) {
+		boolean decision = root.hasAuthority("ADMIN");
+		// custom work ...
+        return decision;
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class MyAuthorizer {
+	fun isAdmin(val root: MethodSecurityExpressionOperations): boolean {
+		val decision = root.hasAuthority("ADMIN");
+		// custom work ...
+        return decision;
+	}
+}
+----
+======
+
+然后在注解中像这样引用它：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@PreAuthorize("@authz.isAdmin(#root)")
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@PreAuthorize("@authz.isAdmin(#root)")
+----
+======
+
+[[subclass-defaultmethodsecurityexpressionhandler]]
+==== 我仍然更喜欢子类化 `DefaultMethodSecurityExpressionHandler`
+
+如果您必须继续子类化 `DefaultMethodSecurityExpressionHandler`，您仍然可以这样做。
+相反，像这样重写 `createEvaluationContext(Supplier<Authentication>, MethodInvocation)` 方法：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+class MyExpressionHandler extends DefaultMethodSecurityExpressionHandler {
+    @Override
+    public EvaluationContext createEvaluationContext(Supplier<Authentication> authentication, MethodInvocation mi) {
+		StandardEvaluationContext context = (StandardEvaluationContext) super.createEvaluationContext(authentication, mi);
+        MethodSecurityExpressionOperations delegate = (MethodSecurityExpressionOperations) context.getRootObject().getValue();
+        MySecurityExpressionRoot root = new MySecurityExpressionRoot(delegate);
+        context.setRootObject(root);
+        return context;
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+class MyExpressionHandler: DefaultMethodSecurityExpressionHandler {
+    override fun createEvaluationContext(val authentication: Supplier<Authentication>,
+        val mi: MethodInvocation): EvaluationContext {
+		val context = super.createEvaluationContext(authentication, mi) as StandardEvaluationContext
+        val delegate = context.getRootObject().getValue() as MethodSecurityExpressionOperations
+        val root = MySecurityExpressionRoot(delegate)
+        context.setRootObject(root)
+        return context
+    }
+}
+----
+======
+
+== 进一步阅读
+
+现在您已经保护了应用程序的请求，请 xref:servlet/authorization/authorize-http-requests.adoc[保护其请求]（如果尚未完成）。
+您还可以进一步阅读 xref:servlet/test/index.adoc[测试您的应用程序] 或集成 Spring Security 与其他应用程序方面，如 xref:servlet/integrations/data.adoc[数据层] 或 xref:servlet/integrations/observability.adoc[跟踪和指标]。

@@ -1,0 +1,21 @@
+[[servlet-authentication-daoauthenticationprovider]]
+= DaoAuthenticationProvider
+:figures: servlet/authentication/unpwd
+
+{security-api-url}org/springframework/security/authentication/dao/DaoAuthenticationProvider.html[`DaoAuthenticationProvider`] 是一个 xref:servlet/authentication/architecture.adoc#servlet-authentication-authenticationprovider[`AuthenticationProvider`] 的实现，它使用 xref:servlet/authentication/passwords/user-details-service.adoc#servlet-authentication-userdetailsservice[`UserDetailsService`] 和 xref:servlet/authentication/passwords/password-encoder.adoc#servlet-authentication-password-storage[`PasswordEncoder`] 来验证用户名和密码。
+
+本节将介绍 `DaoAuthenticationProvider` 在 Spring Security 中的工作原理。下图说明了在 xref:servlet/authentication/passwords/index.adoc#servlet-authentication-unpwd-input[读取用户名与密码] 章节中提到的 xref:servlet/authentication/architecture.adoc#servlet-authentication-authenticationmanager[`AuthenticationManager`] 的工作流程。
+
+.`DaoAuthenticationProvider` 的使用
+[.invert-dark]
+image::{figures}/daoauthenticationprovider.png[]
+
+image:{icondir}/number_1.png[] 来自 xref:servlet/authentication/passwords/index.adoc#servlet-authentication-unpwd-input[读取用户名与密码] 章节的身份验证 `Filter` 将一个 `UsernamePasswordAuthenticationToken` 传递给 `AuthenticationManager`，而该管理器由 xref:servlet/authentication/architecture.adoc#servlet-authentication-providermanager[`ProviderManager`] 实现。
+
+image:{icondir}/number_2.png[] `ProviderManager` 被配置为使用类型为 `DaoAuthenticationProvider` 的 xref:servlet/authentication/architecture.adoc#servlet-authentication-authenticationprovider[AuthenticationProvider]。
+
+image:{icondir}/number_3.png[] `DaoAuthenticationProvider` 通过 `UserDetailsService` 查找 `UserDetails`。
+
+image:{icondir}/number_4.png[] `DaoAuthenticationProvider` 使用 xref:servlet/authentication/passwords/password-encoder.adoc#servlet-authentication-password-storage[`PasswordEncoder`] 验证上一步返回的 `UserDetails` 中的密码。
+
+image:{icondir}/number_5.png[] 当认证成功时，返回的 xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[`Authentication`] 对象为 `UsernamePasswordAuthenticationToken` 类型，并且其主体（principal）是已配置的 `UserDetailsService` 返回的 `UserDetails`。最终，认证 `Filter` 会将返回的 `UsernamePasswordAuthenticationToken` 设置到 xref:servlet/authentication/architecture.adoc#servlet-authentication-securitycontextholder[`SecurityContextHolder`] 中。

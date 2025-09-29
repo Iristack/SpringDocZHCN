@@ -1,0 +1,50 @@
+[[jackson]]
+= Jackson 支持
+
+Spring Security 为持久化 Spring Security 相关类提供了对 Jackson 的支持。  
+这可以提升在使用分布式会话（例如：会话复制、Spring Session 等）时，序列化 Spring Security 相关类的性能。
+
+要使用该功能，请将 `SecurityJackson2Modules.getModules(ClassLoader)` 获取到的模块注册到 `ObjectMapper`（来自 https://github.com/FasterXML/jackson-databind[jackson-databind]）中：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+ObjectMapper mapper = new ObjectMapper();
+ClassLoader loader = getClass().getClassLoader();
+List<Module> modules = SecurityJackson2Modules.getModules(loader);
+mapper.registerModules(modules);
+
+// ... 正常使用 ObjectMapper ...
+SecurityContext context = new SecurityContextImpl();
+// ...
+String json = mapper.writeValueAsString(context);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val mapper = ObjectMapper()
+val loader = javaClass.classLoader
+val modules: MutableList<Module> = SecurityJackson2Modules.getModules(loader)
+mapper.registerModules(modules)
+
+// ... 正常使用 ObjectMapper ...
+val context: SecurityContext = SecurityContextImpl()
+// ...
+val json: String = mapper.writeValueAsString(context)
+----
+======
+
+[NOTE]
+====
+以下 Spring Security 模块提供了对 Jackson 的支持：
+
+- spring-security-core (`CoreJackson2Module`)
+- spring-security-web (`WebJackson2Module`, `WebServletJackson2Module`, `WebServerJackson2Module`)
+- xref:servlet/oauth2/client/index.adoc#oauth2client[ spring-security-oauth2-client] (`OAuth2ClientJackson2Module`)
+- spring-security-cas (`CasJackson2Module`)
+====

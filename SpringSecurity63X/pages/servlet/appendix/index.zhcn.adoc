@@ -1,0 +1,8 @@
+= 附录
+
+这是基于 Servlet 的 Spring Security 的附录内容，  
+包含以下章节：
+
+* xref:servlet/appendix/database-schema.adoc[数据库模式]
+* xref:servlet/appendix/namespace/index.adoc[XML 命名空间]
+* xref:servlet/appendix/faq.adoc[常见问题解答]

@@ -1,0 +1,568 @@
+= 核心配置
+
+[[webflux-oauth2-login-sample]]
+== Spring Boot 示例
+
+Spring Boot 为 OAuth 2.0 登录提供了完整的自动配置功能。
+
+本节介绍如何使用 _Google_ 作为 _认证提供者_ 配置 {gh-samples-url}/boot/oauth2login-webflux[*OAuth 2.0 登录 WebFlux 示例*]，内容涵盖以下主题：
+
+* <<webflux-oauth2-login-sample-setup>>
+* <<webflux-oauth2-login-sample-redirect>>
+* <<webflux-oauth2-login-sample-config>>
+* <<webflux-oauth2-login-sample-start>>
+
+
+[[webflux-oauth2-login-sample-setup]]
+=== 初始设置
+
+若要使用 Google 的 OAuth 2.0 认证系统进行登录，您必须在 Google API 控制台中创建一个项目，以获取 OAuth 2.0 凭据。
+
+[NOTE]
+====
+https://developers.google.com/identity/protocols/OpenIDConnect[Google 的 OAuth 2.0 实现] 符合 https://openid.net/connect/[OpenID Connect 1.0] 规范，并已通过 https://openid.net/certification/[OpenID 认证]。
+====
+
+请按照 https://developers.google.com/identity/protocols/OpenIDConnect[OpenID Connect] 页面上的说明操作，从 "`Setting up OAuth 2.0`"（设置 OAuth 2.0）部分开始。
+
+完成"`获取 OAuth 2.0 凭据`"的步骤后，您将获得一个新的 OAuth 客户端，其凭据包括客户端 ID 和客户端密钥。
+
+
+[[webflux-oauth2-login-sample-redirect]]
+=== 设置重定向 URI
+
+重定向 URI 是应用程序中的路径，当最终用户通过 Google 身份验证并在同意页面上授予对 OAuth 客户端（<<webflux-oauth2-login-sample-setup,上一步中创建的>>）的访问权限后，用户的用户代理会被重定向回该路径。
+
+在"`设置重定向 URI`"子章节中，请确保 *授权重定向 URI* 字段设置为 `http://localhost:8080/login/oauth2/code/google`。
+
+[TIP]
+====
+默认的重定向 URI 模板是 `+{baseUrl}/login/oauth2/code/{registrationId}+`。
+*_registrationId_* 是 xref:reactive/oauth2/client/core.adoc#oauth2Client-client-registration[ClientRegistration] 的唯一标识符。
+在本示例中，`registrationId` 为 `google`。
+====
+
+[IMPORTANT]
+====
+如果 OAuth 客户端运行在代理服务器之后，建议查阅 xref:features/exploits/http.adoc#http-proxy-server[代理服务器配置]，以确保应用正确配置。
+此外，请参阅支持的 xref:reactive/oauth2/client/authorization-grants.adoc#oauth2Client-auth-code-redirect-uri[ `URI` 模板变量] 了解 `redirect-uri` 的用法。
+====
+
+[[webflux-oauth2-login-sample-config]]
+=== 配置 `application.yml`
+
+现在您已经拥有了与 Google 关联的新 OAuth 客户端，需要配置应用程序以使用该客户端执行 _认证流程_。为此，请执行以下操作：
+
+. 打开 `application.yml` 文件并设置如下配置：
++
+.OAuth 客户端属性
+====
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:	<1>
+          google:	<2>
+            client-id: google-client-id
+            client-secret: google-client-secret
+----
+
+<1> `spring.security.oauth2.client.registration` 是 OAuth 客户端属性的基础前缀。
+<2> 基础属性前缀后的部分是 xref:reactive/oauth2/client/core.adoc#oauth2Client-client-registration[`ClientRegistration`] 的 ID，例如 `google`。
+====
+
+. 将 `client-id` 和 `client-secret` 属性的值替换为您之前创建的 OAuth 2.0 凭据。
+
+
+[[webflux-oauth2-login-sample-start]]
+=== 启动应用程序
+
+启动 Spring Boot 示例并访问 `http://localhost:8080`。
+您将被重定向到默认的 _自动生成_ 登录页面，该页面显示一个指向 Google 的链接。
+
+点击 Google 链接后，您将被重定向至 Google 进行身份验证。
+
+使用您的 Google 账户凭据完成身份验证后，接下来会显示“同意”页面，询问您是否允许或拒绝访问之前创建的 OAuth 客户端。
+点击 *允许*，授权 OAuth 客户端访问您的电子邮件地址和基本个人资料信息。
+
+此时，OAuth 客户端会从 https://openid.net/specs/openid-connect-core-1_0.html#UserInfo[UserInfo 端点] 获取您的电子邮件地址和基本个人资料信息，并建立一个已认证的会话。
+
+
+[[oauth2login-boot-property-mappings]]
+== Spring Boot 属性映射
+
+下表列出了 Spring Boot OAuth 客户端属性与 xref:reactive/oauth2/client/core.adoc#oauth2Client-client-registration[ClientRegistration] 属性之间的映射关系。
+
+|===
+|Spring Boot |ClientRegistration
+
+|`spring.security.oauth2.client.registration._[registrationId]_`
+|`registrationId`
+
+|`spring.security.oauth2.client.registration._[registrationId]_.client-id`
+|`clientId`
+
+|`spring.security.oauth2.client.registration._[registrationId]_.client-secret`
+|`clientSecret`
+
+|`spring.security.oauth2.client.registration._[registrationId]_.client-authentication-method`
+|`clientAuthenticationMethod`
+
+|`spring.security.oauth2.client.registration._[registrationId]_.authorization-grant-type`
+|`authorizationGrantType`
+
+|`spring.security.oauth2.client.registration._[registrationId]_.redirect-uri`
+|`redirectUri`
+
+|`spring.security.oauth2.client.registration._[registrationId]_.scope`
+|`scopes`
+
+|`spring.security.oauth2.client.registration._[registrationId]_.client-name`
+|`clientName`
+
+|`spring.security.oauth2.client.provider._[providerId]_.authorization-uri`
+|`providerDetails.authorizationUri`
+
+|`spring.security.oauth2.client.provider._[providerId]_.token-uri`
+|`providerDetails.tokenUri`
+
+|`spring.security.oauth2.client.provider._[providerId]_.jwk-set-uri`
+|`providerDetails.jwkSetUri`
+
+|`spring.security.oauth2.client.provider._[providerId]_.issuer-uri`
+|`providerDetails.issuerUri`
+
+|`spring.security.oauth2.client.provider._[providerId]_.user-info-uri`
+|`providerDetails.userInfoEndpoint.uri`
+
+|`spring.security.oauth2.client.provider._[providerId]_.user-info-authentication-method`
+|`providerDetails.userInfoEndpoint.authenticationMethod`
+
+|`spring.security.oauth2.client.provider._[providerId]_.user-name-attribute`
+|`providerDetails.userInfoEndpoint.userNameAttributeName`
+|===
+
+[TIP]
+可以通过指定 `spring.security.oauth2.client.provider._[providerId]_.issuer-uri` 属性，利用 OpenID Connect 提供者的 https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfig[配置端点] 或授权服务器的 https://tools.ietf.org/html/rfc8414#section-3[元数据端点] 发现机制来初始化配置 `ClientRegistration`。
+
+
+[[webflux-oauth2-login-common-oauth2-provider]]
+== CommonOAuth2Provider
+
+`CommonOAuth2Provider` 为一些知名提供商（如 Google、GitHub、Facebook 和 Okta）预定义了一组默认的客户端属性。
+
+例如，对于某个提供商而言，`authorization-uri`、`token-uri` 和 `user-info-uri` 通常很少变动，因此提供默认值可以减少所需配置量。
+
+正如前面所演示的，在我们 <<webflux-oauth2-login-sample-config,配置 Google 客户端>> 时，仅需提供 `client-id` 和 `client-secret` 属性即可。
+
+以下是一个示例：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: google-client-id
+            client-secret: google-client-secret
+----
+
+[TIP]
+此处客户端属性的自动默认化之所以能无缝工作，是因为 `registrationId`（`google`）与 `CommonOAuth2Provider` 中的 `GOOGLE` 枚举值匹配（不区分大小写）。
+
+如果您希望指定不同的 `registrationId`，比如 `google-login`，仍然可以通过配置 `provider` 属性来利用客户端属性的自动默认化功能。
+
+以下是一个示例：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          google-login:	<1>
+            provider: google	<2>
+            client-id: google-client-id
+            client-secret: google-client-secret
+----
+<1> `registrationId` 设置为 `google-login`。
+<2> `provider` 属性设置为 `google`，这将利用 `CommonOAuth2Provider.GOOGLE.getBuilder()` 中设定的客户端属性自动默认值。
+
+
+[[webflux-oauth2-login-custom-provider-properties]]
+== 配置自定义提供商属性
+
+某些 OAuth 2.0 提供商支持多租户架构，这意味着每个租户（或子域）都有各自的协议端点。
+
+例如，注册于 Okta 的 OAuth 客户端会被分配到特定的子域，并拥有自己的协议端点。
+
+在这种情况下，Spring Boot 提供了以下基础属性用于配置自定义提供商属性：`spring.security.oauth2.client.provider._[providerId]_`。
+
+以下是一个示例：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-secret: okta-client-secret
+        provider:
+          okta:	<1>
+            authorization-uri: https://your-subdomain.oktapreview.com/oauth2/v1/authorize
+            token-uri: https://your-subdomain.oktapreview.com/oauth2/v1/token
+            user-info-uri: https://your-subdomain.oktapreview.com/oauth2/v1/userinfo
+            user-name-attribute: sub
+            jwk-set-uri: https://your-subdomain.oktapreview.com/oauth2/v1/keys
+----
+
+<1> 基础属性 (`spring.security.oauth2.client.provider.okta`) 允许对协议端点位置进行自定义配置。
+
+
+[[webflux-oauth2-login-override-boot-autoconfig]]
+== 覆盖 Spring Boot 自动配置
+
+支持 OAuth 客户端的 Spring Boot 自动配置类是 `ReactiveOAuth2ClientAutoConfiguration`。
+
+它执行以下任务：
+
+* 注册一个由配置的 OAuth 客户端属性构成的 `ClientRegistration`(s) 组成的 `ReactiveClientRegistrationRepository` `@Bean`。
+* 注册一个 `SecurityWebFilterChain` `@Bean` 并通过 `serverHttpSecurity.oauth2Login()` 启用 OAuth 2.0 登录。
+
+如果需要根据具体需求覆盖自动配置，可以通过以下方式实现：
+
+* <<webflux-oauth2-login-register-reactiveclientregistrationrepository-bean,注册 ReactiveClientRegistrationRepository @Bean>>
+* <<webflux-oauth2-login-register-securitywebfilterchain-bean,注册 SecurityWebFilterChain @Bean>>
+* <<webflux-oauth2-login-completely-override-autoconfiguration,完全覆盖自动配置>
+
+
+[[webflux-oauth2-login-register-reactiveclientregistrationrepository-bean]]
+=== 注册 ReactiveClientRegistrationRepository @Bean
+
+以下示例展示了如何注册一个 `ReactiveClientRegistrationRepository` `@Bean`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary",attrs="-attributes"]
+----
+@Configuration
+public class OAuth2LoginConfig {
+
+	@Bean
+	public ReactiveClientRegistrationRepository clientRegistrationRepository() {
+		return new InMemoryReactiveClientRegistrationRepository(this.googleClientRegistration());
+	}
+
+	private ClientRegistration googleClientRegistration() {
+		return ClientRegistration.withRegistrationId("google")
+				.clientId("google-client-id")
+				.clientSecret("google-client-secret")
+				.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+				.authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+				.redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+				.scope("openid", "profile", "email", "address", "phone")
+				.authorizationUri("https://accounts.google.com/o/oauth2/v2/auth")
+				.tokenUri("https://www.googleapis.com/oauth2/v4/token")
+				.userInfoUri("https://www.googleapis.com/oauth2/v3/userinfo")
+				.userNameAttributeName(IdTokenClaimNames.SUB)
+				.jwkSetUri("https://www.googleapis.com/oauth2/v3/certs")
+				.clientName("Google")
+				.build();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary",attrs="-attributes"]
+----
+@Configuration
+class OAuth2LoginConfig {
+
+    @Bean
+    fun clientRegistrationRepository(): ReactiveClientRegistrationRepository {
+        return InMemoryReactiveClientRegistrationRepository(googleClientRegistration())
+    }
+
+    private fun googleClientRegistration(): ClientRegistration {
+        return ClientRegistration.withRegistrationId("google")
+                .clientId("google-client-id")
+                .clientSecret("google-client-secret")
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+                .scope("openid", "profile", "email", "address", "phone")
+                .authorizationUri("https://accounts.google.com/o/oauth2/v2/auth")
+                .tokenUri("https://www.googleapis.com/oauth2/v4/token")
+                .userInfoUri("https://www.googleapis.com/oauth2/v3/userinfo")
+                .userNameAttributeName(IdTokenClaimNames.SUB)
+                .jwkSetUri("https://www.googleapis.com/oauth2/v3/certs")
+                .clientName("Google")
+                .build()
+    }
+}
+----
+======
+
+
+[[webflux-oauth2-login-register-securitywebfilterchain-bean]]
+=== 注册 SecurityWebFilterChain @Bean
+
+以下示例展示了如何使用 `@EnableWebFluxSecurity` 注册一个 `SecurityWebFilterChain` `@Bean`，并通过 `serverHttpSecurity.oauth2Login()` 启用 OAuth 2.0 登录：
+
+.OAuth2 登录配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+public class OAuth2LoginSecurityConfig {
+
+	@Bean
+	public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
+		http
+			.authorizeExchange(authorize -> authorize
+				.anyExchange().authenticated()
+			)
+			.oauth2Login(withDefaults());
+
+		return http.build();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+class OAuth2LoginSecurityConfig {
+
+    @Bean
+    fun securityWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+        http {
+            authorizeExchange {
+                authorize(anyExchange, authenticated)
+            }
+            oauth2Login { }
+        }
+
+        return http.build()
+    }
+}
+----
+======
+
+
+[[webflux-oauth2-login-completely-override-autoconfiguration]]
+=== 完全覆盖自动配置
+
+以下示例展示了如何通过注册 `ReactiveClientRegistrationRepository` `@Bean` 和 `SecurityWebFilterChain` `@Bean` 来完全覆盖自动配置。
+
+.覆盖自动配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary",attrs="-attributes"]
+----
+@Configuration
+@EnableWebFluxSecurity
+public class OAuth2LoginConfig {
+
+	@Bean
+	public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
+		http
+			.authorizeExchange(authorize -> authorize
+				.anyExchange().authenticated()
+			)
+			.oauth2Login(withDefaults());
+
+		return http.build();
+	}
+
+	@Bean
+	public ReactiveClientRegistrationRepository clientRegistrationRepository() {
+		return new InMemoryReactiveClientRegistrationRepository(this.googleClientRegistration());
+	}
+
+	private ClientRegistration googleClientRegistration() {
+		return ClientRegistration.withRegistrationId("google")
+				.clientId("google-client-id")
+				.clientSecret("google-client-secret")
+				.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+				.authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+				.redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+				.scope("openid", "profile", "email", "address", "phone")
+				.authorizationUri("https://accounts.google.com/o/oauth2/v2/auth")
+				.tokenUri("https://www.googleapis.com/oauth2/v4/token")
+				.userInfoUri("https://www.googleapis.com/oauth2/v3/userinfo")
+				.userNameAttributeName(IdTokenClaimNames.SUB)
+				.jwkSetUri("https://www.googleapis.com/oauth2/v3/certs")
+				.clientName("Google")
+				.build();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary",attrs="-attributes"]
+----
+@Configuration
+@EnableWebFluxSecurity
+class OAuth2LoginConfig {
+
+    @Bean
+    fun securityWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+        http {
+            authorizeExchange {
+                authorize(anyExchange, authenticated)
+            }
+            oauth2Login { }
+        }
+
+        return http.build()
+    }
+
+    @Bean
+    fun clientRegistrationRepository(): ReactiveClientRegistrationRepository {
+        return InMemoryReactiveClientRegistrationRepository(googleClientRegistration())
+    }
+
+    private fun googleClientRegistration(): ClientRegistration {
+        return ClientRegistration.withRegistrationId("google")
+                .clientId("google-client-id")
+                .clientSecret("google-client-secret")
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+                .scope("openid", "profile", "email", "address", "phone")
+                .authorizationUri("https://accounts.google.com/o/oauth2/v2/auth")
+                .tokenUri("https://www.googleapis.com/oauth2/v4/token")
+                .userInfoUri("https://www.googleapis.com/oauth2/v3/userinfo")
+                .userNameAttributeName(IdTokenClaimNames.SUB)
+                .jwkSetUri("https://www.googleapis.com/oauth2/v3/certs")
+                .clientName("Google")
+                .build()
+    }
+}
+----
+======
+
+
+[[webflux-oauth2-login-javaconfig-wo-boot]]
+== 不使用 Spring Boot 的 Java 配置
+
+如果您无法使用 Spring Boot，但仍希望配置 `CommonOAuth2Provider` 中的一个预定义提供商（例如 Google），请使用以下配置：
+
+.OAuth2 登录配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+public class OAuth2LoginConfig {
+
+	@Bean
+	public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
+		http
+			.authorizeExchange(authorize -> authorize
+				.anyExchange().authenticated()
+			)
+			.oauth2Login(withDefaults());
+
+		return http.build();
+	}
+
+	@Bean
+	public ReactiveClientRegistrationRepository clientRegistrationRepository() {
+		return new InMemoryReactiveClientRegistrationRepository(this.googleClientRegistration());
+	}
+
+	@Bean
+	public ReactiveOAuth2AuthorizedClientService authorizedClientService(
+			ReactiveClientRegistrationRepository clientRegistrationRepository) {
+		return new InMemoryReactiveOAuth2AuthorizedClientService(clientRegistrationRepository);
+	}
+
+	@Bean
+	public ServerOAuth2AuthorizedClientRepository authorizedClientRepository(
+			ReactiveOAuth2AuthorizedClientService authorizedClientService) {
+		return new AuthenticatedPrincipalServerOAuth2AuthorizedClientRepository(authorizedClientService);
+	}
+
+	private ClientRegistration googleClientRegistration() {
+		return CommonOAuth2Provider.GOOGLE.getBuilder("google")
+				.clientId("google-client-id")
+				.clientSecret("google-client-secret")
+				.build();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebFluxSecurity
+class OAuth2LoginConfig {
+
+    @Bean
+    fun securityWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+        http {
+            authorizeExchange {
+                authorize(anyExchange, authenticated)
+            }
+            oauth2Login { }
+        }
+
+        return http.build()
+    }
+
+    @Bean
+    fun clientRegistrationRepository(): ReactiveClientRegistrationRepository {
+        return InMemoryReactiveClientRegistrationRepository(googleClientRegistration())
+    }
+
+    @Bean
+    fun authorizedClientService(
+        clientRegistrationRepository: ReactiveClientRegistrationRepository
+    ): ReactiveOAuth2AuthorizedClientService {
+        return InMemoryReactiveOAuth2AuthorizedClientService(clientRegistrationRepository)
+    }
+
+    @Bean
+    fun authorizedClientRepository(
+        authorizedClientService: ReactiveOAuth2AuthorizedClientService
+    ): ServerOAuth2AuthorizedClientRepository {
+        return AuthenticatedPrincipalServerOAuth2AuthorizedClientRepository(authorizedClientService)
+    }
+
+    private fun googleClientRegistration(): ClientRegistration {
+        return CommonOAuth2Provider.GOOGLE.getBuilder("google")
+                .clientId("google-client-id")
+                .clientSecret("google-client-secret")
+                .build()
+    }
+}
+----
+======

@@ -1,0 +1,69 @@
+[[test-mockmvc-csrf]]
+= 使用 CSRF 保护进行测试
+
+当测试任何非安全的 HTTP 方法并使用 Spring Security 的 CSRF 保护时，必须在请求中包含一个有效的 CSRF Token。  
+要将有效的 CSRF Token 作为请求参数指定，请使用 CSRF xref:servlet/test/mockmvc/request-post-processors.adoc[`RequestPostProcessor`]，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+mvc
+	.perform(post("/").with(csrf()))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+mvc.post("/") {
+    with(csrf())
+}
+----
+======
+
+你也可以选择将 CSRF Token 放在请求头中：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+mvc
+	.perform(post("/").with(csrf().asHeader()))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+mvc.post("/") {
+    with(csrf().asHeader())
+}
+----
+======
+
+你还可以通过以下方式测试提供无效的 CSRF Token：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+mvc
+	.perform(post("/").with(csrf().useInvalidToken()))
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+mvc.post("/") {
+    with(csrf().useInvalidToken())
+}
+----
+======

@@ -1,0 +1,463 @@
+[[jc]]
+= Java 配置
+
+自 Spring 3.1 版本起，Spring Framework 开始支持 https://docs.spring.io/spring/docs/3.1.x/spring-framework-reference/html/beans.html#beans-java[Java 配置]。  
+Spring Security 3.2 引入了 Java 配置方式，使用户能够在不使用任何 XML 的情况下配置 Spring Security。
+
+如果你熟悉 xref:servlet/configuration/xml-namespace.adoc#ns-config[安全命名空间配置]，你应该会发现它与 Spring Security 的 Java 配置之间有许多相似之处。
+
+[NOTE]
+====
+Spring Security 提供了 https://github.com/spring-projects/spring-security-samples/tree/main/servlet/java-configuration[大量示例应用]，用于演示如何使用 Spring Security 的 Java 配置。
+====
+
+[[jc-hello-wsca]]
+== Hello Web Security Java 配置
+
+第一步是创建我们的 Spring Security Java 配置。  
+该配置会创建一个名为 `springSecurityFilterChain` 的 Servlet 过滤器（Filter），负责处理应用程序中的所有安全功能（例如保护应用的 URL、验证提交的用户名和密码、重定向到登录表单等）。  
+以下是最基本的 Spring Security Java 配置示例：
+
+[source,java]
+----
+import org.springframework.beans.factory.annotation.Autowired;
+
+import org.springframework.context.annotation.*;
+import org.springframework.security.config.annotation.authentication.builders.*;
+import org.springframework.security.config.annotation.web.configuration.*;
+
+@Configuration
+@EnableWebSecurity
+public class WebSecurityConfig {
+
+	@Bean
+	public UserDetailsService userDetailsService() {
+		InMemoryUserDetailsManager manager = new InMemoryUserDetailsManager();
+		manager.createUser(User.withDefaultPasswordEncoder().username("user").password("password").roles("USER").build());
+		return manager;
+	}
+}
+----
+
+这个配置虽然简单，但实现了许多功能：
+
+* 要求对应用程序中每个 URL 进行身份认证
+* 自动生成一个登录表单
+* 允许用户名为 `user`、密码为 `password` 的用户通过基于表单的身份认证进行登录
+* 支持用户注销
+* 防止 https://en.wikipedia.org/wiki/Cross-site_request_forgery[CSRF 攻击]
+* 防止 https://en.wikipedia.org/wiki/Session_fixation[会话固定] 攻击
+* 安全头信息集成：
+** 对安全请求启用 https://en.wikipedia.org/wiki/HTTP_Strict_Transport_Security[HTTP 严格传输安全 (HSTS)]
+** 集成 https://msdn.microsoft.com/en-us/library/ie/gg622941(v=vs.85).aspx[X-Content-Type-Options]
+** 缓存控制（你可以在后续应用中覆盖此设置以允许静态资源缓存）
+** 集成 https://msdn.microsoft.com/en-us/library/dd565647(v=vs.85).aspx[X-XSS-Protection]
+** 集成 X-Frame-Options，帮助防止 https://en.wikipedia.org/wiki/Clickjacking[点击劫持]
+* 与以下 Servlet API 方法集成：
+** https://docs.oracle.com/javaee/6/api/javax/servlet/http/HttpServletRequest.html#getRemoteUser()[`HttpServletRequest#getRemoteUser()`]
+** https://docs.oracle.com/javaee/6/api/javax/servlet/http/HttpServletRequest.html#getUserPrincipal()[`HttpServletRequest#getUserPrincipal()`]
+** https://docs.oracle.com/javaee/6/api/javax/servlet/http/HttpServletRequest.html#isUserInRole(java.lang.String)[`HttpServletRequest#isUserInRole(java.lang.String)`]
+** https://docs.oracle.com/javaee/6/api/javax/servlet/http/HttpServletRequest.html#login(java.lang.String,%20java.lang.String)[`HttpServletRequest#login(java.lang.String, java.lang.String)`]
+** https://docs.oracle.com/javaee/6/api/javax/servlet/http/HttpServletRequest.html#logout()[`HttpServletRequest#logout()`]
+
+=== AbstractSecurityWebApplicationInitializer
+
+下一步是将 `springSecurityFilterChain` 注册到 WAR 文件中。  
+在 Servlet 3.0+ 环境下，你可以使用 https://docs.spring.io/spring/docs/3.2.x/spring-framework-reference/html/mvc.html#mvc-container-config[Spring 的 `WebApplicationInitializer` 支持] 来实现 Java 配置。  
+毫不奇怪，Spring Security 提供了一个基类 (`AbstractSecurityWebApplicationInitializer`)，以确保自动注册 `springSecurityFilterChain`。  
+我们使用 `AbstractSecurityWebApplicationInitializer` 的方式取决于是否已经在项目中使用了 Spring：
+
+* <<abstractsecuritywebapplicationinitializer-without-existing-spring>> - 如果你尚未使用 Spring，请参考这些说明
+* <<abstractsecuritywebapplicationinitializer-with-spring-mvc>> - 如果你已经在使用 Spring，请参考这些说明
+
+[[abstractsecuritywebapplicationinitializer-without-existing-spring]]
+=== 没有现有 Spring 的 AbstractSecurityWebApplicationInitializer
+
+如果你没有使用 Spring 或 Spring MVC，则需要将 `WebSecurityConfig` 传递给父类，以确保配置被正确加载：
+
+[source,java]
+----
+import org.springframework.security.web.context.*;
+
+public class SecurityWebApplicationInitializer
+	extends AbstractSecurityWebApplicationInitializer {
+
+	public SecurityWebApplicationInitializer() {
+		super(WebSecurityConfig.class);
+	}
+}
+----
+
+`SecurityWebApplicationInitializer` 执行以下操作：
+
+* 自动为应用程序中的每个 URL 注册 `springSecurityFilterChain` 过滤器。
+* 添加一个 `ContextLoaderListener`，用于加载 <<jc-hello-wsca,WebSecurityConfig>>。
+
+[[abstractsecuritywebapplicationinitializer-with-spring-mvc]]
+=== 带有 Spring MVC 的 AbstractSecurityWebApplicationInitializer
+
+如果我们在应用程序的其他部分已经使用了 Spring，则可能已经有了一个 `WebApplicationInitializer` 来加载 Spring 配置。  
+如果我们使用前面的配置，将会导致错误。  
+相反，我们应该将 Spring Security 注册到现有的 `ApplicationContext` 中。  
+例如，如果我们使用 Spring MVC，则 `SecurityWebApplicationInitializer` 可能如下所示：
+
+[source,java]
+----
+import org.springframework.security.web.context.*;
+
+public class SecurityWebApplicationInitializer
+	extends AbstractSecurityWebApplicationInitializer {
+
+}
+----
+
+这仅会为应用程序中的每个 URL 注册 `springSecurityFilterChain`。  
+之后，我们需要确保 `WebSecurityConfig` 已经在现有的 `ApplicationInitializer` 中被加载。  
+例如，如果我们使用 Spring MVC，它会在 `getServletConfigClasses()` 中添加：
+
+[[message-web-application-inititializer-java]]
+[source,java]
+----
+public class MvcWebApplicationInitializer extends
+		AbstractAnnotationConfigDispatcherServletInitializer {
+
+	@Override
+	protected Class<?>[] getServletConfigClasses() {
+		return new Class[] { WebSecurityConfig.class, WebMvcConfig.class };
+	}
+
+	// ... 其他重写方法 ...
+}
+----
+
+这样做的原因是：Spring Security 需要检查一些 Spring MVC 的配置，以便适当地配置 xref:servlet/authorization/authorize-http-requests.adoc#authorizing-endpoints[底层请求匹配器]，因此它们必须位于同一个应用上下文中。  
+如果将 Spring Security 放在 `getRootConfigClasses` 中，会导致其进入父级应用上下文，而该上下文可能无法找到 Spring MVC 的 `HandlerMappingIntrospector`。
+
+==== 配置多个 Spring MVC Dispatcher
+
+如有需要，任何与 Spring MVC 无关的 Spring Security 配置都可以放在另一个配置类中，如下所示：
+
+[source,java]
+----
+public class MvcWebApplicationInitializer extends
+		AbstractAnnotationConfigDispatcherServletInitializer {
+
+	@Override
+    protected Class<?>[] getRootConfigClasses() {
+		return new Class[] { NonWebSecurityConfig.class };
+    }
+
+	@Override
+	protected Class<?>[] getServletConfigClasses() {
+		return new Class[] { WebSecurityConfig.class, WebMvcConfig.class };
+	}
+
+	// ... 其他重写方法 ...
+}
+----
+
+当你有多个 `AbstractAnnotationConfigDispatcherServletInitializer` 实例，并且不想在这两个实例间重复通用安全配置时，这种做法非常有用。
+
+[[jc-httpsecurity]]
+== HttpSecurity
+
+到目前为止，我们的 <<jc-hello-wsca,`WebSecurityConfig`>> 仅包含有关如何认证用户的配置。  
+那么 Spring Security 是如何知道我们希望所有用户都必须经过身份验证？  
+又是如何知道我们要支持基于表单的认证？  
+实际上，有一个名为 `SecurityFilterChain` 的配置类在后台被调用。  
+它的默认实现如下所示：
+
+[source,java]
+----
+@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+	http
+		.authorizeHttpRequests(authorize -> authorize
+			.anyRequest().authenticated()
+		)
+		.formLogin(withDefaults())
+		.httpBasic(withDefaults());
+	return http.build();
+}
+----
+
+上述默认配置：
+
+* 确保对应用程序的任何请求都需要用户进行身份认证
+* 允许用户通过表单登录进行身份认证
+* 允许用户使用 HTTP Basic 认证方式进行身份认证
+
+注意，此配置相当于以下 XML 命名空间配置：
+
+[source,xml]
+----
+<http>
+	<intercept-url pattern="/**" access="authenticated"/>
+	<form-login />
+	<http-basic />
+</http>
+----
+
+== 多个 HttpSecurity 实例
+
+我们可以像在 XML 中配置多个 `<http>` 块一样，配置多个 `HttpSecurity` 实例。  
+关键是注册多个 `SecurityFilterChain` ``@Bean``。  
+下面的示例针对以 `/api/` 开头的 URL 使用不同的配置。
+
+[source,java]
+----
+@Configuration
+@EnableWebSecurity
+public class MultiHttpSecurityConfig {
+	@Bean                                                             <1>
+	public UserDetailsService userDetailsService() throws Exception {
+		// 确保密码被正确编码
+		UserBuilder users = User.withDefaultPasswordEncoder();
+		InMemoryUserDetailsManager manager = new InMemoryUserDetailsManager();
+		manager.createUser(users.username("user").password("password").roles("USER").build());
+		manager.createUser(users.username("admin").password("password").roles("USER","ADMIN").build());
+		return manager;
+	}
+
+	@Bean
+	@Order(1)                                                        <2>
+	public SecurityFilterChain apiFilterChain(HttpSecurity http) throws Exception {
+		http
+			.securityMatcher("/api/**")                              <3>
+			.authorizeHttpRequests(authorize -> authorize
+				.anyRequest().hasRole("ADMIN")
+			)
+			.httpBasic(withDefaults());
+		return http.build();
+	}
+
+	@Bean                                                            <4>
+	public SecurityFilterChain formLoginFilterChain(HttpSecurity http) throws Exception {
+		http
+			.authorizeHttpRequests(authorize -> authorize
+				.anyRequest().authenticated()
+			)
+			.formLogin(withDefaults());
+		return http.build();
+	}
+}
+----
+<1> 像平常一样配置认证机制。
+<2> 创建一个包含 `@Order` 的 `SecurityFilterChain` 实例，指定哪个 `SecurityFilterChain` 应该优先考虑。
+<3> `http.securityMatcher` 表明此 `HttpSecurity` 仅适用于以 `/api/` 开头的 URL。
+<4> 创建另一个 `SecurityFilterChain` 实例。  
+如果 URL 不以 `/api/` 开头，则使用此配置。  
+由于此配置的 `@Order` 值大于 `1`（未标注 `@Order` 默认为最后），所以它将在 `apiFilterChain` 之后被考虑。
+
+[[jc-custom-dsls]]
+== 自定义 DSL
+
+你可以在 Spring Security 中提供自己的自定义 DSL：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class MyCustomDsl extends AbstractHttpConfigurer<MyCustomDsl, HttpSecurity> {
+	private boolean flag;
+
+	@Override
+	public void init(HttpSecurity http) throws Exception {
+		// 任何添加其他配置器的方法
+		// 必须在 init 方法中完成
+		http.csrf().disable();
+	}
+
+	@Override
+	public void configure(HttpSecurity http) throws Exception {
+		ApplicationContext context = http.getSharedObject(ApplicationContext.class);
+
+		// 这里我们从 ApplicationContext 查找 Bean，也可以直接创建新实例。
+		MyFilter myFilter = context.getBean(MyFilter.class);
+		myFilter.setFlag(flag);
+		http.addFilterBefore(myFilter, UsernamePasswordAuthenticationFilter.class);
+	}
+
+	public MyCustomDsl flag(boolean value) {
+		this.flag = value;
+		return this;
+	}
+
+	public static MyCustomDsl customDsl() {
+		return new MyCustomDsl();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class MyCustomDsl : AbstractHttpConfigurer<MyCustomDsl, HttpSecurity>() {
+    var flag: Boolean = false
+
+    override fun init(http: HttpSecurity) {
+        // 任何添加其他配置器的方法
+        // 必须在 init 方法中完成
+        http.csrf().disable()
+    }
+
+    override fun configure(http: HttpSecurity) {
+        val context: ApplicationContext = http.getSharedObject(ApplicationContext::class.java)
+
+        // 这里我们从 ApplicationContext 查找 Bean，也可以直接创建新实例。
+        val myFilter: MyFilter = context.getBean(MyFilter::class.java)
+        myFilter.setFlag(flag)
+        http.addFilterBefore(myFilter, UsernamePasswordAuthenticationFilter::class.java)
+    }
+
+    companion object {
+        @JvmStatic
+        fun customDsl(): MyCustomDsl {
+            return MyCustomDsl()
+        }
+    }
+}
+----
+======
+
+[NOTE]
+====
+实际上，像 `HttpSecurity.authorizeHttpRequests()` 这样的方法就是以此方式实现的。
+====
+
+然后你可以使用这个自定义 DSL：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class Config {
+	@Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+		http
+			.with(MyCustomDsl.customDsl(), (dsl) -> dsl
+				.flag(true)
+			)
+			// ...
+		return http.build();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+class Config {
+
+    @Bean
+    fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        http
+            .with(MyCustomDsl.customDsl()) {
+                flag = true
+            }
+            // ...
+
+        return http.build()
+    }
+}
+----
+======
+
+代码执行顺序如下：
+
+* `Config.filterChain` 方法中的代码首先执行
+* 接着执行 `MyCustomDsl.init` 方法中的代码
+* 最后执行 `MyCustomDsl.configure` 方法中的代码
+
+此外，你可以通过 `SpringFactories` 让 `HttpSecurity` 默认添加你的 `MyCustomDsl`。  
+例如，你可以在类路径上创建一个名为 `META-INF/spring.factories` 的资源文件，内容如下：
+
+.META-INF/spring.factories
+[source]
+----
+org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer = sample.MyCustomDsl
+----
+
+你也可以显式地禁用默认行为：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class Config {
+	@Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+		http
+			.with(MyCustomDsl.customDsl(), (dsl) -> dsl
+				.disable()
+			)
+			...;
+		return http.build();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+class Config {
+
+    @Bean
+    fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        http
+            .with(MyCustomDsl.customDsl()) {
+                disable()
+            }
+            // ...
+        return http.build()
+    }
+
+}
+----
+======
+
+[[post-processing-configured-objects]]
+== 配置对象的后处理
+
+Spring Security 的 Java 配置并不会暴露其所配置对象的每一个属性。  
+这是为了简化大多数用户的配置工作。毕竟，如果每个属性都暴露出来，用户可以直接使用标准的 Bean 配置方式。
+
+尽管不直接暴露所有属性是有充分理由的，但用户仍可能需要更高级的配置选项。  
+为此，Spring Security 引入了 `ObjectPostProcessor` 的概念，可用于修改或替换 Java 配置创建的许多 `Object` 实例。  
+例如，若要设置 `FilterSecurityInterceptor` 上的 `filterSecurityPublishAuthorizationSuccess` 属性，可以使用以下代码：
+
+[source,java]
+----
+@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+	http
+		.authorizeHttpRequests(authorize -> authorize
+			.anyRequest().authenticated()
+			.withObjectPostProcessor(new ObjectPostProcessor<FilterSecurityInterceptor>() {
+				public <O extends FilterSecurityInterceptor> O postProcess(
+						O fsi) {
+					fsi.setPublishAuthorizationSuccess(true);
+					return fsi;
+				}
+			})
+		);
+	return http.build();
+}
+----

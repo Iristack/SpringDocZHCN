@@ -1,0 +1,525 @@
+[[servlet-authentication-unpwd]]
+= 用户名/密码认证
+:page-section-summary-toc: 1
+:figures: images/servlet/authentication/unpwd
+:icondir: images/icons
+
+对用户进行身份验证的最常见方式之一是通过验证用户名和密码。  
+Spring Security 对使用用户名和密码的身份验证提供了全面的支持。
+
+你可以通过以下方式配置用户名/密码认证：
+
+.简单的用户名/密码示例
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			.authorizeHttpRequests((authorize) -> authorize
+				.anyRequest().authenticated()
+			)
+			.httpBasic(Customizer.withDefaults())
+			.formLogin(Customizer.withDefaults());
+
+		return http.build();
+	}
+
+	@Bean
+	public UserDetailsService userDetailsService() {
+		UserDetails userDetails = User.withDefaultPasswordEncoder()
+			.username("user")
+			.password("password")
+			.roles("USER")
+			.build();
+
+		return new InMemoryUserDetailsManager(userDetails);
+	}
+
+}
+----
+
+XML::
++
+[source,xml,role="secondary"]
+----
+<http>
+	<intercept-url pattern="/**" access="authenticated"/>
+	<form-login />
+	<http-basic />
+
+	<user-service>
+		<user name="user"
+			password="{noop}password"
+			authorities="ROLE_USER" />
+	</user-service>
+</http>
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		http {
+			authorizeHttpRequests {
+				authorize(anyRequest, authenticated)
+			}
+			formLogin { }
+			httpBasic { }
+		}
+
+		return http.build()
+	}
+
+	@Bean
+	fun userDetailsService(): UserDetailsService {
+		val user = User.withDefaultPasswordEncoder()
+			.username("user")
+			.password("password")
+			.roles("USER")
+			.build()
+
+		return InMemoryUserDetailsManager(user)
+	}
+
+}
+----
+=====
+
+上述配置会自动注册一个 xref:servlet/authentication/passwords/in-memory.adoc[内存中的 `UserDetailsService`] 到 `SecurityFilterChain`，并为默认的 xref:servlet/authentication/architecture.adoc#servlet-authentication-authenticationmanager[`AuthenticationManager`] 注册 xref:servlet/authentication/passwords/dao-authentication-provider.adoc[`DaoAuthenticationProvider`]，同时启用 xref:servlet/authentication/passwords/form.adoc[表单登录] 和 xref:servlet/authentication/passwords/basic.adoc[HTTP Basic] 认证。
+
+要了解更多关于用户名/密码认证的信息，请考虑以下使用场景：
+
+* 我想 xref:servlet/authentication/passwords/form.adoc[了解表单登录的工作原理]
+* 我想 xref:servlet/authentication/passwords/basic.adoc[了解 HTTP Basic 认证的工作原理]
+* 我想 xref:servlet/authentication/passwords/dao-authentication-provider.adoc[了解 `DaoAuthenticationProvider` 的工作原理]
+* 我想 xref:servlet/authentication/passwords/in-memory.adoc[在内存中管理用户]
+* 我想 xref:servlet/authentication/passwords/jdbc.adoc[在数据库中管理用户]
+* 我想 xref:servlet/authentication/passwords/ldap.adoc#servlet-authentication-ldap-authentication[在 LDAP 中管理用户]
+* 我想 <<publish-authentication-manager-bean,发布一个 `AuthenticationManager` bean>> 用于自定义认证
+* 我想 <<customize-global-authentication-manager,自定义全局 `AuthenticationManager`>>
+
+[[publish-authentication-manager-bean]]
+== 发布 `AuthenticationManager` Bean
+
+一个常见的需求是发布一个 `AuthenticationManager` Bean，以便在诸如 `@Service` 或 Spring MVC 的 `@Controller` 中实现自定义认证。例如，你可能希望通过 REST API 而不是使用 xref:servlet/authentication/passwords/form.adoc[表单登录] 来对用户进行认证。
+
+你可以使用以下配置为自定义认证场景发布 `AuthenticationManager`：
+
+.为自定义认证发布 `AuthenticationManager` Bean
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			.authorizeHttpRequests((authorize) -> authorize
+				.requestMatchers("/login").permitAll()
+				.anyRequest().authenticated()
+			);
+
+		return http.build();
+	}
+
+	@Bean
+	public AuthenticationManager authenticationManager(
+			UserDetailsService userDetailsService,
+			PasswordEncoder passwordEncoder) {
+		DaoAuthenticationProvider authenticationProvider = new DaoAuthenticationProvider();
+		authenticationProvider.setUserDetailsService(userDetailsService);
+		authenticationProvider.setPasswordEncoder(passwordEncoder);
+
+		return new ProviderManager(authenticationProvider);
+	}
+
+	@Bean
+	public UserDetailsService userDetailsService() {
+		UserDetails userDetails = User.withDefaultPasswordEncoder()
+			.username("user")
+			.password("password")
+			.roles("USER")
+			.build();
+
+		return new InMemoryUserDetailsManager(userDetails);
+	}
+
+	@Bean
+	public PasswordEncoder passwordEncoder() {
+		return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+	}
+
+}
+----
+
+XML::
++
+[source,xml,role="secondary"]
+----
+<http>
+	<intercept-url pattern="/login" access="permitAll"/>
+	<intercept-url pattern="/**" access="authenticated"/>
+
+	<bean id="authenticationManager"
+			class="org.springframework.security.authentication.ProviderManager">
+		<constructor-arg>
+			<bean class="org.springframework.security.authentication.dao.DaoAuthenticationProvider">
+				<property name="userDetailsService" ref="userDetailsService" />
+				<property name="passwordEncoder" ref="passwordEncoder" />
+			</bean>
+		</constructor-arg>
+	</bean>
+
+	<user-service id="userDetailsService">
+		<user name="user"
+			password="{noop}password"
+			authorities="ROLE_USER" />
+	</user-service>
+
+	<bean id="passwordEncoder"
+			class="org.springframework.security.crypto.factory.PasswordEncoderFactories" factory-method="createDelegatingPasswordEncoder"/>
+</http>
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		http {
+			authorizeHttpRequests {
+				authorize("/login", permitAll)
+				authorize(anyRequest, authenticated)
+			}
+		}
+
+		return http.build()
+	}
+
+	@Bean
+	fun authenticationManager(
+			userDetailsService: UserDetailsService,
+			passwordEncoder: PasswordEncoder): AuthenticationManager {
+		val authenticationProvider = DaoAuthenticationProvider()
+		authenticationProvider.setUserDetailsService(userDetailsService)
+		authenticationProvider.setPasswordEncoder(passwordEncoder)
+
+		return ProviderManager(authenticationProvider)
+	}
+
+	@Bean
+	fun userDetailsService(): UserDetailsService {
+		val user = User.withDefaultPasswordEncoder()
+			.username("user")
+			.password("password")
+			.roles("USER")
+			.build()
+
+		return InMemoryUserDetailsManager(user)
+	}
+
+	@Bean
+	fun passwordEncoder(): PasswordEncoder {
+		return PasswordEncoderFactories.createDelegatingPasswordEncoder()
+	}
+
+}
+----
+=====
+
+有了上述配置后，你可以创建一个使用 `AuthenticationManager` 的 `@RestController`，如下所示：
+
+.创建用于认证的 `@RestController`
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@RestController
+public class LoginController {
+
+	private final AuthenticationManager authenticationManager;
+
+	public LoginController(AuthenticationManager authenticationManager) {
+		this.authenticationManager = authenticationManager;
+	}
+
+	@PostMapping("/login")
+	public ResponseEntity<Void> login(@RequestBody LoginRequest loginRequest) {
+		Authentication authenticationRequest =
+			UsernamePasswordAuthenticationToken.unauthenticated(loginRequest.username(), loginRequest.password());
+		Authentication authenticationResponse =
+			this.authenticationManager.authenticate(authenticationRequest);
+		// ...
+	}
+
+	public record LoginRequest(String username, String password) {
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@RestController
+class LoginController(val authenticationManager: AuthenticationManager) {
+
+	@PostMapping("/login")
+	fun login(@RequestBody loginRequest: LoginRequest): ResponseEntity<Void> {
+		val authenticationRequest =
+			UsernamePasswordAuthenticationToken.unauthenticated(
+				loginRequest.username, loginRequest.password)
+		val authenticationResponse =
+			authenticationManager.authenticate(authenticationRequest)
+		// ...
+	}
+
+	data class LoginRequest(val username: String, val password: String)
+
+}
+----
+=====
+
+[NOTE]
+====
+在此示例中，如果需要，你需要负责将已认证的用户保存到 `SecurityContextRepository` 中。
+例如，如果使用 `HttpSession` 在请求之间持久化 `SecurityContext`，你可以使用 xref:servlet/authentication/persistence.adoc#httpsecuritycontextrepository[`HttpSessionSecurityContextRepository`]。
+====
+ 
+[[customize-global-authentication-manager]]
+== 自定义 `AuthenticationManager`
+
+通常情况下，Spring Security 内部会构建一个由 `DaoAuthenticationProvider` 组成的 `AuthenticationManager`，用于处理用户名/密码认证。但在某些情况下，仍可能希望自定义 Spring Security 使用的 `AuthenticationManager` 实例。例如，你可能需要为缓存的用户简单地禁用 xref:servlet/authentication/architecture.adoc#servlet-authentication-providermanager-erasing-credentials[凭证擦除] 功能。
+
+为此，你可以利用这样一个事实：用于构建 Spring Security 全局 `AuthenticationManager` 的 `AuthenticationManagerBuilder` 会被作为 Bean 发布。你可以按如下方式配置该构建器：
+
+.配置全局 `AuthenticationManagerBuilder`
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		// ...
+		return http.build();
+	}
+
+	@Bean
+	public UserDetailsService userDetailsService() {
+		// 返回一个缓存用户的 UserDetailsService
+		// ...
+	}
+
+	@Autowired
+	public void configure(AuthenticationManagerBuilder builder) {
+		builder.eraseCredentials(false);
+	}
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		// ...
+		return http.build()
+	}
+
+	@Bean
+	fun userDetailsService(): UserDetailsService {
+		// 返回一个缓存用户的 UserDetailsService
+		// ...
+	}
+
+	@Autowired
+	fun configure(builder: AuthenticationManagerBuilder) {
+		builder.eraseCredentials(false)
+	}
+
+}
+----
+=====
+
+或者，你也可以配置一个局部的 `AuthenticationManager` 来覆盖全局的实例。
+
+.为 Spring Security 配置局部 `AuthenticationManager`
+[tabs]
+=====
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			.authorizeHttpRequests((authorize) -> authorize
+				.anyRequest().authenticated()
+			)
+			.httpBasic(Customizer.withDefaults())
+			.formLogin(Customizer.withDefaults())
+			.authenticationManager(authenticationManager());
+
+		return http.build();
+	}
+
+	private AuthenticationManager authenticationManager() {
+		DaoAuthenticationProvider authenticationProvider = new DaoAuthenticationProvider();
+		authenticationProvider.setUserDetailsService(userDetailsService());
+		authenticationProvider.setPasswordEncoder(passwordEncoder());
+
+		ProviderManager providerManager = new ProviderManager(authenticationProvider);
+		providerManager.setEraseCredentialsAfterAuthentication(false);
+
+		return providerManager;
+	}
+
+	private UserDetailsService userDetailsService() {
+		UserDetails userDetails = User.withDefaultPasswordEncoder()
+			.username("user")
+			.password("password")
+			.roles("USER")
+			.build();
+
+		return new InMemoryUserDetailsManager(userDetails);
+	}
+
+	private PasswordEncoder passwordEncoder() {
+		return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+	}
+
+}
+----
+
+XML::
++
+[source,xml,role="secondary"]
+----
+<http authentication-manager-ref="authenticationManager">
+	<intercept-url pattern="/**" access="authenticated"/>
+	<form-login />
+	<http-basic />
+
+	<bean id="authenticationManager"
+			class="org.springframework.security.authentication.ProviderManager">
+		<constructor-arg>
+			<bean class="org.springframework.security.authentication.dao.DaoAuthenticationProvider">
+				<property name="userDetailsService" ref="userDetailsService" />
+				<property name="passwordEncoder" ref="passwordEncoder" />
+			</bean>
+		</constructor-arg>
+	</bean>
+
+	<user-service id="userDetailsService">
+		<user name="user"
+			password="{noop}password"
+			authorities="ROLE_USER" />
+	</user-service>
+
+	<bean id="passwordEncoder"
+			class="org.springframework.security.crypto.factory.PasswordEncoderFactories" factory-method="createDelegatingPasswordEncoder"/>
+</http>
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+	@Bean
+	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+		http {
+			authorizeHttpRequests {
+				authorize(anyRequest, authenticated)
+			}
+			formLogin { }
+			httpBasic { }
+			authenticationManager = authenticationManager()
+		}
+
+		return http.build()
+	}
+
+	@Bean
+	fun authenticationManager(): AuthenticationManager {
+		val authenticationProvider = DaoAuthenticationProvider()
+		authenticationProvider.setUserDetailsService(userDetailsService())
+		authenticationProvider.setPasswordEncoder(passwordEncoder())
+
+		val providerManager = ProviderManager(authenticationProvider)
+		providerManager.eraseCredentialsAfterAuthentication = false
+
+		return providerManager
+	}
+
+	private fun userDetailsService(): UserDetailsService {
+		val user = User.withDefaultPasswordEncoder()
+			.username("user")
+			.password("password")
+			.roles("USER")
+			.build()
+
+		return InMemoryUserDetailsManager(user)
+	}
+
+	private fun passwordEncoder(): PasswordEncoder {
+		return PasswordEncoderFactories.createDelegatingPasswordEncoder()
+	}
+
+}
+----
+=====

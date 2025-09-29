@@ -1,0 +1,9 @@
+[[appendix-namespace]]
+= 安全命名空间
+:page-section-summary-toc: 1
+
+本附录提供了安全命名空间中可用元素的参考信息，以及这些元素所创建的基础 Bean 的相关说明（假设您已了解各个类及其协同工作的原理——更多详细信息可参阅项目 Javadoc 或本文档其他部分）。  
+如果您之前未使用过该命名空间，请先阅读关于命名空间配置的 xref:servlet/configuration/xml-namespace.adoc#ns-config[介绍章节]，因为本附录旨在补充其中的内容。  
+建议在基于该模式编辑配置时使用高质量的 XML 编辑器，这样可以提供有关可用元素和属性的上下文信息，并包含解释其用途的注释。  
+该命名空间采用 https://relaxng.org/[RELAX NG] Compact 格式编写，之后再转换为 XSD 模式。  
+如果您熟悉此格式，可以直接查看 https://raw.githubusercontent.com/spring-projects/spring-security/main/config/src/main/resources/org/springframework/security/config/spring-security-6.3.rnc[模式文件]。

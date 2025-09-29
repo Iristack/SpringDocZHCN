@@ -1,0 +1,306 @@
+[[new]]
+= Spring Security 6.3 中的新特性
+
+Spring Security 6.3 引入了许多新功能。  
+以下是本次发布的主要亮点，你也可以查看 https://github.com/spring-projects/spring-security/releases[发行说明] 获取每个功能和 Bug 修复的详细列表。
+
+== 被动 JDK 序列化支持
+
+在对 JDK 序列化的安全组件支持方面，Spring Security 历来较为激进，每个序列化版本仅支持一个 Spring Security 的小版本。  
+这意味着如果你使用了 JDK 序列化的安全组件，在升级到下一个 Spring Security 版本之前必须清除这些组件，否则将无法反序列化。
+
+现在 Spring Security 每六个月发布一次小版本，这使得上述限制成为一个显著的问题。  
+为了解决这个问题，Spring Security 现在像对待 JSON 序列化一样，对 JDK 序列化采用https://spring.io/blog/2024/01/19/spring-security-6-3-adds-passive-jdk-serialization-deserialization-for[被动支持模式]，从而实现更平滑的升级体验。
+
+== 授权功能
+
+在最近几个版本中，持续的主题之一是重构并改进 Spring Security 的授权子系统。  
+从最初用 `AuthorizationManager` 替代 `AccessDecisionManager` API，到现在我们已经能够添加多个令人期待的新功能。
+
+=== 注解参数 - https://github.com/spring-projects/spring-security/issues/14480[#14480]
+
+6.3 版本的第一个新功能是 https://github.com/spring-projects/spring-security/issues/14480[支持注解参数]。  
+考虑一下 Spring Security 对 xref:servlet/authorization/method-security.adoc#meta-annotations[元注解] 的支持，例如：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+@PreAuthorize("hasAuthority('SCOPE_message:read')")
+public @interface HasMessageRead {}
+----
+
+Kotlin::
++
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+@PreAuthorize("hasAuthority('SCOPE_message:read')")
+annotation class HasMessageRead
+----
+======
+
+在此次发布之前，这种写法只有在整个代码库中广泛使用时才真正有用。但现在，你可以 xref:servlet/authorization/method-security.adoc#_templating_meta_annotation_expressions[添加参数]，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+@PreAuthorize("hasAuthority('SCOPE_{scope}')")
+public @interface HasScope {
+	String scope();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+@PreAuthorize("hasAuthority('SCOPE_{scope}')")
+annotation class HasScope (val scope:String)
+----
+======
+
+这样就可以像下面这样使用：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@HasScope("message:read")
+public String method() { ... }
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@HasScope("message:read")
+fun method(): String { ... }
+----
+======
+
+并且可以在更多地方应用你的 SpEL 表达式。
+
+=== 安全返回值 - https://github.com/spring-projects/spring-security/issues/14596[#14596], https://github.com/spring-projects/spring-security/issues/14597[#14597]
+
+自 Spring Security 早期以来，你就可以使用 `@PreAuthorize` 和 `@PostAuthorize` 对 Spring Bean 进行 xref:servlet/authorization/method-security.adoc#use-preauthorize[注解]。  
+但控制器、服务和仓库并不是唯一需要保护的对象。例如，对于领域对象 `Order`，是否只有管理员才能调用其 `Order#getPayment` 方法？
+
+现在在 6.3 版本中，https://github.com/spring-projects/spring-security/issues/14597[你可以直接注解这些方法]。首先，像注解 Spring Bean 一样注解 `getPayment` 方法：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class Order {
+
+	@HasScope("payment:read")
+	Payment getPayment() { ... }
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class Order {
+
+	@HasScope("payment:read")
+	fun getPayment(): Payment { ... }
+
+}
+----
+======
+
+然后 xref:servlet/authorization/method-security.adoc#authorize-object[在 Spring Data 仓库上使用 `@AuthorizeReturnObject` 注解]，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public interface OrderRepository extends CrudRepository<Order, String> {
+
+	@AuthorizeReturnObject
+	Optional<Order> findOrderById(String id);
+
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+interface OrderRepository : CrudRepository<Order, String> {
+    @AuthorizeReturnObject
+    fun findOrderById(id: String?): Optional<Order?>?
+}
+----
+======
+
+此时，Spring Security 将通过 https://github.com/spring-projects/spring-security/issues/14596[代理 `Order` 实例] 来保护从 `findOrderById` 返回的任何 `Order` 对象。
+
+=== 错误处理 - https://github.com/spring-projects/spring-security/issues/14598[#14598], https://github.com/spring-projects/spring-security/issues/14600[#14600], https://github.com/spring-projects/spring-security/issues/14601[#14601]
+
+在此版本中，你还可以通过新的方法级安全注解 https://github.com/spring-projects/spring-security/issues/14601[拦截并处理方法级别的授权失败]。
+
+当你使用 xref:servlet/authorization/method-security.adoc#fallback-values-authorization-denied[`@HandleAuthorizationDenied` 注解] 方法时，例如：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+public class Payment {
+    @HandleAuthorizationDenied(handlerClass=Mask.class)
+    @PreAuthorize("hasAuthority('card:read')")
+    public String getCreditCardNumber() { ... }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class Payment {
+    @HandleAuthorizationDenied(handlerClass=Mask.class)
+    @PreAuthorize("hasAuthority('card:read')")
+    fun getCreditCardNumber(): String { ... }
+}
+----
+======
+
+并注册一个 `Mask` Bean：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class Mask implements MethodAuthorizationDeniedHandler {
+	@Override
+    public Object handleDeniedInvocation(MethodInvocation invocation, AuthorizationResult result) {
+		return "***";
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+class Mask : MethodAuthorizationDeniedHandler {
+    fun handleDeniedInvocation(invocation: MethodInvocation?, result: AuthorizationResult?): Any = "***"
+}
+----
+======
+
+那么任何未授权调用 `Payment#getCreditCardNumber` 都将返回 `\***` 而不是真实卡号。
+
+你可以在 https://github.com/spring-projects/spring-security-samples/tree/main/servlet/spring-boot/java/data[最新的 Spring Security Data 示例] 中看到这些功能协同工作的完整示例。
+
+== 密码泄露检查 - https://github.com/spring-projects/spring-security/issues/7395[#7395]
+
+如果你允许用户自定义密码，关键是要确保该密码尚未被泄露。  
+Spring Security 6.3 让这一点变得非常简单：只需 xref:features/authentication/password-storage.adoc#authentication-compromised-password-check[注册一个 `CompromisedPasswordChecker` Bean] 即可：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public CompromisedPasswordChecker compromisedPasswordChecker() {
+    return new HaveIBeenPwnedRestApiPasswordChecker();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun compromisedPasswordChecker(): CompromisedPasswordChecker = HaveIBeenPwnedRestApiPasswordChecker()
+----
+======
+
+== `spring-security-rsa` 正式成为 Spring Security 的一部分 - https://github.com/spring-projects/spring-security/issues/14202[#14202]
+
+自 2017 年以来，Spring Security 一直在持续推进一项长期计划，即将各种 Spring Security 扩展项目整合进主项目。  
+在 6.3 版本中，`spring-security-rsa` 成为最新加入的模块，这有助于团队长期维护并为其添加新功能。
+
+`spring-security-rsa` 提供了多个 https://github.com/spring-projects/spring-security/blob/main/crypto/src/main/java/org/springframework/security/crypto/encrypt/RsaSecretEncryptor.java[便捷的 `BytesEncryptor`] https://github.com/spring-projects/spring-security/blob/main/crypto/src/main/java/org/springframework/security/crypto/encrypt/RsaRawEncryptor.java[实现]，以及 https://github.com/spring-projects/spring-security/blob/main/crypto/src/main/java/org/springframework/security/crypto/encrypt/KeyStoreKeyFactory.java[简化操作 ``KeyStore`` 的 API]。
+
+== OAuth 2.0 Token Exchange 授权机制 - https://github.com/spring-projects/spring-security/issues/5199[#5199]
+
+Spring Security 中最受关注的 https://github.com/spring-projects/spring-security/issues/5199[OAuth 2.0 功能之一] 现已在 6.3 版本中实现，即支持 https://datatracker.ietf.org/doc/html/rfc8693#section-2[OAuth 2.0 Token Exchange 授权机制]。
+
+对于 xref:servlet/oauth2/client/authorization-grants.adoc#token-exchange-grant-access-token[配置为支持令牌交换的客户端]，你只需将 `TokenExchangeAuthorizedClientProvider` 添加到 `OAuth2AuthorizedClientManager` 中即可启用，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public OAuth2AuthorizedClientProvider tokenExchange() {
+	return new TokenExchangeOAuth2AuthorizedClientProvider();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun tokenExchange(): OAuth2AuthorizedClientProvider = TokenExchangeOAuth2AuthorizedClientProvider()
+----
+======
+
+然后像平常一样 xref:servlet/oauth2/client/authorized-clients.adoc#oauth2Client-registered-authorized-client[使用 `@RegisteredOAuth2AuthorizedClient` 注解] 来获取资源服务器所需的具有扩展权限的令牌。
+
+== 其他亮点
+
+- https://github.com/spring-projects/spring-security/pull/14655[gh-14655] - 新增 `DelegatingAuthenticationConverter`
+- https://github.com/spring-projects/spring-security/issues/6192[gh-6192] - 在 WebFlux 中添加并发会话控制（xref:reactive/authentication/concurrent-sessions-control.adoc[文档]）
+- https://github.com/spring-projects/spring-security/pull/14193[gh-14193] - 添加对 CAS Gateway 认证的支持
+- https://github.com/spring-projects/spring-security/issues/13259[gh-13259] - 自定义 UserInfo 调用时机
+- https://github.com/spring-projects/spring-security/pull/14168[gh-14168] - 在 OAuth2AuthorizationRequestRedirectFilter 中引入可自定义的 AuthorizationFailureHandler
+- https://github.com/spring-projects/spring-security/issues/14672[gh-14672] - 自定义从 OidcUserRequest 和 OidcUserInfo 映射 OidcUser 的方式
+- https://github.com/spring-projects/spring-security/issues/13763[gh-13763] - 简化响应式 OAuth2 客户端组件模型的配置
+- https://github.com/spring-projects/spring-security/issues/14758[gh-14758] - 更新响应式 OAuth2 文档首页示例（xref:reactive/oauth2/index.adoc[文档]）
+- https://github.com/spring-projects/spring-security/issues/10538[gh-10538] - 支持基于证书绑定的 JWT 访问令牌验证
+- https://github.com/spring-projects/spring-security/pull/14265[gh-14265] - 支持 UserInfo 响应中的嵌套用户名
+- https://github.com/spring-projects/spring-security/pull/14265[gh-14449] - 添加 `SecurityContext` 参数解析器
+- https://github.com/spring-projects/spring-security/issues/11440[gh-11440] - 简化禁用 `application/x-www-form-urlencoded` 编码客户端 ID 和密钥的方式（xref:servlet/oauth2/client/client-authentication.adoc#_authenticate_using_client_secret_basic[servlet 文档], xref:reactive/oauth2/client/client-authentication.adoc#_authenticate_using_client_secret_basic[响应式文档]）
+
+如需完整列表，请参阅以下版本的发行说明：
+https://github.com/spring-projects/spring-security/releases/tag/6.3.0-RC1[6.3.0-RC1],
+https://github.com/spring-projects/spring-security/releases/tag/6.3.0-M3[6.3.0-M3],
+https://github.com/spring-projects/spring-security/releases/tag/6.3.0-M2[6.3.0-M2],
+https://github.com/spring-projects/spring-security/releases/tag/6.3.0-M1[6.3.0-M1]。

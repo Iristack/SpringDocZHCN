@@ -1,0 +1,102 @@
+[[reactive-x509]]
+= 响应式 X.509 认证
+
+与 xref:servlet/authentication/x509.adoc#servlet-x509[Servlet X.509 认证] 类似，响应式 X.509 认证过滤器允许从客户端提供的证书中提取认证令牌。
+
+以下示例展示了响应式 X.509 安全配置：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
+	http
+		.x509(withDefaults())
+		.authorizeExchange(exchanges -> exchanges
+		    .anyExchange().permitAll()
+		);
+	return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun securityWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    return http {
+        x509 { }
+        authorizeExchange {
+            authorize(anyExchange, authenticated)
+        }
+    }
+}
+----
+======
+
+在上述配置中，当未提供 `principalExtractor` 或 `authenticationManager` 时，将使用默认实现。默认的主体提取器是 `SubjectDnX509PrincipalExtractor`，它从客户端提供的证书中提取 CN（通用名称）字段。默认的认证管理器是 `ReactivePreAuthenticatedAuthenticationManager`，它执行用户账户验证，检查是否存在由 `principalExtractor` 提取的用户名对应的账户，并确认该账户未被锁定、禁用或过期。
+
+以下示例演示如何覆盖这些默认设置：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
+	SubjectDnX509PrincipalExtractor principalExtractor =
+	        new SubjectDnX509PrincipalExtractor();
+
+	principalExtractor.setSubjectDnRegex("OU=(.*?)(?:,|$)");
+
+	ReactiveAuthenticationManager authenticationManager = authentication -> {
+		authentication.setAuthenticated("Trusted Org Unit".equals(authentication.getName()));
+		return Mono.just(authentication);
+	};
+
+	http
+		.x509(x509 -> x509
+		    .principalExtractor(principalExtractor)
+		    .authenticationManager(authenticationManager)
+		)
+		.authorizeExchange(exchanges -> exchanges
+		    .anyExchange().authenticated()
+		);
+	return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun securityWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain? {
+    val customPrincipalExtractor = SubjectDnX509PrincipalExtractor()
+    customPrincipalExtractor.setSubjectDnRegex("OU=(.*?)(?:,|$)")
+    val customAuthenticationManager = ReactiveAuthenticationManager { authentication: Authentication ->
+        authentication.isAuthenticated = "Trusted Org Unit" == authentication.name
+        Mono.just(authentication)
+    }
+    return http {
+        x509 {
+            principalExtractor = customPrincipalExtractor
+            authenticationManager = customAuthenticationManager
+        }
+        authorizeExchange {
+            authorize(anyExchange, authenticated)
+        }
+    }
+}
+----
+======
+
+在前面的示例中，用户名是从客户端证书的 OU 字段而非 CN 字段提取的，并且完全不通过 `ReactiveUserDetailsService` 查找用户账户。相反，如果提供的证书是颁发给名为 "`Trusted Org Unit`" 的组织单位（OU），则请求将被认证通过。
+
+有关配置 Netty 以及 `WebClient` 或 `curl` 命令行工具以使用双向 TLS 并启用 X.509 认证的示例，请参见：https://github.com/spring-projects/spring-security-samples/tree/main/servlet/java-configuration/authentication/x509。

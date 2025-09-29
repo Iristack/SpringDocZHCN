@@ -1,0 +1,1654 @@
+[[oauth2Client-auth-grant-support]]
+= 授权授予支持
+
+本节介绍 Spring Security 对授权授予的支持。
+
+[[oauth2Client-auth-code-grant]]
+== 授权码
+
+[NOTE]
+====
+有关授权码授予的更多详细信息，请参阅 https://tools.ietf.org/html/rfc6749#section-1.3.1[授权码] 授予的 OAuth 2.0 授权框架。
+====
+
+=== 获取授权
+
+[NOTE]
+====
+请参阅授权码授予的 https://tools.ietf.org/html/rfc6749#section-4.1.1[授权请求/响应] 协议流程。
+====
+
+
+
+=== 发起授权请求
+
+`OAuth2AuthorizationRequestRedirectFilter` 使用 `OAuth2AuthorizationRequestResolver` 解析一个 `OAuth2AuthorizationRequest`，并通过将最终用户的用户代理重定向到授权服务器的授权端点来启动授权码授予流程。
+
+`OAuth2AuthorizationRequestResolver` 的主要作用是从提供的 Web 请求中解析出 `OAuth2AuthorizationRequest`。默认实现 `DefaultOAuth2AuthorizationRequestResolver` 匹配（默认）路径 `+/oauth2/authorization/{registrationId}+`，提取 `registrationId`，并使用它为关联的 `ClientRegistration` 构建 `OAuth2AuthorizationRequest`。
+
+考虑以下用于 OAuth 2.0 客户端注册的 Spring Boot 属性：
+
+[source,yaml,attrs="-attributes"]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-secret: okta-client-secret
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/authorized/okta"
+            scope: read, write
+        provider:
+          okta:
+            authorization-uri: https://dev-1234.oktapreview.com/oauth2/v1/authorize
+            token-uri: https://dev-1234.oktapreview.com/oauth2/v1/token
+----
+
+根据上述属性，对基础路径 `/oauth2/authorization/okta` 的请求会触发 `OAuth2AuthorizationRequestRedirectFilter` 进行授权请求重定向，最终启动授权码授予流程。
+
+[NOTE]
+====
+`AuthorizationCodeOAuth2AuthorizedClientProvider` 是针对授权码授予的 `OAuth2AuthorizedClientProvider` 实现，
+它还通过 `OAuth2AuthorizationRequestRedirectFilter` 启动授权请求重定向。
+====
+
+如果 OAuth 2.0 客户端是 https://tools.ietf.org/html/rfc6749#section-2.1[公共客户端]，请按如下方式配置 OAuth 2.0 客户端注册：
+
+[source,yaml,attrs="-attributes"]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-authentication-method: none
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/authorized/okta"
+            ...
+----
+
+通过使用 https://tools.ietf.org/html/rfc7636[代码交换证明密钥] (PKCE) 来支持公共客户端。如果客户端在不受信任的环境中运行（例如原生应用程序或基于 Web 浏览器的应用程序），因此无法维护其凭据的机密性，则在满足以下条件时自动使用 PKCE：
+
+. `client-secret` 被省略（或为空）
+. `client-authentication-method` 设置为 `none` (`ClientAuthenticationMethod.NONE`)
+
+[TIP]
+如果 OAuth 2.0 提供者支持 https://tools.ietf.org/html/rfc6749#section-2.1[机密客户端] 的 PKCE，您可以选择使用 `DefaultOAuth2AuthorizationRequestResolver.setAuthorizationRequestCustomizer(OAuth2AuthorizationRequestCustomizers.withPkce())` 进行配置。
+
+[[oauth2Client-auth-code-redirect-uri]]
+`DefaultOAuth2AuthorizationRequestResolver` 还通过使用 `UriComponentsBuilder` 支持 `redirect-uri` 的 `URI` 模板变量。
+
+以下配置使用了所有受支持的 `URI` 模板变量：
+
+[source,yaml,attrs="-attributes"]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            ...
+            redirect-uri: "{baseScheme}://{baseHost}{basePort}{basePath}/authorized/{registrationId}"
+            ...
+----
+
+[NOTE]
+====
+`+{baseUrl}+` 解析为 `+{baseScheme}://{baseHost}{basePort}{basePath}+`
+====
+
+使用 `URI` 模板变量配置 `redirect-uri` 在 OAuth 2.0 客户端在 xref:features/exploits/http.adoc#http-proxy-server[代理服务器] 后面运行时特别有用。
+这样做可以确保在扩展 `redirect-uri` 时使用 `X-Forwarded-*` 头。
+
+=== 自定义授权请求
+
+`OAuth2AuthorizationRequestResolver` 可以实现的主要用例之一是能够在标准 OAuth 2.0 授权框架定义的标准参数之上自定义授权请求的附加参数。
+
+例如，OpenID Connect 定义了用于 https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest[授权码流程] 的额外 OAuth 2.0 请求参数，这些参数扩展了 https://tools.ietf.org/html/rfc6749#section-4.1.1[OAuth 2.0 授权框架] 中定义的标准参数。其中一个扩展参数是 `prompt` 参数。
+
+[NOTE]
+====
+`prompt` 参数是可选的。空格分隔、大小写敏感的 ASCII 字符串值列表，指定授权服务器是否提示最终用户重新认证和同意。定义的值有：`none`、`login`、`consent` 和 `select_account`。
+====
+
+以下示例展示了如何配置 `DefaultOAuth2AuthorizationRequestResolver`，使用 `Consumer<OAuth2AuthorizationRequest.Builder>` 通过包含请求参数 `prompt=consent` 来为 `oauth2Login()` 自定义授权请求。
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class OAuth2LoginSecurityConfig {
+
+	@Autowired
+	private ClientRegistrationRepository clientRegistrationRepository;
+
+	@Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+		http
+			.authorizeHttpRequests(authorize -> authorize
+				.anyRequest().authenticated()
+			)
+			.oauth2Login(oauth2 -> oauth2
+				.authorizationEndpoint(authorization -> authorization
+					.authorizationRequestResolver(
+						authorizationRequestResolver(this.clientRegistrationRepository)
+					)
+				)
+			);
+		return http.build();
+	}
+
+	private OAuth2AuthorizationRequestResolver authorizationRequestResolver(
+			ClientRegistrationRepository clientRegistrationRepository) {
+
+		DefaultOAuth2AuthorizationRequestResolver authorizationRequestResolver =
+				new DefaultOAuth2AuthorizationRequestResolver(
+						clientRegistrationRepository, "/oauth2/authorization");
+		authorizationRequestResolver.setAuthorizationRequestCustomizer(
+				authorizationRequestCustomizer());
+
+		return  authorizationRequestResolver;
+	}
+
+	private Consumer<OAuth2AuthorizationRequest.Builder> authorizationRequestCustomizer() {
+		return customizer -> customizer
+					.additionalParameters(params -> params.put("prompt", "consent"));
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+    @Autowired
+    private lateinit var customClientRegistrationRepository: ClientRegistrationRepository
+
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        http {
+            authorizeRequests {
+                authorize(anyRequest, authenticated)
+            }
+            oauth2Login {
+                authorizationEndpoint {
+                    authorizationRequestResolver = authorizationRequestResolver(customClientRegistrationRepository)
+                }
+            }
+        }
+        return http.build()
+    }
+
+    private fun authorizationRequestResolver(
+            clientRegistrationRepository: ClientRegistrationRepository?): OAuth2AuthorizationRequestResolver? {
+        val authorizationRequestResolver = DefaultOAuth2AuthorizationRequestResolver(
+                clientRegistrationRepository, "/oauth2/authorization")
+        authorizationRequestResolver.setAuthorizationRequestCustomizer(
+                authorizationRequestCustomizer())
+        return authorizationRequestResolver
+    }
+
+    private fun authorizationRequestCustomizer(): Consumer<OAuth2AuthorizationRequest.Builder> {
+        return Consumer { customizer ->
+            customizer
+                    .additionalParameters { params -> params["prompt"] = "consent" }
+        }
+    }
+}
+----
+======
+
+对于简单的用例，如果特定提供者的附加请求参数始终相同，可以直接在 `authorization-uri` 属性中添加。
+
+例如，如果请求参数 `prompt` 的值对于提供者 `okta` 始终为 `consent`，则可以按如下方式配置：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        provider:
+          okta:
+            authorization-uri: https://dev-1234.oktapreview.com/oauth2/v1/authorize?prompt=consent
+----
+
+上述示例显示了在标准参数之上添加自定义参数的常见用例。或者，如果你的需求更高级，可以通过覆盖 `OAuth2AuthorizationRequest.authorizationRequestUri` 属性来完全控制构建授权请求 URI。
+
+[TIP]
+====
+`OAuth2AuthorizationRequest.Builder.build()` 构造 `OAuth2AuthorizationRequest.authorizationRequestUri`，表示包含所有查询参数的授权请求 URI，使用 `application/x-www-form-urlencoded` 格式。
+====
+
+以下示例展示了前面示例中的 `authorizationRequestCustomizer()` 的变体，并覆盖了 `OAuth2AuthorizationRequest.authorizationRequestUri` 属性：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+private Consumer<OAuth2AuthorizationRequest.Builder> authorizationRequestCustomizer() {
+	return customizer -> customizer
+				.authorizationRequestUri(uriBuilder -> uriBuilder
+					.queryParam("prompt", "consent").build());
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+private fun authorizationRequestCustomizer(): Consumer<OAuth2AuthorizationRequest.Builder> {
+    return Consumer { customizer: OAuth2AuthorizationRequest.Builder ->
+        customizer
+                .authorizationRequestUri { uriBuilder: UriBuilder ->
+                    uriBuilder
+                            .queryParam("prompt", "consent").build()
+                }
+    }
+}
+----
+======
+
+
+=== 存储授权请求
+
+`AuthorizationRequestRepository` 负责从发起授权请求到接收授权响应（回调）期间 `OAuth2AuthorizationRequest` 的持久化。
+
+[TIP]
+====
+`OAuth2AuthorizationRequest` 用于关联和验证授权响应。
+====
+
+`AuthorizationRequestRepository` 的默认实现是 `HttpSessionOAuth2AuthorizationRequestRepository`，它将 `OAuth2AuthorizationRequest` 存储在 `HttpSession` 中。
+
+如果你有 `AuthorizationRequestRepository` 的自定义实现，可以按如下方式配置：
+
+.AuthorizationRequestRepository 配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class OAuth2ClientSecurityConfig {
+
+	@Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+		http
+			.oauth2Client(oauth2 -> oauth2
+				.authorizationCodeGrant(codeGrant -> codeGrant
+					.authorizationRequestRepository(this.authorizationRequestRepository())
+					...
+				)
+            .oauth2Login(oauth2 -> oauth2
+                .authorizationEndpoint(endpoint -> endpoint
+                    .authorizationRequestRepository(this.authorizationRequestRepository())
+                    ...
+                )
+            ).build();
+	}
+
+    @Bean
+    public AuthorizationRequestRepository<OAuth2AuthorizationRequest> authorizationRequestRepository() {
+        return new CustomOAuth2AuthorizationRequestRepository();
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+class OAuth2ClientSecurityConfig {
+
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        http {
+            oauth2Client {
+                authorizationCodeGrant {
+                    authorizationRequestRepository = authorizationRequestRepository()
+                }
+            }
+        }
+        return http.build()
+    }
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<http>
+	<oauth2-client>
+		<authorization-code-grant authorization-request-repository-ref="authorizationRequestRepository"/>
+	</oauth2-client>
+</http>
+----
+======
+
+=== 请求访问令牌
+
+[NOTE]
+====
+请参阅授权码授予的 https://tools.ietf.org/html/rfc6749#section-4.1.3[访问令牌请求/响应] 协议流程。
+====
+
+授权码授予的 `OAuth2AccessTokenResponseClient` 默认实现是 `DefaultAuthorizationCodeTokenResponseClient`，它使用 `RestOperations` 实例在授权服务器的令牌端点上交换授权码以获取访问令牌。
+
+`DefaultAuthorizationCodeTokenResponseClient` 具有灵活性，因为它允许你自定义令牌请求的预处理和/或令牌响应的后处理。
+
+
+=== 自定义访问令牌请求
+
+如果需要自定义令牌请求的预处理，可以为 `DefaultAuthorizationCodeTokenResponseClient.setRequestEntityConverter()` 提供自定义的 `Converter<OAuth2AuthorizationCodeGrantRequest, RequestEntity<?>>`。默认实现（`OAuth2AuthorizationCodeGrantRequestEntityConverter`）构建标准 https://tools.ietf.org/html/rfc6749#section-4.1.3[OAuth 2.0 访问令牌请求] 的 `RequestEntity` 表示。然而，提供自定义 `Converter` 可以让你扩展标准令牌请求并添加自定义参数。
+
+要仅自定义请求的参数，可以为 `OAuth2AuthorizationCodeGrantRequestEntityConverter.setParametersConverter()` 提供自定义的 `Converter<OAuth2AuthorizationCodeGrantRequest, MultiValueMap<String, String>>`，以完全覆盖随请求发送的参数。这通常比直接构造 `RequestEntity` 更简单。
+
+[TIP]
+====
+如果你只想添加额外的参数，可以为 `OAuth2AuthorizationCodeGrantRequestEntityConverter.addParametersConverter()` 提供自定义的 `Converter<OAuth2AuthorizationCodeGrantRequest, MultiValueMap<String, String>>`，它会构建一个聚合 `Converter`。
+====
+
+[IMPORTANT]
+====
+自定义 `Converter` 必须返回一个有效的 `RequestEntity` 表示，该表示是目标 OAuth 2.0 提供者理解的 OAuth 2.0 访问令牌请求。
+====
+
+=== 自定义访问令牌响应
+
+另一方面，如果需要自定义令牌响应的后处理，需要为 `DefaultAuthorizationCodeTokenResponseClient.setRestOperations()` 提供自定义配置的 `RestOperations`。默认的 `RestOperations` 配置如下：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val restTemplate = RestTemplate(listOf(
+        FormHttpMessageConverter(),
+        OAuth2AccessTokenResponseHttpMessageConverter()))
+
+restTemplate.errorHandler = OAuth2ErrorResponseErrorHandler()
+----
+======
+
+[TIP]
+====
+Spring MVC `FormHttpMessageConverter` 是必需的，因为发送 OAuth 2.0 访问令牌请求时会使用它。
+====
+
+`OAuth2AccessTokenResponseHttpMessageConverter` 是用于 OAuth 2.0 访问令牌响应的 `HttpMessageConverter`。你可以为 `OAuth2AccessTokenResponseHttpMessageConverter.setAccessTokenResponseConverter()` 提供自定义的 `Converter<Map<String, Object>, OAuth2AccessTokenResponse>`，用于将 OAuth 2.0 访问令牌响应参数转换为 `OAuth2AccessTokenResponse`。
+
+`OAuth2ErrorResponseErrorHandler` 是一个 `ResponseErrorHandler`，能够处理 OAuth 2.0 错误，例如 `400 Bad Request`。它使用 `OAuth2ErrorHttpMessageConverter` 将 OAuth 2.0 错误参数转换为 `OAuth2Error`。
+
+无论你是自定义 `DefaultAuthorizationCodeTokenResponseClient` 还是提供自己的 `OAuth2AccessTokenResponseClient` 实现，都需要按如下方式配置：
+
+.访问令牌响应配置
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class OAuth2ClientSecurityConfig {
+
+	@Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+		http
+			.oauth2Client(oauth2 -> oauth2
+				.authorizationCodeGrant(codeGrant -> codeGrant
+					.accessTokenResponseClient(this.accessTokenResponseClient())
+					...
+				)
+			);
+		return http.build();
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+class OAuth2ClientSecurityConfig {
+
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+        http {
+            oauth2Client {
+                authorizationCodeGrant {
+                    accessTokenResponseClient = accessTokenResponseClient()
+                }
+            }
+        }
+        return http.build()
+    }
+}
+----
+
+Xml::
++
+[source,xml,role="secondary"]
+----
+<http>
+	<oauth2-client>
+		<authorization-code-grant access-token-response-client-ref="accessTokenResponseClient"/>
+	</oauth2-client>
+</http>
+----
+======
+
+
+[[oauth2Client-refresh-token-grant]]
+== 刷新令牌
+
+[NOTE]
+====
+有关 https://tools.ietf.org/html/rfc6749#section-1.5[刷新令牌] 的更多详细信息，请参阅 OAuth 2.0 授权框架。
+====
+
+
+=== 刷新访问令牌
+
+[NOTE]
+====
+请参阅刷新令牌授予的 https://tools.ietf.org/html/rfc6749#section-6[访问令牌请求/响应] 协议流程。
+====
+
+刷新令牌授予的 `OAuth2AccessTokenResponseClient` 默认实现是 `DefaultRefreshTokenTokenResponseClient`，它在授权服务器的令牌端点刷新访问令牌时使用 `RestOperations`。
+
+`DefaultRefreshTokenTokenResponseClient` 具有灵活性，因为它允许你自定义令牌请求的预处理或令牌响应的后处理。
+
+
+=== 自定义访问令牌请求
+
+如果需要自定义令牌请求的预处理，可以为 `DefaultRefreshTokenTokenResponseClient.setRequestEntityConverter()` 提供自定义的 `Converter<OAuth2RefreshTokenGrantRequest, RequestEntity<?>>`。默认实现（`OAuth2RefreshTokenGrantRequestEntityConverter`）构建标准 https://tools.ietf.org/html/rfc6749#section-6[OAuth 2.0 访问令牌请求] 的 `RequestEntity` 表示。然而，提供自定义 `Converter` 可以让你扩展标准令牌请求并添加自定义参数。
+
+要仅自定义请求的参数，可以为 `OAuth2RefreshTokenGrantRequestEntityConverter.setParametersConverter()` 提供自定义的 `Converter<OAuth2RefreshTokenGrantRequest, MultiValueMap<String, String>>`，以完全覆盖随请求发送的参数。这通常比直接构造 `RequestEntity` 更简单。
+
+[TIP]
+====
+如果你只想添加额外的参数，可以为 `OAuth2RefreshTokenGrantRequestEntityConverter.addParametersConverter()` 提供自定义的 `Converter<OAuth2RefreshTokenGrantRequest, MultiValueMap<String, String>>`，它会构建一个聚合 `Converter`。
+====
+
+[IMPORTANT]
+====
+自定义 `Converter` 必须返回一个有效的 `RequestEntity` 表示，该表示是目标 OAuth 2.0 提供者理解的 OAuth 2.0 访问令牌请求。
+====
+
+
+=== 自定义访问令牌响应
+
+另一方面，如果需要自定义令牌响应的后处理，需要为 `DefaultRefreshTokenTokenResponseClient.setRestOperations()` 提供自定义配置的 `RestOperations`。默认的 `RestOperations` 配置如下：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val restTemplate = RestTemplate(listOf(
+        FormHttpMessageConverter(),
+        OAuth2AccessTokenResponseHttpMessageConverter()))
+
+restTemplate.errorHandler = OAuth2ErrorResponseErrorHandler()
+----
+======
+
+[TIP]
+====
+Spring MVC `FormHttpMessageConverter` 是必需的，因为发送 OAuth 2.0 访问令牌请求时会使用它。
+====
+
+`OAuth2AccessTokenResponseHttpMessageConverter` 是用于 OAuth 2.0 访问令牌响应的 `HttpMessageConverter`。你可以为 `OAuth2AccessTokenResponseHttpMessageConverter.setAccessTokenResponseConverter()` 提供自定义的 `Converter<Map<String, Object>, OAuth2AccessTokenResponse>`，用于将 OAuth 2.0 访问令牌响应参数转换为 `OAuth2AccessTokenResponse`。
+
+`OAuth2ErrorResponseErrorHandler` 是一个 `ResponseErrorHandler`，能够处理 OAuth 2.0 错误，例如 `400 Bad Request`。它使用 `OAuth2ErrorHttpMessageConverter` 将 OAuth 2.0 错误参数转换为 `OAuth2Error`。
+
+无论你是自定义 `DefaultRefreshTokenTokenResponseClient` 还是提供自己的 `OAuth2AccessTokenResponseClient` 实现，都需要按如下方式配置：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+// Customize
+OAuth2AccessTokenResponseClient<OAuth2RefreshTokenGrantRequest> refreshTokenTokenResponseClient = ...
+
+OAuth2AuthorizedClientProvider authorizedClientProvider =
+		OAuth2AuthorizedClientProviderBuilder.builder()
+				.authorizationCode()
+				.refreshToken(configurer -> configurer.accessTokenResponseClient(refreshTokenTokenResponseClient))
+				.build();
+
+...
+
+authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+// Customize
+val refreshTokenTokenResponseClient: OAuth2AccessTokenResponseClient<OAuth2RefreshTokenGrantRequest> = ...
+
+val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+        .authorizationCode()
+        .refreshToken { it.accessTokenResponseClient(refreshTokenTokenResponseClient) }
+        .build()
+
+...
+
+authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+----
+======
+
+[NOTE]
+====
+`OAuth2AuthorizedClientProviderBuilder.builder().refreshToken()` 配置了一个 `RefreshTokenOAuth2AuthorizedClientProvider`，
+它是针对刷新令牌授予的 `OAuth2AuthorizedClientProvider` 实现。
+====
+
+`OAuth2RefreshToken` 可以选择性地在 `authorization_code` 和 `password` 授予类型的访问令牌响应中返回。如果 `OAuth2AuthorizedClient.getRefreshToken()` 可用且 `OAuth2AuthorizedClient.getAccessToken()` 已过期，则 `RefreshTokenOAuth2AuthorizedClientProvider` 会自动刷新它。
+
+
+[[oauth2Client-client-creds-grant]]
+== 客户端凭证
+
+[NOTE]
+请参阅 https://tools.ietf.org/html/rfc6749#section-1.3.4[客户端凭证] 授予的 OAuth 2.0 授权框架以获取更多详细信息。
+
+
+=== 请求访问令牌
+
+[NOTE]
+====
+请参阅 https://tools.ietf.org/html/rfc6749#section-1.3.4[客户端凭证] 授予的 OAuth 2.0 授权框架以获取更多详细信息。
+====
+
+客户端凭证授予的 `OAuth2AccessTokenResponseClient` 默认实现是 `DefaultClientCredentialsTokenResponseClient`，它在请求授权服务器令牌端点的访问令牌时使用 `RestOperations`。
+
+`DefaultClientCredentialsTokenResponseClient` 具有灵活性，因为它允许你自定义令牌请求的预处理或令牌响应的后处理。
+
+
+=== 自定义访问令牌请求
+
+如果需要自定义令牌请求的预处理，可以为 `DefaultClientCredentialsTokenResponseClient.setRequestEntityConverter()` 提供自定义的 `Converter<OAuth2ClientCredentialsGrantRequest, RequestEntity<?>>`。默认实现（`OAuth2ClientCredentialsGrantRequestEntityConverter`）构建标准 https://tools.ietf.org/html/rfc6749#section-4.4.2[OAuth 2.0 访问令牌请求] 的 `RequestEntity` 表示。然而，提供自定义 `Converter` 可以让你扩展标准令牌请求并添加自定义参数。
+
+要仅自定义请求的参数，可以为 `OAuth2ClientCredentialsGrantRequestEntityConverter.setParametersConverter()` 提供自定义的 `Converter<OAuth2ClientCredentialsGrantRequest, MultiValueMap<String, String>>`，以完全覆盖随请求发送的参数。这通常比直接构造 `RequestEntity` 更简单。
+
+[TIP]
+====
+如果你只想添加额外的参数，可以为 `OAuth2ClientCredentialsGrantRequestEntityConverter.addParametersConverter()` 提供自定义的 `Converter<OAuth2ClientCredentialsGrantRequest, MultiValueMap<String, String>>`，它会构建一个聚合 `Converter`。
+====
+
+[IMPORTANT]
+====
+自定义 `Converter` 必须返回一个有效的 `RequestEntity` 表示，该表示是目标 OAuth 2.0 提供者理解的 OAuth 2.0 访问令牌请求。
+====
+
+
+=== 自定义访问令牌响应
+
+另一方面，如果需要自定义令牌响应的后处理，需要为 `DefaultClientCredentialsTokenResponseClient.setRestOperations()` 提供自定义配置的 `RestOperations`。默认的 `RestOperations` 配置如下：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val restTemplate = RestTemplate(listOf(
+        FormHttpMessageConverter(),
+        OAuth2AccessTokenResponseHttpMessageConverter()))
+
+restTemplate.errorHandler = OAuth2ErrorResponseErrorHandler()
+----
+======
+
+[TIP]
+====
+Spring MVC `FormHttpMessageConverter` 是必需的，因为发送 OAuth 2.0 访问令牌请求时会使用它。
+====
+
+`OAuth2AccessTokenResponseHttpMessageConverter` 是用于 OAuth 2.0 访问令牌响应的 `HttpMessageConverter`。你可以为 `OAuth2AccessTokenResponseHttpMessageConverter.setAccessTokenResponseConverter()` 提供自定义的 `Converter<Map<String, Object>, OAuth2AccessTokenResponse>`，用于将 OAuth 2.0 访问令牌响应参数转换为 `OAuth2AccessTokenResponse`。
+
+`OAuth2ErrorResponseErrorHandler` 是一个 `ResponseErrorHandler`，能够处理 OAuth 2.0 错误，例如 `400 Bad Request`。它使用 `OAuth2ErrorHttpMessageConverter` 将 OAuth 2.0 错误参数转换为 `OAuth2Error`。
+
+无论你是自定义 `DefaultClientCredentialsTokenResponseClient` 还是提供自己的 `OAuth2AccessTokenResponseClient` 实现，都需要按如下方式配置：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+// Customize
+OAuth2AccessTokenResponseClient<OAuth2ClientCredentialsGrantRequest> clientCredentialsTokenResponseClient = ...
+
+OAuth2AuthorizedClientProvider authorizedClientProvider =
+		OAuth2AuthorizedClientProviderBuilder.builder()
+				.clientCredentials(configurer -> configurer.accessTokenResponseClient(clientCredentialsTokenResponseClient))
+				.build();
+
+...
+
+authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+// Customize
+val clientCredentialsTokenResponseClient: OAuth2AccessTokenResponseClient<OAuth2ClientCredentialsGrantRequest> = ...
+
+val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+        .clientCredentials { it.accessTokenResponseClient(clientCredentialsTokenResponseClient) }
+        .build()
+
+...
+
+authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+----
+======
+
+[NOTE]
+====
+`OAuth2AuthorizedClientProviderBuilder.builder().clientCredentials()` 配置了一个 `ClientCredentialsOAuth2AuthorizedClientProvider`，
+它是针对客户端凭证授予的 `OAuth2AuthorizedClientProvider` 实现。
+====
+
+=== 使用访问令牌
+
+考虑以下用于 OAuth 2.0 客户端注册的 Spring Boot 属性：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-secret: okta-client-secret
+            authorization-grant-type: client_credentials
+            scope: read, write
+        provider:
+          okta:
+            token-uri: https://dev-1234.oktapreview.com/oauth2/v1/token
+----
+
+再考虑以下 `OAuth2AuthorizedClientManager` `@Bean`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public OAuth2AuthorizedClientManager authorizedClientManager(
+		ClientRegistrationRepository clientRegistrationRepository,
+		OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+	OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+					.clientCredentials()
+					.build();
+
+	DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultOAuth2AuthorizedClientManager(
+					clientRegistrationRepository, authorizedClientRepository);
+	authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+	return authorizedClientManager;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun authorizedClientManager(
+        clientRegistrationRepository: ClientRegistrationRepository,
+        authorizedClientRepository: OAuth2AuthorizedClientRepository): OAuth2AuthorizedClientManager {
+    val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+            .clientCredentials()
+            .build()
+    val authorizedClientManager = DefaultOAuth2AuthorizedClientManager(
+            clientRegistrationRepository, authorizedClientRepository)
+    authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+    return authorizedClientManager
+}
+----
+======
+
+根据上述属性和 bean，你可以按如下方式获取 `OAuth2AccessToken`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Controller
+public class OAuth2ClientController {
+
+	@Autowired
+	private OAuth2AuthorizedClientManager authorizedClientManager;
+
+	@GetMapping("/")
+	public String index(Authentication authentication,
+						HttpServletRequest servletRequest,
+						HttpServletResponse servletResponse) {
+
+		OAuth2AuthorizeRequest authorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+				.principal(authentication)
+				.attributes(attrs -> {
+					attrs.put(HttpServletRequest.class.getName(), servletRequest);
+					attrs.put(HttpServletResponse.class.getName(), servletResponse);
+				})
+				.build();
+		OAuth2AuthorizedClient authorizedClient = this.authorizedClientManager.authorize(authorizeRequest);
+
+		OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+
+		...
+
+		return "index";
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class OAuth2ClientController {
+
+    @Autowired
+    private lateinit var authorizedClientManager: OAuth2AuthorizedClientManager
+
+    @GetMapping("/")
+    fun index(authentication: Authentication?,
+              servletRequest: HttpServletRequest,
+              servletResponse: HttpServletResponse): String {
+        val authorizeRequest: OAuth2AuthorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+                .principal(authentication)
+                .attributes(Consumer { attrs: MutableMap<String, Any> ->
+                    attrs[HttpServletRequest::class.java.name] = servletRequest
+                    attrs[HttpServletResponse::class.java.name] = servletResponse
+                })
+                .build()
+        val authorizedClient = authorizedClientManager.authorize(authorizeRequest)
+        val accessToken: OAuth2AccessToken = authorizedClient.accessToken
+
+        ...
+
+        return "index"
+    }
+}
+----
+======
+
+[NOTE]
+====
+`HttpServletRequest` 和 `HttpServletResponse` 都是可选属性。
+如果不提供，它们默认使用 `RequestContextHolder.getRequestAttributes()` 的 `ServletRequestAttributes`。
+====
+
+[[oauth2Client-password-grant]]
+== 资源所有者密码凭证
+
+[NOTE]
+====
+请参阅 https://tools.ietf.org/html/rfc6749#section-1.3.3[资源所有者密码凭证] 授予的 OAuth 2.0 授权框架以获取更多详细信息。
+====
+
+=== 请求访问令牌
+
+[NOTE]
+====
+请参阅资源所有者密码凭证授予的 https://tools.ietf.org/html/rfc6749#section-4.3.2[访问令牌请求/响应] 协议流程。
+====
+
+资源所有者密码凭证授予的 `OAuth2AccessTokenResponseClient` 默认实现是 `DefaultPasswordTokenResponseClient`，它在请求授权服务器令牌端点的访问令牌时使用 `RestOperations`。
+
+`DefaultPasswordTokenResponseClient` 具有灵活性，因为它允许你自定义令牌请求的预处理或令牌响应的后处理。
+
+=== 自定义访问令牌请求
+
+如果需要自定义令牌请求的预处理，可以为 `DefaultPasswordTokenResponseClient.setRequestEntityConverter()` 提供自定义的 `Converter<OAuth2PasswordGrantRequest, RequestEntity<?>>`。默认实现（`OAuth2PasswordGrantRequestEntityConverter`）构建标准 https://tools.ietf.org/html/rfc6749#section-4.3.2[OAuth 2.0 访问令牌请求] 的 `RequestEntity` 表示。然而，提供自定义 `Converter` 可以让你扩展标准令牌请求并添加自定义参数。
+
+要仅自定义请求的参数，可以为 `OAuth2PasswordGrantRequestEntityConverter.setParametersConverter()` 提供自定义的 `Converter<OAuth2PasswordGrantRequest, MultiValueMap<String, String>>`，以完全覆盖随请求发送的参数。这通常比直接构造 `RequestEntity` 更简单。
+
+[TIP]
+====
+如果你只想添加额外的参数，可以为 `OAuth2PasswordGrantRequestEntityConverter.addParametersConverter()` 提供自定义的 `Converter<OAuth2PasswordGrantRequest, MultiValueMap<String, String>>`，它会构建一个聚合 `Converter`。
+====
+
+[IMPORTANT]
+====
+自定义 `Converter` 必须返回一个有效的 `RequestEntity` 表示，该表示是目标 OAuth 2.0 提供者理解的 OAuth 2.0 访问令牌请求。
+====
+
+
+=== 自定义访问令牌响应
+
+另一方面，如果需要自定义令牌响应的后处理，需要为 `DefaultPasswordTokenResponseClient.setRestOperations()` 提供自定义配置的 `RestOperations`。默认的 `RestOperations` 配置如下：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val restTemplate = RestTemplate(listOf(
+        FormHttpMessageConverter(),
+        OAuth2AccessTokenResponseHttpMessageConverter()))
+
+restTemplate.errorHandler = OAuth2ErrorResponseErrorHandler()
+----
+======
+
+[TIP]
+====
+Spring MVC `FormHttpMessageConverter` 是必需的，因为发送 OAuth 2.0 访问令牌请求时会使用它。
+====
+
+`OAuth2AccessTokenResponseHttpMessageConverter` 是用于 OAuth 2.0 访问令牌响应的 `HttpMessageConverter`。你可以为 `OAuth2AccessTokenResponseHttpMessageConverter.setTokenResponseConverter()` 提供自定义的 `Converter<Map<String, String>, OAuth2AccessTokenResponse>`，用于将 OAuth 2.0 访问令牌响应参数转换为 `OAuth2AccessTokenResponse`。
+
+`OAuth2ErrorResponseErrorHandler` 是一个 `ResponseErrorHandler`，能够处理 OAuth 2.0 错误，例如 `400 Bad Request`。它使用 `OAuth2ErrorHttpMessageConverter` 将 OAuth 2.0 错误参数转换为 `OAuth2Error`。
+
+无论你是自定义 `DefaultPasswordTokenResponseClient` 还是提供自己的 `OAuth2AccessTokenResponseClient` 实现，都需要按如下方式配置：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+// Customize
+OAuth2AccessTokenResponseClient<OAuth2PasswordGrantRequest> passwordTokenResponseClient = ...
+
+OAuth2AuthorizedClientProvider authorizedClientProvider =
+		OAuth2AuthorizedClientProviderBuilder.builder()
+				.password(configurer -> configurer.accessTokenResponseClient(passwordTokenResponseClient))
+				.refreshToken()
+				.build();
+
+...
+
+authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val passwordTokenResponseClient: OAuth2AccessTokenResponseClient<OAuth2PasswordGrantRequest> = ...
+
+val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+        .password { it.accessTokenResponseClient(passwordTokenResponseClient) }
+        .refreshToken()
+        .build()
+
+...
+
+authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+----
+======
+
+[NOTE]
+====
+`OAuth2AuthorizedClientProviderBuilder.builder().password()` 配置了一个 `PasswordOAuth2AuthorizedClientProvider`，
+它是针对资源所有者密码凭证授予的 `OAuth2AuthorizedClientProvider` 实现。
+====
+
+=== 使用访问令牌
+
+考虑以下用于 OAuth 2.0 客户端注册的 Spring Boot 属性：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-secret: okta-client-secret
+            authorization-grant-type: password
+            scope: read, write
+        provider:
+          okta:
+            token-uri: https://dev-1234.oktapreview.com/oauth2/v1/token
+----
+
+再考虑 `OAuth2AuthorizedClientManager` `@Bean`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public OAuth2AuthorizedClientManager authorizedClientManager(
+		ClientRegistrationRepository clientRegistrationRepository,
+		OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+	OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+					.password()
+					.refreshToken()
+					.build();
+
+	DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultOAuth2AuthorizedClientManager(
+					clientRegistrationRepository, authorizedClientRepository);
+	authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+	// Assuming the `username` and `password` are supplied as `HttpServletRequest` parameters,
+	// map the `HttpServletRequest` parameters to `OAuth2AuthorizationContext.getAttributes()`
+	authorizedClientManager.setContextAttributesMapper(contextAttributesMapper());
+
+	return authorizedClientManager;
+}
+
+private Function<OAuth2AuthorizeRequest, Map<String, Object>> contextAttributesMapper() {
+	return authorizeRequest -> {
+		Map<String, Object> contextAttributes = Collections.emptyMap();
+		HttpServletRequest servletRequest = authorizeRequest.getAttribute(HttpServletRequest.class.getName());
+		String username = servletRequest.getParameter(OAuth2ParameterNames.USERNAME);
+		String password = servletRequest.getParameter(OAuth2ParameterNames.PASSWORD);
+		if (StringUtils.hasText(username) && StringUtils.hasText(password)) {
+			contextAttributes = new HashMap<>();
+
+			// `PasswordOAuth2AuthorizedClientProvider` requires both attributes
+			contextAttributes.put(OAuth2AuthorizationContext.USERNAME_ATTRIBUTE_NAME, username);
+			contextAttributes.put(OAuth2AuthorizationContext.PASSWORD_ATTRIBUTE_NAME, password);
+		}
+		return contextAttributes;
+	};
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun authorizedClientManager(
+        clientRegistrationRepository: ClientRegistrationRepository,
+        authorizedClientRepository: OAuth2AuthorizedClientRepository): OAuth2AuthorizedClientManager {
+    val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+            .password()
+            .refreshToken()
+            .build()
+    val authorizedClientManager = DefaultOAuth2AuthorizedClientManager(
+            clientRegistrationRepository, authorizedClientRepository)
+    authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+
+    // Assuming the `username` and `password` are supplied as `HttpServletRequest` parameters,
+    // map the `HttpServletRequest` parameters to `OAuth2AuthorizationContext.getAttributes()`
+    authorizedClientManager.setContextAttributesMapper(contextAttributesMapper())
+    return authorizedClientManager
+}
+
+private fun contextAttributesMapper(): Function<OAuth2AuthorizeRequest, MutableMap<String, Any>> {
+    return Function { authorizeRequest ->
+        var contextAttributes: MutableMap<String, Any> = mutableMapOf()
+        val servletRequest: HttpServletRequest = authorizeRequest.getAttribute(HttpServletRequest::class.java.name)
+        val username = servletRequest.getParameter(OAuth2ParameterNames.USERNAME)
+        val password = servletRequest.getParameter(OAuth2ParameterNames.PASSWORD)
+        if (StringUtils.hasText(username) && StringUtils.hasText(password)) {
+            contextAttributes = hashMapOf()
+
+            // `PasswordOAuth2AuthorizedClientProvider` requires both attributes
+            contextAttributes[OAuth2AuthorizationContext.USERNAME_ATTRIBUTE_NAME] = username
+            contextAttributes[OAuth2AuthorizationContext.PASSWORD_ATTRIBUTE_NAME] = password
+        }
+        contextAttributes
+    }
+}
+----
+======
+
+根据上述属性和 bean，你可以按如下方式获取 `OAuth2AccessToken`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Controller
+public class OAuth2ClientController {
+
+	@Autowired
+	private OAuth2AuthorizedClientManager authorizedClientManager;
+
+	@GetMapping("/")
+	public String index(Authentication authentication,
+						HttpServletRequest servletRequest,
+						HttpServletResponse servletResponse) {
+
+		OAuth2AuthorizeRequest authorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+				.principal(authentication)
+				.attributes(attrs -> {
+					attrs.put(HttpServletRequest.class.getName(), servletRequest);
+					attrs.put(HttpServletResponse.class.getName(), servletResponse);
+				})
+				.build();
+		OAuth2AuthorizedClient authorizedClient = this.authorizedClientManager.authorize(authorizeRequest);
+
+		OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+
+		...
+
+		return "index";
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Controller
+class OAuth2ClientController {
+    @Autowired
+    private lateinit var authorizedClientManager: OAuth2AuthorizedClientManager
+
+    @GetMapping("/")
+    fun index(authentication: Authentication?,
+              servletRequest: HttpServletRequest,
+              servletResponse: HttpServletResponse): String {
+        val authorizeRequest: OAuth2AuthorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+                .principal(authentication)
+                .attributes(Consumer {
+                    it[HttpServletRequest::class.java.name] = servletRequest
+                    it[HttpServletResponse::class.java.name] = servletResponse
+                })
+                .build()
+        val authorizedClient = authorizedClientManager.authorize(authorizeRequest)
+        val accessToken: OAuth2AccessToken = authorizedClient.accessToken
+
+        ...
+
+        return "index"
+    }
+}
+----
+======
+
+[NOTE]
+====
+`HttpServletRequest` 和 `HttpServletResponse` 都是可选属性。
+如果不提供，它们默认使用 `RequestContextHolder.getRequestAttributes()` 的 `ServletRequestAttributes`。
+====
+
+
+[[oauth2Client-jwt-bearer-grant]]
+== JWT Bearer
+
+[NOTE]
+====
+请参阅 https://datatracker.ietf.org/doc/html/rfc7523[JWT Bearer] 授予的 JSON Web Token (JWT) Profile for OAuth 2.0 Client Authentication and Authorization Grants 以获取更多详细信息。
+====
+
+
+=== 请求访问令牌
+
+[NOTE]
+====
+请参阅 JWT Bearer 授予的 https://datatracker.ietf.org/doc/html/rfc7523#section-2.1[访问令牌请求/响应] 协议流程。
+====
+
+JWT Bearer 授予的 `OAuth2AccessTokenResponseClient` 默认实现是 `DefaultJwtBearerTokenResponseClient`，它在请求授权服务器令牌端点的访问令牌时使用 `RestOperations`。
+
+`DefaultJwtBearerTokenResponseClient` 相当灵活，因为它允许你自定义令牌请求的预处理和/或令牌响应的后处理。
+
+
+=== 自定义访问令牌请求
+
+如果需要自定义令牌请求的预处理，可以为 `DefaultJwtBearerTokenResponseClient.setRequestEntityConverter()` 提供自定义的 `Converter<JwtBearerGrantRequest, RequestEntity<?>>`。默认实现 `JwtBearerGrantRequestEntityConverter` 构建 https://datatracker.ietf.org/doc/html/rfc7523#section-2.1[OAuth 2.0 访问令牌请求] 的 `RequestEntity` 表示。然而，提供自定义 `Converter` 可以让你扩展令牌请求并添加自定义参数。
+
+要仅自定义请求的参数，可以为 `JwtBearerGrantRequestEntityConverter.setParametersConverter()` 提供自定义的 `Converter<JwtBearerGrantRequest, MultiValueMap<String, String>>`，以完全覆盖随请求发送的参数。这通常比直接构造 `RequestEntity` 更简单。
+
+[TIP]
+如果你只想添加额外的参数，可以为 `JwtBearerGrantRequestEntityConverter.addParametersConverter()` 提供自定义的 `Converter<JwtBearerGrantRequest, MultiValueMap<String, String>>`，它会构建一个聚合 `Converter`。
+
+
+=== 自定义访问令牌响应
+
+另一方面，如果需要自定义令牌响应的后处理，需要为 `DefaultJwtBearerTokenResponseClient.setRestOperations()` 提供自定义配置的 `RestOperations`。默认的 `RestOperations` 配置如下：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val restTemplate = RestTemplate(listOf(
+        FormHttpMessageConverter(),
+        OAuth2AccessTokenResponseHttpMessageConverter()))
+
+restTemplate.errorHandler = OAuth2ErrorResponseErrorHandler()
+----
+======
+
+[TIP]
+====
+Spring MVC `FormHttpMessageConverter` 是必需的，因为发送 OAuth 2.0 访问令牌请求时会使用它。
+====
+
+`OAuth2AccessTokenResponseHttpMessageConverter` 是用于 OAuth 2.0 访问令牌响应的 `HttpMessageConverter`。你可以为 `OAuth2AccessTokenResponseHttpMessageConverter.setAccessTokenResponseConverter()` 提供自定义的 `Converter<Map<String, Object>, OAuth2AccessTokenResponse>`，用于将 OAuth 2.0 访问令牌响应参数转换为 `OAuth2AccessTokenResponse`。
+
+`OAuth2ErrorResponseErrorHandler` 是一个 `ResponseErrorHandler`，能够处理 OAuth 2.0 错误，例如 `400 Bad Request`。它使用 `OAuth2ErrorHttpMessageConverter` 将 OAuth 2.0 错误参数转换为 `OAuth2Error`。
+
+无论你是自定义 `DefaultJwtBearerTokenResponseClient` 还是提供自己的 `OAuth2AccessTokenResponseClient` 实现，都需要按如下方式配置：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+// Customize
+OAuth2AccessTokenResponseClient<JwtBearerGrantRequest> jwtBearerTokenResponseClient = ...
+
+JwtBearerOAuth2AuthorizedClientProvider jwtBearerAuthorizedClientProvider = new JwtBearerOAuth2AuthorizedClientProvider();
+jwtBearerAuthorizedClientProvider.setAccessTokenResponseClient(jwtBearerTokenResponseClient);
+
+OAuth2AuthorizedClientProvider authorizedClientProvider =
+		OAuth2AuthorizedClientProviderBuilder.builder()
+				.provider(jwtBearerAuthorizedClientProvider)
+				.build();
+
+...
+
+authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+// Customize
+val jwtBearerTokenResponseClient: OAuth2AccessTokenResponseClient<JwtBearerGrantRequest> = ...
+
+val jwtBearerAuthorizedClientProvider = JwtBearerOAuth2AuthorizedClientProvider()
+jwtBearerAuthorizedClientProvider.setAccessTokenResponseClient(jwtBearerTokenResponseClient);
+
+val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+        .provider(jwtBearerAuthorizedClientProvider)
+        .build()
+
+...
+
+authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+----
+======
+
+=== 使用访问令牌
+
+给定以下用于 OAuth 2.0 客户端注册的 Spring Boot 属性：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-secret: okta-client-secret
+            authorization-grant-type: urn:ietf:params:oauth:grant-type:jwt-bearer
+            scope: read
+        provider:
+          okta:
+            token-uri: https://dev-1234.oktapreview.com/oauth2/v1/token
+----
+
+...以及 `OAuth2AuthorizedClientManager` `@Bean`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public OAuth2AuthorizedClientManager authorizedClientManager(
+		ClientRegistrationRepository clientRegistrationRepository,
+		OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+	JwtBearerOAuth2AuthorizedClientProvider jwtBearerAuthorizedClientProvider =
+			new JwtBearerOAuth2AuthorizedClientProvider();
+
+	OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+					.provider(jwtBearerAuthorizedClientProvider)
+					.build();
+
+	DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultOAuth2AuthorizedClientManager(
+					clientRegistrationRepository, authorizedClientRepository);
+	authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+	return authorizedClientManager;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun authorizedClientManager(
+        clientRegistrationRepository: ClientRegistrationRepository,
+        authorizedClientRepository: OAuth2AuthorizedClientRepository): OAuth2AuthorizedClientManager {
+    val jwtBearerAuthorizedClientProvider = JwtBearerOAuth2AuthorizedClientProvider()
+    val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+            .provider(jwtBearerAuthorizedClientProvider)
+            .build()
+    val authorizedClientManager = DefaultOAuth2AuthorizedClientManager(
+            clientRegistrationRepository, authorizedClientRepository)
+    authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+    return authorizedClientManager
+}
+----
+======
+
+你可以按如下方式获取 `OAuth2AccessToken`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@RestController
+public class OAuth2ResourceServerController {
+
+	@Autowired
+	private OAuth2AuthorizedClientManager authorizedClientManager;
+
+	@GetMapping("/resource")
+	public String resource(JwtAuthenticationToken jwtAuthentication) {
+		OAuth2AuthorizeRequest authorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+				.principal(jwtAuthentication)
+				.build();
+		OAuth2AuthorizedClient authorizedClient = this.authorizedClientManager.authorize(authorizeRequest);
+		OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+
+		...
+
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class OAuth2ResourceServerController {
+
+    @Autowired
+    private lateinit var authorizedClientManager: OAuth2AuthorizedClientManager
+
+    @GetMapping("/resource")
+    fun resource(jwtAuthentication: JwtAuthenticationToken?): String {
+        val authorizeRequest: OAuth2AuthorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+                .principal(jwtAuthentication)
+                .build()
+        val authorizedClient = authorizedClientManager.authorize(authorizeRequest)
+        val accessToken: OAuth2AccessToken = authorizedClient.accessToken
+
+        ...
+
+    }
+}
+----
+======
+
+[NOTE]
+`JwtBearerOAuth2AuthorizedClientProvider` 默认通过 `OAuth2AuthorizationContext.getPrincipal().getPrincipal()` 解析 `Jwt` 断言，因此前面的示例中使用了 `JwtAuthenticationToken`。
+
+[TIP]
+如果需要从不同的源解析 `Jwt` 断言，可以为 `JwtBearerOAuth2AuthorizedClientProvider.setJwtAssertionResolver()` 提供自定义的 `Function<OAuth2AuthorizationContext, Jwt>`。
+
+[[oauth2Client-token-exchange-grant]]
+== 令牌交换
+
+[NOTE]
+====
+请参阅 https://datatracker.ietf.org/doc/html/rfc8693[令牌交换] 授予的 OAuth 2.0 令牌交换以获取更多详细信息。
+====
+
+
+=== 请求访问令牌
+
+[NOTE]
+====
+请参阅令牌交换授予的 https://datatracker.ietf.org/doc/html/rfc8693#section-2[令牌交换请求和响应] 协议流程。
+====
+
+令牌交换授予的 `OAuth2AccessTokenResponseClient` 默认实现是 `DefaultTokenExchangeTokenResponseClient`，它在请求授权服务器令牌端点的访问令牌时使用 `RestOperations`。
+
+`DefaultTokenExchangeTokenResponseClient` 相当灵活，因为它允许你自定义令牌请求的预处理和/或令牌响应的后处理。
+
+
+=== 自定义访问令牌请求
+
+如果需要自定义令牌请求的预处理，可以为 `DefaultTokenExchangeTokenResponseClient.setRequestEntityConverter()` 提供自定义的 `Converter<TokenExchangeGrantRequest, RequestEntity<?>>`。默认实现 `TokenExchangeGrantRequestEntityConverter` 构建 https://datatracker.ietf.org/doc/html/rfc8693#section-2.1[OAuth 2.0 访问令牌请求] 的 `RequestEntity` 表示。然而，提供自定义 `Converter` 可以让你扩展令牌请求并添加自定义参数。
+
+要仅自定义请求的参数，可以为 `TokenExchangeGrantRequestEntityConverter.setParametersConverter()` 提供自定义的 `Converter<TokenExchangeGrantRequest, MultiValueMap<String, String>>`，以完全覆盖随请求发送的参数。这通常比直接构造 `RequestEntity` 更简单。
+
+[TIP]
+如果你只想添加额外的参数，可以为 `TokenExchangeGrantRequestEntityConverter.addParametersConverter()` 提供自定义的 `Converter<TokenExchangeGrantRequest, MultiValueMap<String, String>>`，它会构建一个聚合 `Converter`。
+
+
+=== 自定义访问令牌响应
+
+另一方面，如果需要自定义令牌响应的后处理，需要为 `DefaultTokenExchangeTokenResponseClient.setRestOperations()` 提供自定义配置的 `RestOperations`。默认的 `RestOperations` 配置如下：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+val restTemplate = RestTemplate(listOf(
+        FormHttpMessageConverter(),
+        OAuth2AccessTokenResponseHttpMessageConverter()))
+
+restTemplate.errorHandler = OAuth2ErrorResponseErrorHandler()
+----
+======
+
+[TIP]
+====
+Spring MVC `FormHttpMessageConverter` 是必需的，因为发送 OAuth 2.0 访问令牌请求时会使用它。
+====
+
+`OAuth2AccessTokenResponseHttpMessageConverter` 是用于 OAuth 2.0 访问令牌响应的 `HttpMessageConverter`。你可以为 `OAuth2AccessTokenResponseHttpMessageConverter.setAccessTokenResponseConverter()` 提供自定义的 `Converter<Map<String, Object>, OAuth2AccessTokenResponse>`，用于将 OAuth 2.0 访问令牌响应参数转换为 `OAuth2AccessTokenResponse`。
+
+`OAuth2ErrorResponseErrorHandler` 是一个 `ResponseErrorHandler`，能够处理 OAuth 2.0 错误，例如 `400 Bad Request`。它使用 `OAuth2ErrorHttpMessageConverter` 将 OAuth 2.0 错误参数转换为 `OAuth2Error`。
+
+无论你是自定义 `DefaultTokenExchangeTokenResponseClient` 还是提供自己的 `OAuth2AccessTokenResponseClient` 实现，都需要按如下方式配置：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+// Customize
+OAuth2AccessTokenResponseClient<TokenExchangeGrantRequest> tokenExchangeTokenResponseClient = ...
+
+TokenExchangeOAuth2AuthorizedClientProvider tokenExchangeAuthorizedClientProvider = new TokenExchangeOAuth2AuthorizedClientProvider();
+tokenExchangeAuthorizedClientProvider.setAccessTokenResponseClient(tokenExchangeTokenResponseClient);
+
+OAuth2AuthorizedClientProvider authorizedClientProvider =
+		OAuth2AuthorizedClientProviderBuilder.builder()
+				.provider(tokenExchangeAuthorizedClientProvider)
+				.build();
+
+...
+
+authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+// Customize
+val tokenExchangeTokenResponseClient: OAuth2AccessTokenResponseClient<TokenExchangeGrantRequest> = ...
+
+val tokenExchangeAuthorizedClientProvider = TokenExchangeOAuth2AuthorizedClientProvider()
+tokenExchangeAuthorizedClientProvider.setAccessTokenResponseClient(tokenExchangeTokenResponseClient)
+
+val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+        .provider(tokenExchangeAuthorizedClientProvider)
+        .build()
+
+...
+
+authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+----
+======
+
+[[token-exchange-grant-access-token]]
+=== 使用访问令牌
+
+给定以下用于 OAuth 2.0 客户端注册的 Spring Boot 属性：
+
+[source,yaml]
+----
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-secret: okta-client-secret
+            authorization-grant-type: urn:ietf:params:oauth:grant-type:token-exchange
+            scope: read
+        provider:
+          okta:
+            token-uri: https://dev-1234.oktapreview.com/oauth2/v1/token
+----
+
+...以及 `OAuth2AuthorizedClientManager` `@Bean`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public OAuth2AuthorizedClientManager authorizedClientManager(
+		ClientRegistrationRepository clientRegistrationRepository,
+		OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+	TokenExchangeOAuth2AuthorizedClientProvider tokenExchangeAuthorizedClientProvider =
+			new TokenExchangeOAuth2AuthorizedClientProvider();
+
+	OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+					.provider(tokenExchangeAuthorizedClientProvider)
+					.build();
+
+	DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultOAuth2AuthorizedClientManager(
+					clientRegistrationRepository, authorizedClientRepository);
+	authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+	return authorizedClientManager;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun authorizedClientManager(
+        clientRegistrationRepository: ClientRegistrationRepository,
+        authorizedClientRepository: OAuth2AuthorizedClientRepository): OAuth2AuthorizedClientManager {
+    val tokenExchangeAuthorizedClientProvider = TokenExchangeOAuth2AuthorizedClientProvider()
+    val authorizedClientProvider = OAuth2AuthorizedClientProviderBuilder.builder()
+            .provider(tokenExchangeAuthorizedClientProvider)
+            .build()
+    val authorizedClientManager = DefaultOAuth2AuthorizedClientManager(
+            clientRegistrationRepository, authorizedClientRepository)
+    authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider)
+    return authorizedClientManager
+}
+----
+======
+
+你可以按如下方式获取 `OAuth2AccessToken`：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@RestController
+public class OAuth2ResourceServerController {
+
+	@Autowired
+	private OAuth2AuthorizedClientManager authorizedClientManager;
+
+	@GetMapping("/resource")
+	public String resource(JwtAuthenticationToken jwtAuthentication) {
+		OAuth2AuthorizeRequest authorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+				.principal(jwtAuthentication)
+				.build();
+		OAuth2AuthorizedClient authorizedClient = this.authorizedClientManager.authorize(authorizeRequest);
+		OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+
+		...
+
+	}
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+class OAuth2ResourceServerController {
+
+    @Autowired
+    private lateinit var authorizedClientManager: OAuth2AuthorizedClientManager
+
+    @GetMapping("/resource")
+    fun resource(jwtAuthentication: JwtAuthenticationToken?): String {
+        val authorizeRequest: OAuth2AuthorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+                .principal(jwtAuthentication)
+                .build()
+        val authorizedClient = authorizedClientManager.authorize(authorizeRequest)
+        val accessToken: OAuth2AccessToken = authorizedClient.accessToken
+
+        ...
+
+    }
+}
+----
+======
+
+[NOTE]
+`TokenExchangeOAuth2AuthorizedClientProvider` 默认通过 `OAuth2AuthorizationContext.getPrincipal().getPrincipal()` 解析主体令牌（作为 `OAuth2Token`），因此前面的示例中使用了 `JwtAuthenticationToken`。
+默认情况下不解析动作令牌。
+
+[TIP]
+如果需要从不同源解析主体令牌，可以为 `TokenExchangeOAuth2AuthorizedClientProvider.setSubjectTokenResolver()` 提供自定义的 `Function<OAuth2AuthorizationContext, OAuth2Token>`。
+
+[TIP]
+如果需要解析动作令牌，可以为 `TokenExchangeOAuth2AuthorizedClientProvider.setActorTokenResolver()` 提供自定义的 `Function<OAuth2AuthorizationContext, OAuth2Token>`。

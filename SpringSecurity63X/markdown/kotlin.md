@@ -1,0 +1,119 @@
+Spring Security 的 Kotlin 配置自 Spring Security 5.3 起可用。
+它允许用户使用原生的 Kotlin DSL 来配置 Spring Security。
+
+:::: note
+::: title
+:::
+
+Spring Security 提供了一个
+[示例应用](https://github.com/spring-projects/spring-security-samples/tree/main/servlet/spring-boot/kotlin/hello-security)，用于演示如何使用
+Kotlin 配置 Spring Security。
+::::
+
+# HttpSecurity {#kotlin-config-httpsecurity}
+
+Spring Security 是如何知道我们希望所有用户都必须经过身份验证的？
+它是如何知道我们要支持基于表单的身份验证的？ 背后有一个名为
+`SecurityFilterChain` 的配置类正在被调用。 其默认实现如下所示：
+
+``` kotlin
+import org.springframework.security.config.annotation.web.invoke
+
+@Bean
+open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+    http {
+        authorizeHttpRequests {
+            authorize(anyRequest, authenticated)
+        }
+        formLogin { }
+        httpBasic { }
+    }
+    return http.build()
+}
+```
+
+:::: note
+::: title
+:::
+
+确保在类中导入
+`org.springframework.security.config.annotation.web.invoke` 函数，以启用
+Kotlin DSL。IDE 并不总是会自动导入该方法，这可能导致编译错误。
+::::
+
+上述默认配置的作用是：
+
+- 确保对应用程序的任何请求都需要用户进行身份验证
+
+- 允许用户通过基于表单的登录进行身份验证
+
+- 允许用户通过 HTTP Basic 身份验证方式进行身份验证
+
+请注意，此配置与以下 XML 命名空间配置相对应：
+
+``` xml
+<http>
+    <intercept-url pattern="/**" access="authenticated"/>
+    <form-login />
+    <http-basic />
+</http>
+```
+
+# 多个 HttpSecurity 实例 {#_多个_httpsecurity_实例}
+
+我们可以像在 XML 中可以定义多个 `<http>` 块一样，配置多个 `HttpSecurity`
+实例。 关键在于注册多个 `SecurityFilterChain` `@Bean`。 以下示例为以
+`/api/` 开头的 URL 提供了不同的安全配置：
+
+``` kotlin
+import org.springframework.security.config.annotation.web.invoke
+
+@Configuration
+@EnableWebSecurity
+class MultiHttpSecurityConfig {
+    @Bean                                                            
+    public fun userDetailsService(): UserDetailsService {
+        val users: User.UserBuilder = User.withDefaultPasswordEncoder()
+        val manager = InMemoryUserDetailsManager()
+        manager.createUser(users.username("user").password("password").roles("USER").build())
+        manager.createUser(users.username("admin").password("password").roles("USER","ADMIN").build())
+        return manager
+    }
+
+    @Order(1)                                                        
+    @Bean
+    open fun apiFilterChain(http: HttpSecurity): SecurityFilterChain {
+        http {
+            securityMatcher("/api/**")                               
+            authorizeHttpRequests {
+                authorize(anyRequest, hasRole("ADMIN"))
+            }
+            httpBasic { }
+        }
+        return http.build()
+    }
+
+    @Bean                                                            
+    open fun formLoginFilterChain(http: HttpSecurity): SecurityFilterChain {
+        http {
+            authorizeHttpRequests {
+                authorize(anyRequest, authenticated)
+            }
+            formLogin { }
+        }
+        return http.build()
+    }
+}
+```
+
+- 像平常一样配置认证（Authentication）。
+
+- 创建一个包含 `@Order` 注解的 `SecurityFilterChain` 实例，用于指定哪个
+  `SecurityFilterChain` 应该优先被考虑。
+
+- `http.securityMatcher` 表明这个 `HttpSecurity` 实例仅适用于以 `/api/`
+  开头的 URL。
+
+- 再创建另一个 `SecurityFilterChain` 实例。如果 URL 不以 `/api/`
+  开头，则使用此配置。由于该 Bean 没有 `@Order`
+  注解（默认排在最后），因此会在 `apiFilterChain` 之后被处理。

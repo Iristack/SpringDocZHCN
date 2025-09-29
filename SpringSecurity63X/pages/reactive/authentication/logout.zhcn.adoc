@@ -1,0 +1,52 @@
+[[reactive-logout]]
+= 注销登录
+
+Spring Security 默认提供了一个注销登录的端点。  
+登录后，你可以通过 `GET /logout` 查看默认的注销确认页面，或者使用 `POST /logout` 来触发注销操作。该操作会执行以下行为：
+
+- 清除 `ServerCsrfTokenRepository`、`ServerSecurityContextRepository`
+- 重定向回登录页面
+
+通常情况下，你还希望在用户注销时使会话失效（即销毁会话）。为此，你可以在注销配置中添加 `WebSessionServerLogoutHandler`，如下所示：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+SecurityWebFilterChain http(ServerHttpSecurity http) throws Exception {
+    DelegatingServerLogoutHandler logoutHandler = new DelegatingServerLogoutHandler(
+            new SecurityContextServerLogoutHandler(), new WebSessionServerLogoutHandler()
+    );
+
+    http
+        .authorizeExchange((exchange) -> exchange.anyExchange().authenticated())
+        .logout((logout) -> logout.logoutHandler(logoutHandler));
+
+    return http.build();
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun http(http: ServerHttpSecurity): SecurityWebFilterChain {
+    val customLogoutHandler = DelegatingServerLogoutHandler(
+        SecurityContextServerLogoutHandler(), WebSessionServerLogoutHandler()
+    )
+    
+    return http {
+        authorizeExchange {
+            authorize(anyExchange, authenticated)
+        }
+        logout {
+            logoutHandler = customLogoutHandler
+        }
+    }
+}
+----
+======

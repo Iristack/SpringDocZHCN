@@ -1,0 +1,165 @@
+[[servlet-events]]
+= 认证事件（Authentication Events）
+
+每当认证成功或失败时，系统会分别发布 `AuthenticationSuccessEvent` 或 `AuthenticationFailureEvent` 事件。
+
+要监听这些事件，你首先需要注册一个 `AuthenticationEventPublisher`。Spring Security 提供的 `DefaultAuthenticationEventPublisher` 非常适合此用途：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public AuthenticationEventPublisher authenticationEventPublisher
+        (ApplicationEventPublisher applicationEventPublisher) {
+    return new DefaultAuthenticationEventPublisher(applicationEventPublisher);
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun authenticationEventPublisher
+        (applicationEventPublisher: ApplicationEventPublisher?): AuthenticationEventPublisher {
+    return DefaultAuthenticationEventPublisher(applicationEventPublisher)
+}
+----
+======
+
+然后你可以使用 Spring 的 `@EventListener` 功能来监听事件：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Component
+public class AuthenticationEvents {
+	@EventListener
+    public void onSuccess(AuthenticationSuccessEvent success) {
+		// 处理认证成功逻辑
+    }
+
+    @EventListener
+    public void onFailure(AbstractAuthenticationFailureEvent failures) {
+		// 处理认证失败逻辑
+    }
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Component
+class AuthenticationEvents {
+    @EventListener
+    fun onSuccess(success: AuthenticationSuccessEvent?) {
+        // 处理认证成功逻辑
+    }
+
+    @EventListener
+    fun onFailure(failures: AbstractAuthenticationFailureEvent?) {
+        // 处理认证失败逻辑
+    }
+}
+----
+======
+
+虽然这些事件监听机制与 `AuthenticationSuccessHandler` 和 `AuthenticationFailureHandler` 类似，但其优势在于可以独立于 Servlet API 使用。
+
+== 添加异常映射
+
+默认情况下，`DefaultAuthenticationEventPublisher` 会对以下异常发布对应的 `AuthenticationFailureEvent` 事件：
+
+|============
+| 异常类型 | 对应事件
+| `BadCredentialsException` | `AuthenticationFailureBadCredentialsEvent`
+| `UsernameNotFoundException` | `AuthenticationFailureBadCredentialsEvent`
+| `AccountExpiredException` | `AuthenticationFailureExpiredEvent`
+| `ProviderNotFoundException` | `AuthenticationFailureProviderNotFoundEvent`
+| `DisabledException` | `AuthenticationFailureDisabledEvent`
+| `LockedException` | `AuthenticationFailureLockedEvent`
+| `AuthenticationServiceException` | `AuthenticationFailureServiceExceptionEvent`
+| `CredentialsExpiredException` | `AuthenticationFailureCredentialsExpiredEvent`
+| `InvalidBearerTokenException` | `AuthenticationFailureBadCredentialsEvent`
+|============
+
+该发布器会进行精确的异常类型匹配，这意味着这些异常的子类**不会**自动触发对应事件。
+
+因此，你可能希望通过 `setAdditionalExceptionMappings` 方法向发布器添加额外的异常映射：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public AuthenticationEventPublisher authenticationEventPublisher
+        (ApplicationEventPublisher applicationEventPublisher) {
+    Map<Class<? extends AuthenticationException>,
+        Class<? extends AbstractAuthenticationFailureEvent>> mapping =
+            Collections.singletonMap(FooException.class, FooEvent.class);
+    AuthenticationEventPublisher authenticationEventPublisher =
+        new DefaultAuthenticationEventPublisher(applicationEventPublisher);
+    authenticationEventPublisher.setAdditionalExceptionMappings(mapping);
+    return authenticationEventPublisher;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun authenticationEventPublisher
+        (applicationEventPublisher: ApplicationEventPublisher?): AuthenticationEventPublisher {
+    val mapping: Map<Class<out AuthenticationException>, Class<out AbstractAuthenticationFailureEvent>> =
+            mapOf(Pair(FooException::class.java, FooEvent::class.java))
+    val authenticationEventPublisher = DefaultAuthenticationEventPublisher(applicationEventPublisher)
+    authenticationEventPublisher.setAdditionalExceptionMappings(mapping)
+    return authenticationEventPublisher
+}
+----
+======
+
+== 默认事件（Default Event）
+
+你还可以设置一个“兜底”事件，在发生任何未明确映射的 `AuthenticationException` 时触发：
+
+[tabs]
+======
+Java::
++
+[source,java,role="primary"]
+----
+@Bean
+public AuthenticationEventPublisher authenticationEventPublisher
+        (ApplicationEventPublisher applicationEventPublisher) {
+    AuthenticationEventPublisher authenticationEventPublisher =
+        new DefaultAuthenticationEventPublisher(applicationEventPublisher);
+    authenticationEventPublisher.setDefaultAuthenticationFailureEvent
+        (GenericAuthenticationFailureEvent.class);
+    return authenticationEventPublisher;
+}
+----
+
+Kotlin::
++
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun authenticationEventPublisher
+        (applicationEventPublisher: ApplicationEventPublisher?): AuthenticationEventPublisher {
+    val authenticationEventPublisher = DefaultAuthenticationEventPublisher(applicationEventPublisher)
+    authenticationEventPublisher.setDefaultAuthenticationFailureEvent(GenericAuthenticationFailureEvent::class.java)
+    return authenticationEventPublisher
+}
+----
+======
