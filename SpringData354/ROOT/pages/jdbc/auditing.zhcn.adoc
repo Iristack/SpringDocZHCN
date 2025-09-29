@@ -1,0 +1,22 @@
+[[jdbc.auditing]]
+= 审计（Auditing）
+:page-section-summary-toc: 1
+
+要启用审计功能，请在配置中添加 `@EnableJdbcAuditing` 注解，如下例所示：
+
+.使用 Java 配置启用审计
+[source,java]
+----
+@Configuration
+@EnableJdbcAuditing
+class Config {
+
+    @Bean
+    AuditorAware<AuditableUser> auditorProvider() {
+        return new AuditorAwareImpl();
+    }
+}
+----
+
+如果向 `ApplicationContext` 中注册了类型为 `AuditorAware` 的 Bean，审计基础设施会自动识别并使用它来确定应设置到领域对象上的当前用户。  
+如果在 `ApplicationContext` 中注册了多个 `AuditorAware` 实现，可以通过显式设置 `@EnableJdbcAuditing` 注解的 `auditorAwareRef` 属性来指定使用哪一个实现。

@@ -1,0 +1,108 @@
+[[jdbc.events]]
+= 生命周期事件
+
+Spring Data JDBC 会将生命周期事件发布给 `ApplicationListener` 对象，这些对象通常是应用程序上下文中的 Bean。  
+事件用于通知某个特定生命周期阶段的发生。与实体回调不同，事件主要用于通知目的。  
+事务性监听器将在事务完成时接收到事件。  
+**注意：事件和回调仅对聚合根（aggregate roots）触发**。  
+如果你想处理非根实体，你需要通过监听包含该实体的聚合根来实现。
+
+实体生命周期事件可能带来一定的性能开销。当你加载大量结果集时，可能会注意到性能的变化。  
+你可以通过 javadoc:org.springframework.data.jdbc.core.JdbcAggregateTemplate#setEntityLifecycleEventsEnabled(boolean)[模板 API] 禁用生命周期事件。
+
+例如，以下监听器会在聚合保存前被调用：
+
+[source,java]
+----
+@Bean
+ApplicationListener<BeforeSaveEvent<Object>> loggingSaves() {
+
+    return event -> {
+
+        Object entity = event.getEntity();
+        LOG.info("{} 正在被保存。", entity);
+    };
+}
+----
+
+如果你只想处理特定领域类型的事件，可以让你的监听器继承 `AbstractRelationalEventListener`，并重写一个或多个 `onXXX` 方法，其中 `XXX` 表示事件类型。  
+回调方法仅对与该领域类型及其子类型相关的事件被调用，因此你无需进行额外的类型转换。
+
+[source,java]
+----
+class PersonLoadListener extends AbstractRelationalEventListener<Person> {
+
+    @Override
+    protected void onAfterLoad(AfterLoadEvent<Person> personLoad) {
+		LOG.info(personLoad.getEntity());
+    }
+}
+----
+
+下表描述了可用的事件。有关各个处理步骤之间精确关系的更多细节，请参见 link:#jdbc.entity-callbacks[可用回调的说明]，因为回调与事件是一一对应的。
+
+.可用事件
+|===
+| 事件 | 触发时机
+
+| javadoc:org.springframework.data.relational.core.mapping.event.BeforeDeleteEvent[]
+| 在聚合根被删除之前触发。
+
+| javadoc:org.springframework.data.relational.core.mapping.event.AfterDeleteEvent[]
+| 在聚合根被删除之后触发。
+
+| javadoc:org.springframework.data.relational.core.mapping.event.BeforeConvertEvent[]
+| 在聚合根被转换为执行 SQL 语句的计划之前触发，但此时已经确定了该聚合是新的还是已存在的，即判断是执行更新还是插入操作。
+
+| javadoc:org.springframework.data.relational.core.mapping.event.BeforeSaveEvent[]
+| 在聚合根被保存之前触发（即插入或更新操作之前），且此时已决定是插入还是更新。
+
+| javadoc:org.springframework.data.relational.core.mapping.event.AfterSaveEvent[]
+| 在聚合根被保存之后触发（即插入或更新操作完成后）。
+
+| javadoc:org.springframework.data.relational.core.mapping.event.AfterConvertEvent[]
+| 在从数据库 `ResultSet` 创建聚合根，并设置完其所有属性之后触发。
+|===
+
+WARNING: 生命周期事件依赖于 `ApplicationEventMulticaster`。如果使用的是 `SimpleApplicationEventMulticaster`，它可以配置一个 `TaskExecutor`，因此无法保证事件何时被处理。
+
+[[jdbc.entity-callbacks]]
+== 存储特定的 EntityCallbacks
+
+Spring Data JDBC 使用 xref:commons/entity-callbacks.adoc[`EntityCallback` API] 来支持审计功能，并响应下表中列出的回调。
+
+.Spring Data JDBC 执行的不同流程及其处理步骤与回调
+|===
+| 流程 | `EntityCallback` / 处理步骤 | 说明
+
+.3+| 删除 | javadoc:org.springframework.data.relational.core.mapping.event.BeforeDeleteCallback[]
+| 在实际删除操作之前触发。
+
+2+| 聚合根及其所属聚合内的所有实体将从数据库中移除。
+
+| javadoc:org.springframework.data.relational.core.mapping.event.AfterDeleteCallback[]
+| 在聚合被删除之后触发。
+
+
+.6+| 保存 2+| 判断当前聚合是需要插入还是更新，依据是它是否为新实体。
+| javadoc:org.springframework.data.relational.core.mapping.event.BeforeConvertCallback[]
+| 如果你想以编程方式设置 ID，这是最合适的回调。在这一步之前，系统已经识别出哪些聚合是新的；在此处生成的 ID 将用于后续步骤。
+
+2+| 将聚合转换为“聚合变更”（aggregate change），即一系列要执行的 SQL 语句。在此步骤中，会决定 ID 是由聚合自身提供，还是仍为空、需由数据库生成。
+
+| javadoc:org.springframework.data.relational.core.mapping.event.BeforeSaveCallback[]
+| 虽然对聚合根所做的更改可能会被考虑，但在上一步中是否发送 ID 到数据库的决策已经确定。  
+**不要使用此回调为新聚合创建 ID**，应使用 `BeforeConvertCallback`。
+
+2+| 执行上述生成的 SQL 语句。
+
+| javadoc:org.springframework.data.relational.core.mapping.event.AfterSaveCallback[]
+| 在聚合根被保存后触发（即插入或更新完成之后）。
+
+
+.2+| 加载 2+| 使用一个或多个 SQL 查询加载聚合，并从结果集中构建聚合对象。
+| javadoc:org.springframework.data.relational.core.mapping.event.AfterConvertCallback[]
+|
+|===
+
+我们建议优先使用 **回调（callbacks）** 而不是事件，因为回调支持不可变类的使用，因此比事件更强大、更灵活。

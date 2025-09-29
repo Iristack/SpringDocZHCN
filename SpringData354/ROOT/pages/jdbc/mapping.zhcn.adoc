@@ -1,0 +1,177 @@
+[[mapping]]
+= 映射
+
+`MappingJdbcConverter` 提供了丰富的映射支持。`MappingJdbcConverter` 拥有一个强大的元数据模型，允许将领域对象映射到数据库行。  
+该映射元数据模型通过在领域对象上使用注解来填充。然而，这套基础设施并不局限于仅使用注解作为元数据来源。  
+`MappingJdbcConverter` 还允许你在不提供任何额外元数据的情况下，通过遵循一组约定将对象映射到行。
+
+本节介绍 `MappingJdbcConverter` 的功能，包括如何使用约定将对象映射到行，以及如何使用基于注解的映射元数据覆盖这些约定。
+
+继续阅读本章之前，请先了解 xref:object-mapping.adoc[] 的基础知识。
+
+[[mapping.conventions]]
+== 基于约定的映射
+
+当未提供额外的映射元数据时，`MappingJdbcConverter` 提供了一些将对象映射到行的默认约定。这些约定包括：
+
+*   Java 类的短名称按如下方式映射为表名。例如，`com.bigbank.SavingsAccount` 类会映射到名为 `SAVINGS_ACCOUNT` 的表。同样的命名规则也适用于字段到列名的映射，例如 `firstName` 字段映射到 `FIRST_NAME` 列。你可以通过提供自定义的 `NamingStrategy` 来控制这种映射关系。更多细节请参见 <<mapping.configuration,映射配置>>。  
+    默认情况下，从属性或类名派生出的表名和列名在 SQL 语句中是不带引号使用的。你也可以通过设置 `RelationalMappingContext.setForceQuote(true)` 来改变此行为。
+
+*   转换器会使用注册在 `CustomConversions` 中的所有 Spring Converter，以覆盖对象属性到行列及其值的默认映射。
+
+*   对象的字段用于与行中的列进行相互转换。公共的 `JavaBean` 属性不会被使用。
+
+*   如果对象有一个唯一的、非零参数构造函数，并且其参数名与行的顶级列名匹配，则使用该构造函数；否则使用无参构造函数。如果有多个非零参数构造函数，则会抛出异常。更多详情请参考 xref:object-mapping.adoc#mapping.object-creation[对象创建]。
+
+[[jdbc.entity-persistence.types]]
+== 实体中支持的类型
+
+当前支持以下类型的属性：
+
+* 所有基本类型及其包装类型（如 `int`, `float`, `Integer`, `Float` 等）
+
+* 枚举类型会被映射为其名称（`.name()`）
+
+* `String`
+
+* `java.util.Date`, `java.time.LocalDate`, `java.time.LocalDateTime`, 和 `java.time.LocalTime`
+
+* 上述类型的数组和集合可以在数据库支持数组列类型时，映射为数组类型的列
+
+* 数据库驱动所接受的任意类型
+
+* 对其他实体的引用。这被视为一对一关系或嵌入式类型。对于一对一关系的实体，拥有 `id` 属性是可选的。被引用实体的表预期会多出一个附加列，该列的名称基于引用它的实体（详见 <<jdbc.entity-persistence.types.backrefs>>）。嵌入式实体不需要 `id`，如果存在 `id` 字段，它将被当作普通属性处理，没有特殊含义。
+
+* `Set<some entity>` 被视为一对多关系。被引用实体的表预期会多出一个附加列，列名基于引用它的实体（详见 <<jdbc.entity-persistence.types.backrefs>>）。
+
+* `Map<简单类型, 某个实体>` 被视为“带限定符的一对多”关系。被引用实体的表预期会有两个附加列：一个根据引用实体命名，用作外键（见 <<jdbc.entity-persistence.types.backrefs>>），另一个具有相同名称并加上 `_key` 后缀，用于存储 Map 的键。
+
+* `List<某个实体>` 被映射为 `Map<Integer, 某个实体>`。期望有相同的附加列，列名可通过相同方式自定义。
++
+对于 `List`、`Set` 和 `Map`，反向引用的命名可以通过实现 `NamingStrategy.getReverseColumnName(RelationalPersistentEntity<?> owner)` 和 `NamingStrategy.getKeyColumn(RelationalPersistentProperty property)` 来分别控制。  
+或者，你也可以使用 `@MappedCollection(idColumn="your_column_name", keyColumn="your_key_column_name")` 注解属性。对 `Set` 指定 key 列无效。
+
+* 已注册了合适 xref:#mapping.explicit.converters[自定义转换器] 的类型。
+
+[[mapping.usage.annotations]]
+=== 映射注解概览
+
+include::partial$mapping-annotations.adoc[]
+
+进一步参考请参见 xref:jdbc/entity-persistence.adoc#jdbc.entity-persistence.optimistic-locking[乐观锁]。
+
+映射元数据基础设施定义在独立的 `spring-data-commons` 项目中，该项目与具体技术无关。JDBC 支持使用特定子类来实现基于注解的元数据。也可以实现其他策略（如有需求）。
+
+[[jdbc.entity-persistence.types.referenced-entities]]
+=== 被引用的实体
+
+对被引用实体的处理是有限制的。这是基于前述聚合根（Aggregate Root）的概念。如果你引用了另一个实体，那么根据定义，该实体是你聚合的一部分。因此，当你删除这个引用时，原先被引用的实体也会被删除。这也意味着引用只能是一对一（1-1）或一对多（1-n），不能是多对一（n-1）或多对多（n-m）。
+
+如果你有 n-1 或 n-m 的引用，那么根据定义，你正在处理两个独立的聚合。它们之间的引用可以编码为简单的 `id` 值，这能与 Spring Data JDBC 正确映射。更好的方式是将其表示为 `AggregateReference` 实例。`AggregateReference` 是围绕 id 值的一个包装器，表明该值是对另一个聚合的引用。同时，该聚合的类型通过泛型参数编码。
+
+[[jdbc.entity-persistence.types.backrefs]]
+=== 反向引用（Back References）
+
+聚合内的所有引用都会在数据库中产生相反方向的外键关系。默认情况下，外键列的名称是引用方实体的表名。
+
+另外，你也可以选择让列名基于引用实体的类名（忽略 `@Table` 注解）。通过调用 `RelationalMappingContext` 上的 `setForeignKeyNaming(ForeignKeyNaming.IGNORE_RENAMING)` 方法即可启用此行为。
+
+对于 `List` 和 `Map` 类型的引用，需要一个额外的列来保存列表索引或 Map 键。该列基于外键列名，并附加 `_KEY` 后缀。
+
+如果你想完全自定义这些反向引用的命名方式，可以实现 `NamingStrategy.getReverseColumnName(RelationalPersistentEntity<?> owner)` 方法以满足你的需求。
+
+.声明并设置一个 `AggregateReference`
+[source,java]
+----
+class Person {
+    @Id long id;
+    AggregateReference<Person, Long> bestFriend;
+}
+
+// ...
+
+Person p1, p2 = // 某些初始化操作
+
+p1.bestFriend = AggregateReference.to(p2.id);
+
+----
+
+你不应在实体中包含用于保存反向引用实际值的属性，也不应包含 `List` 或 `Map` 的键列值。如果你希望这些值在领域模型中可用，我们建议在 `AfterConvertCallback` 中完成此操作，并将这些值存储在 transient（瞬态）字段中。
+
+:mapped-collection: true
+:embedded-entities: true
+include::partial$mapping.adoc[]
+
+[[mapping.explicit.converters]]
+== 使用显式转换器覆盖映射
+
+Spring Data 允许注册自定义转换器，以影响值在数据库中的映射方式。目前，转换器仅应用于属性级别，即你只能将领域对象中的单个值转换为数据库中的单个值，反之亦然。**不支持复杂对象与多列之间的转换**。
+
+[[custom-converters.writer]]
+=== 使用已注册的 Spring 转换器写入属性
+
+以下示例展示了一个将 `Boolean` 对象转换为 `String` 值的 `Converter` 实现：
+
+[source,java]
+----
+import org.springframework.core.convert.converter.Converter;
+
+@WritingConverter
+public class BooleanToStringConverter implements Converter<Boolean, String> {
+
+    @Override
+    public String convert(Boolean source) {
+        return source != null && source ? "T" : "F";
+    }
+}
+----
+
+需要注意几点：`Boolean` 和 `String` 都是简单类型，因此 Spring Data 需要明确提示该转换器应用的方向（读取或写入）。通过使用 `@WritingConverter` 注解，你指示 Spring Data 将每个 `Boolean` 属性以 `String` 形式写入数据库。
+
+[[custom-converters.reader]]
+=== 使用 Spring 转换器读取数据
+
+以下示例展示了一个将 `String` 转换为 `Boolean` 值的 `Converter` 实现：
+
+[source,java]
+----
+@ReadingConverter
+public class StringToBooleanConverter implements Converter<String, Boolean> {
+
+    @Override
+    public Boolean convert(String source) {
+        return source != null && source.equalsIgnoreCase("T") ? Boolean.TRUE : Boolean.FALSE;
+    }
+}
+----
+
+同样需要注意：`String` 和 `Boolean` 都是简单类型，因此 Spring Data 需要指定转换方向。通过使用 `@ReadingConverter` 注解，你指示 Spring Data 将数据库中所有应赋值给 `Boolean` 属性的 `String` 值进行转换。
+
+[[jdbc.custom-converters.configuration]]
+=== 在 `JdbcConverter` 中注册 Spring 转换器
+
+[source,java]
+----
+class MyJdbcConfiguration extends AbstractJdbcConfiguration {
+
+    // …
+
+    @Override
+    protected List<?> userConverters() {
+        return Arrays.asList(new BooleanToStringConverter(), new StringToBooleanConverter());
+    }
+
+}
+----
+
+NOTE: 在早期版本的 Spring Data JDBC 中，推荐直接重写 `AbstractJdbcConfiguration.jdbcCustomConversions()` 方法。现在这已不再必要甚至不推荐，因为该方法会组合所有数据库通用的转换、由所用 `Dialect` 注册的转换以及用户注册的转换。如果你从旧版本迁移且重写了 `jdbcCustomConversions()`，则 `Dialect` 注册的转换将不会被正确加载。
+
+[TIP]
+====
+如果你想依赖 https://spring.io/projects/spring-boot[Spring Boot] 来引导 Spring Data JDBC，但仍想覆盖某些配置项，可以选择暴露对应类型的 Bean。例如，对于自定义转换，你可以注册一个 `JdbcCustomConversions` 类型的 Bean，Boot 基础设施会自动识别并使用它。欲了解更多，请务必查阅 Spring Boot 官方 https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#data.sql.jdbc[参考文档]。
+====
+
+[[jdbc.custom-converters.jdbc-value]]
+=== JdbcValue
+
+值转换使用 `JdbcValue` 来增强传递给 JDBC 操作的值，使其携带 `java.sql.Types` 类型信息。如果你需要指定特定于 JDBC 的类型而不是依赖类型推断，请注册一个自定义的写入转换器。该转换器应将值转换为 `JdbcValue`，后者包含一个值字段和一个实际的 `JDBCType` 字段。

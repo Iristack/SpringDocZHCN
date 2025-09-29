@@ -1,0 +1,4 @@
+[[jdbc.sequences]]
+= 序列支持
+
+include::partial$sequences.adoc[]

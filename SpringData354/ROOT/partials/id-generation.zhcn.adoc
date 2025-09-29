@@ -1,0 +1,14 @@
+[[entity-persistence.id-generation]]
+== ID 生成
+
+Spring Data 使用标识符属性来识别实体，即通过这些属性查找或创建针对特定行的语句。实体的 ID 必须使用 Spring Data 的 {spring-data-commons-javadoc-base}/org/springframework/data/annotation/Id.html[`@Id`] 注解进行标注。
+
+当数据库中的 ID 列为自增列时，在将实体插入数据库后，生成的值会被设置到该实体中。
+
+如果你还使用 `@Sequence` 注解标识符属性，并且底层 `Dialect` 支持序列，则会使用数据库序列来获取 ID 值。
+
+否则，当实体为新实体时，Spring Data 不会尝试向标识符列插入值，此时标识符值将保持其默认初始值：对于基本类型是 `0`，如果标识符属性使用的是 `Long` 等数值包装类型，则默认值为 `null`。
+
+xref:repositories/core-concepts.adoc#is-new-state-detection[实体状态检测] 详细解释了判断实体是否为新实体、或是否预期已存在于数据库中的各种策略。
+
+一个重要的约束是：在保存实体之后，该实体不能再被视为“新实体”。请注意，实体是否为新实体是其实体状态的一部分。对于自增列，这一点会自动实现，因为 Spring Data 会使用数据库 ID 列返回的值来设置实体的 ID。

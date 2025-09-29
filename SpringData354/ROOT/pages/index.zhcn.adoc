@@ -1,0 +1,20 @@
+[[spring-data-jpa-reference-documentation]]
+= Spring Data JDBC 和 R2DBC
+:revnumber: {version}
+:revdate: {localdate}
+:feature-scroll: true
+
+_Spring Data JDBC 和 R2DBC 为 Java 数据库连接（JDBC）以及响应式关系型数据库连接（R2DBC）API 提供了仓库支持。它通过一致的编程模型简化了需要访问 SQL 数据源的应用程序开发。_
+
+[horizontal]
+xref:repositories/introduction.adoc[简介] :: 仓库简介  
+xref:jdbc.adoc[JDBC] :: JDBC 对象映射与仓库  
+xref:r2dbc.adoc[R2DBC] :: R2DBC 对象映射与仓库  
+xref:kotlin.adoc[Kotlin] :: Kotlin 特定支持  
+https://github.com/spring-projects/spring-data-commons/wiki[Wiki] :: 最新动态、升级说明、支持版本及其他跨版本信息。
+
+作者：Jens Schauder, Jay Bryant, Mark Paluch, Bastian Wilhelm
+
+(C) 2008-{copyright-year} VMware, Inc.
+
+您可以出于个人使用或分发给他人之目的复制本文档，但前提是您不得为此类复制收取任何费用，并且每份副本（无论是以印刷形式还是电子形式分发）必须包含本版权声明。

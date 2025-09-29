@@ -1,0 +1,12 @@
+[[jdbc.repositories]]
+= JDBC
+:page-section-summary-toc: 1
+
+Spring Data JDBC 模块将核心的 Spring 概念应用于基于 JDBC 数据库驱动的开发，并遵循 xref:jdbc/domain-driven-design.adoc[领域驱动设计原则] 来构建解决方案。  
+我们提供了一个“模板”（`template`），作为存储和查询聚合根（aggregates）的高级抽象。
+
+本文档是 Spring Data JDBC 支持的参考指南，解释了相关概念、语义和语法。
+
+本章节重点介绍针对 JDBC 的仓库（repository）支持特性。  
+其建立在 xref:repositories/introduction.adoc[使用 Spring Data 仓库] 中所阐述的核心仓库支持基础之上。  
+你应该充分理解其中所讲解的基本概念。

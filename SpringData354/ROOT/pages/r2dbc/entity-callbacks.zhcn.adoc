@@ -1,0 +1,42 @@
+[[r2dbc.entity-callbacks]]
+= 实体回调（EntityCallbacks）
+
+Spring Data R2DBC 使用 xref:commons/entity-callbacks.adoc[`EntityCallback` API] 来支持审计功能，并响应以下回调。
+
+.支持的实体回调
+[%header,cols="4"]
+|===
+| 回调
+| 方法
+| 描述
+| 执行顺序
+
+| BeforeConvertCallback
+| `onBeforeConvert(T entity, SqlIdentifier table)`
+| 在领域对象被转换为 `OutboundRow` 之前调用。
+| `Ordered.LOWEST_PRECEDENCE`
+
+| AfterConvertCallback
+| `onAfterConvert(T entity, SqlIdentifier table)`
+| 在领域对象加载之后调用。+
+可以在从数据行读取后修改领域对象。
+| `Ordered.LOWEST_PRECEDENCE`
+
+| AuditingEntityCallback
+| `onBeforeConvert(T entity, SqlIdentifier table)`
+| 标记可审计实体为 _已创建_ 或 _已修改_。
+| 100
+
+| BeforeSaveCallback
+| `onBeforeSave(T entity, OutboundRow row, SqlIdentifier table)`
+| 在领域对象保存之前调用。+
+可以修改目标 `OutboundRow`，即包含所有映射实体信息的、将要持久化的对象。
+| `Ordered.LOWEST_PRECEDENCE`
+
+| AfterSaveCallback
+| `onAfterSave(T entity, OutboundRow row, SqlIdentifier table)`
+| 在领域对象保存之后调用。+
+可以修改将要返回的领域对象以及包含所有映射实体信息的 `OutboundRow`。
+| `Ordered.LOWEST_PRECEDENCE`
+
+|===

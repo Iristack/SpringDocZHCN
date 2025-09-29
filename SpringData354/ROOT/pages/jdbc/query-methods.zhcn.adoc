@@ -1,0 +1,269 @@
+[[jdbc.query-methods]]
+= 查询方法
+
+本节提供有关 Spring Data JDBC 实现和使用的一些具体信息。
+
+通常在仓库（repository）上触发的大多数数据访问操作都会导致对数据库执行查询。  
+定义此类查询只需在仓库接口中声明一个方法，如下例所示：
+
+.PersonRepository 包含查询方法
+[source,java]
+----
+interface PersonRepository extends PagingAndSortingRepository<Person, String> {
+
+    List<Person> findByFirstname(String firstname);                                   <1>
+
+    List<Person> findByFirstnameOrderByLastname(String firstname, Pageable pageable); <2>
+
+    Slice<Person> findByLastname(String lastname, Pageable pageable);                 <3>
+
+    Page<Person> findByLastname(String lastname, Pageable pageable);                  <4>
+
+    Person findByFirstnameAndLastname(String firstname, String lastname);             <5>
+
+    Person findFirstByLastname(String lastname);                                      <6>
+
+    @Query("SELECT * FROM person WHERE lastname = :lastname")
+    List<Person> findByLastname(String lastname);                                     <7>
+    
+    @Query("SELECT * FROM person WHERE lastname = :lastname")
+    Stream<Person> streamByLastname(String lastname);                                     <8>
+
+    @Query("SELECT * FROM person WHERE username = :#{ principal?.username }")
+    Person findActiveUser();															<9>
+}
+----
+<1> 该方法用于查找具有指定 `firstname` 的所有人。查询是通过解析方法名中的约束条件（可使用 `And` 和 `Or` 连接）生成的。因此，该方法名称最终会生成类似 `SELECT … FROM person WHERE firstname = :firstname` 的查询表达式。
+<2> 使用 `Pageable` 向数据库传递偏移量和排序参数。
+<3> 返回一个 `Slice<Person>`。选择 `LIMIT+1` 行以判断是否还有更多数据可供消费。不支持自定义 `ResultSetExtractor`。
+<4> 执行分页查询并返回 `Page<Person>`。仅选择给定页面范围内的数据，并可能额外执行一次计数查询以确定总数。不支持自定义 `ResultSetExtractor`。
+<5> 根据给定条件查找单个实体。如果结果不唯一，则抛出 `IncorrectResultSizeDataAccessException` 异常。
+<6> 与 <3> 不同的是，即使查询返回多个结果，也总是返回第一个实体。
+<7> `findByLastname` 方法用于查找具有指定 `lastname` 的所有人。
+<8> `streamByLastname` 方法返回一个 `Stream`，使得只要数据库返回了值就可以立即使用这些值。
+<9> 可以使用 Spring 表达式语言（SpEL）动态解析参数。在此示例中，Spring Security 被用来获取当前用户的用户名。
+
+下表列出了查询方法支持的关键字：
+
+[cols="1,2,3",options="header",subs="quotes"]
+.查询方法支持的关键字
+|===
+| 关键字
+| 示例
+| 逻辑结果
+
+| `After`
+| `findByBirthdateAfter(Date date)`
+| `birthdate > date`
+
+| `GreaterThan`
+| `findByAgeGreaterThan(int age)`
+| `age > age`
+
+| `GreaterThanEqual`
+| `findByAgeGreaterThanEqual(int age)`
+| `age >= age`
+
+| `Before`
+| `findByBirthdateBefore(Date date)`
+| `birthdate < date`
+
+| `LessThan`
+| `findByAgeLessThan(int age)`
+| `age < age`
+
+| `LessThanEqual`
+| `findByAgeLessThanEqual(int age)`
+| `age \<= age`
+
+| `Between`
+| `findByAgeBetween(int from, int to)`
+| `age BETWEEN from AND to`
+
+| `NotBetween`
+| `findByAgeNotBetween(int from, int to)`
+| `age NOT BETWEEN from AND to`
+
+| `In`
+| `findByAgeIn(Collection<Integer> ages)`
+| `age IN (age1, age2, ageN)`
+
+| `NotIn`
+| `findByAgeNotIn(Collection ages)`
+| `age NOT IN (age1, age2, ageN)`
+
+| `IsNotNull`, `NotNull`
+| `findByFirstnameNotNull()`
+| `firstname IS NOT NULL`
+
+| `IsNull`, `Null`
+| `findByFirstnameNull()`
+| `firstname IS NULL`
+
+| `Like`, `StartingWith`, `EndingWith`
+| `findByFirstnameLike(String name)`
+| `firstname LIKE name`
+
+| `NotLike`, `IsNotLike`
+| `findByFirstnameNotLike(String name)`
+| `firstname NOT LIKE name`
+
+| `Containing`（字符串类型）
+| `findByFirstnameContaining(String name)`
+| `firstname LIKE '%' + name + '%'`
+
+| `NotContaining`（字符串类型）
+| `findByFirstnameNotContaining(String name)`
+| `firstname NOT LIKE '%' + name + '%'`
+
+| （无关键字）
+| `findByFirstname(String name)`
+| `firstname = name`
+
+| `Not`
+| `findByFirstnameNot(String name)`
+| `firstname != name`
+
+| `IsTrue`, `True`
+| `findByActiveIsTrue()`
+| `active IS TRUE`
+
+| `IsFalse`,  `False`
+| `findByActiveIsFalse()`
+| `active IS FALSE`
+|===
+
+NOTE: 查询推导目前仅限于可以直接在 `WHERE` 子句中使用的属性，不能涉及连接（joins）。
+
+[[jdbc.query-methods.strategies]]
+== 查询查找策略
+
+JDBC 模块支持手动将查询定义为 `@Query` 注解中的字符串，或作为属性文件中的命名查询。
+
+从方法名推导查询目前仅适用于简单属性，即直接存在于聚合根中的属性。此外，这种方法仅支持 SELECT 查询。
+
+[[jdbc.query-methods.at-query]]
+== 使用 `@Query`
+
+以下示例展示了如何使用 `@Query` 声明查询方法：
+
+.使用 @Query 声明查询方法
+[source,java]
+----
+interface UserRepository extends CrudRepository<User, Long> {
+
+    @Query("select firstName, lastName from User u where u.emailAddress = :email")
+    User findByEmailAddress(@Param("email") String email);
+}
+----
+
+为了将查询结果转换为实体，默认情况下使用与 Spring Data JDBC 自动生成查询所用相同的 `RowMapper`。你提供的查询必须符合 `RowMapper` 所期望的格式。构造函数中使用的所有属性都必须提供对应的列；通过 setter、wither 或字段访问设置的属性对应的列为可选。结果集中没有匹配列的属性将不会被设置。
+
+该查询用于填充聚合根、嵌入式实体以及一对一关系（包括作为 SQL 数组类型存储和加载的基本类型数组）。对于 Map、List、Set 和实体数组，会单独生成查询。
+
+一对一关系的属性名称必须以前缀形式加上关系名称加 `_`。例如，如果上面示例中的 `User` 有一个 `address` 属性，而 `address` 中有 `city` 属性，则该 `city` 对应的列必须命名为 `address_city`。
+
+WARNING: 注意基于字符串的查询不支持分页，也不接受 `Sort`、`PageRequest` 和 `Limit` 作为查询参数，因为这需要重写查询语句。如果你希望应用限制，请在 SQL 中显式表达此意图，并自行绑定适当的参数。
+
+查询可以包含 SpEL 表达式。有两种变体，其求值方式不同。
+
+第一种变体中，SpEL 表达式以 `:` 开头，用作绑定变量。这样的 SpEL 表达式会被替换为绑定变量，且该变量会被绑定到 SpEL 表达式的计算结果上。
+
+.在查询中使用 SpEL
+[source,java]
+----
+@Query("SELECT * FROM person WHERE id = :#{#person.id}")
+Person findWithSpEL(PersonRef person);
+----
+
+这可用于访问参数的成员，如上例所示。对于更复杂的用例，可以在应用程序上下文中提供 `EvaluationContextExtension`，从而向 SpEL 暴露任意对象。
+
+另一种变体可在查询的任意位置使用，表达式求值后的结果将替换查询字符串中的表达式本身。
+
+.在查询中使用 SpEL
+[source,java]
+----
+@Query("SELECT * FROM #{tableName} WHERE id = :id")
+Person findWithSpEL(PersonRef person);
+----
+
+它会在首次执行前求值一次，使用带有两个变量 `tableName` 和 `qualifiedTableName` 的 `StandardEvaluationContext`。当表名本身是动态的时候（比如也使用了 SpEL 表达式），这种用法非常有用。
+
+NOTE: Spring 完全支持 Java 8 的参数名发现功能，前提是编译时使用了 `-parameters` 编译器标志。在构建时使用此标志替代调试信息，即可省略 `@Param` 注解对命名参数的标注。
+
+NOTE: Spring Data JDBC 仅支持命名参数。
+
+[[jdbc.query-methods.named-query]]
+== 命名查询
+
+如果在注解中未提供查询（如前一节所述），Spring Data JDBC 将尝试查找命名查询。确定查询名称的方式有两种：
+默认方式是取查询的目标领域类（即仓库的聚合根）的简单类名，并在其后加上方法名，两者之间用 `.` 分隔。
+或者，`@Query` 注解提供了 `name` 属性，可用于指定要查找的查询名称。
+
+命名查询应放在类路径下的属性文件 `META-INF/jdbc-named-queries.properties` 中。
+
+可通过设置 `@EnableJdbcRepositories.namedQueriesLocation` 来更改该文件的位置。
+
+命名查询的处理方式与注解提供的查询相同。
+
+[[jdbc.query-methods.customizing-query-methods]]
+=== 自定义查询方法
+
+[[jdbc.query-methods.at-query.streaming-results]]
+=== 流式结果
+
+当你将查询方法的返回类型指定为 `Stream` 时，Spring Data JDBC 会在数据可用时立即返回元素。处理大量数据时，这种方式有助于减少延迟和内存占用。
+
+流包含一个打开的数据库连接。为了避免内存泄漏，必须最终关闭流来关闭连接。推荐的做法是使用 `try-with-resources` 语句。这也意味着一旦数据库连接关闭，流就无法再获取更多元素，并可能会抛出异常。
+
+[[jdbc.query-methods.at-query.custom-rowmapper]]
+=== 自定义 `RowMapper` 或 `ResultSetExtractor`
+
+`@Query` 注解允许你指定自定义的 `RowMapper` 或 `ResultSetExtractor`。通过 `rowMapperClass` 和 `resultSetExtractorClass` 属性可以指定要使用的类，这些类将通过默认构造函数实例化。  
+或者，你可以将 `rowMapperClassRef` 或 `resultSetExtractorClassRef` 设置为 Spring 应用上下文中的 Bean 名称。
+
+如果你想不仅限于单个方法，而是为所有返回特定类型的自定义查询方法统一使用某个 `RowMapper`，可以注册一个 `RowMapperMap` Bean，并为每种方法返回类型注册相应的 `RowMapper`。  
+以下示例展示了如何注册 `DefaultQueryMappingConfiguration`：
+
+[source,java]
+----
+@Bean
+QueryMappingConfiguration rowMappers() {
+    return new DefaultQueryMappingConfiguration()
+        .register(Person.class, new PersonRowMapper())
+        .register(Address.class, new AddressRowMapper());
+}
+----
+
+在确定某个方法应使用哪个 `RowMapper` 时，会根据方法的返回类型按以下步骤进行：
+
+. 如果类型是简单类型，则不使用 `RowMapper`。
++
+此时预期查询返回单行单列的结果，并对该值进行类型转换。
+. 遍历 `QueryMappingConfiguration` 中注册的实体类，直到找到一个是当前返回类型的父类或接口的类为止。使用为此类注册的 `RowMapper`。
++
+遍历顺序即注册顺序，因此请确保先注册具体的类型，再注册通用的类型。
+
+若适用，像集合或 `Optional` 这样的包装类型会被解包。因此，返回类型为 `Optional<Person>` 的方法在上述过程中实际使用的是 `Person` 类型。
+
+NOTE: 通过 `QueryMappingConfiguration`、`@Query(rowMapperClass=…)` 或自定义 `ResultSetExtractor` 使用自定义 `RowMapper` 时，会禁用实体回调（Entity Callbacks）和生命周期事件（Lifecycle Events），因为结果映射本身可以根据需要发出自己的事件/回调。
+
+[[jdbc.query-methods.at-query.modifying]]
+=== 修改型查询
+
+你可以通过在查询方法上添加 `@Modifying` 注解将其标记为修改型查询，如下例所示：
+
+[source,java]
+----
+@Modifying
+@Query("UPDATE DUMMYENTITY SET name = :name WHERE id = :id")
+boolean updateName(@Param("id") Long id, @Param("name") String name);
+----
+
+你可以指定以下返回类型：
+
+* `void`
+* `int`（更新记录的数量）
+* `boolean`（是否成功更新了一条记录）
+
+修改型查询直接在数据库上执行。不会触发任何事件或回调。因此，如果审计注解（auditing annotations）的字段未在注解查询中被更新，则它们也不会自动更新。

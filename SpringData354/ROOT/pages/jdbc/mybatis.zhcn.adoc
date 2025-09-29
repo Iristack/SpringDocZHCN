@@ -1,0 +1,105 @@
+[[jdbc.mybatis]]
+= MyBatis 集成
+
+CRUD 操作和查询方法可以委托给 MyBatis 处理。  
+本节介绍如何配置 Spring Data JDBC 以与 MyBatis 集成，以及在将查询执行和映射工作交给 MyBatis 库时需要遵循的约定。
+
+[[jdbc.mybatis.configuration]]
+== 配置
+
+将 MyBatis 正确集成到 Spring Data JDBC 的最简单方式是将 `MyBatisJdbcConfiguration` 导入到你的应用程序配置中：
+
+[source,java]
+----
+@Configuration
+@EnableJdbcRepositories
+@Import(MyBatisJdbcConfiguration.class)
+class Application {
+
+    @Bean
+    SqlSessionFactoryBean sqlSessionFactoryBean() {
+        // 在此处配置 MyBatis
+    }
+}
+----
+
+如你所见，你只需声明一个 `SqlSessionFactoryBean`，因为 `MyBatisJdbcConfiguration` 最终依赖于 `ApplicationContext` 中存在一个 `SqlSession` Bean。
+
+[[jdbc.mybatis.conventions]]
+== 使用约定
+
+对于 `CrudRepository` 中的每个操作，Spring Data JDBC 会执行多个语句。  
+如果应用上下文中存在 https://github.com/mybatis/mybatis-3/blob/master/src/main/java/org/apache/ibatis/session/SqlSessionFactory.java[`SqlSessionFactory`]，Spring Data 会在每一步检查该 `SqlSessionFactory` 是否提供了对应的语句。如果找到对应语句，则使用该语句（包括其配置的实体映射）。
+
+语句名称通过将实体类型的全限定名与 `Mapper.` 和表示语句类型的字符串拼接而成。例如，如果要插入一个 `org.example.User` 实例，Spring Data JDBC 将查找名为 `org.example.UserMapper.insert` 的语句。
+
+执行语句时，会传入一个 [`MyBatisContext`] 实例作为参数，使得语句可以访问多种属性。
+
+下表描述了可用的 MyBatis 语句：
+
+[cols="default,default,default,asciidoc"]
+|===
+| 名称 | 目的 | 可能触发此语句的 CrudRepository 方法 | `MyBatisContext` 中可用的属性
+
+| `insert` | 插入单个实体。这也适用于被聚合根引用的实体。 | `save`, `saveAll` |
+`getInstance`: 要保存的实例
+
+`getDomainType`: 要保存的实体类型
+
+`get(<key>)`: 引用实体的 ID，其中 `<key>` 是由 `NamingStrategy` 提供的反向引用列的名称
+
+
+| `update` | 更新单个实体。这也适用于被聚合根引用的实体。 | `save`, `saveAll` |
+`getInstance`: 要保存的实例
+
+`getDomainType`: 要保存的实体类型
+
+| `delete` | 删除单个实体。 | `delete`, `deleteById` |
+`getId`: 要删除的实例的 ID
+
+`getDomainType`: 要删除的实体类型
+
+| `deleteAll-<propertyPath>` | 删除由指定前缀类型的所有聚合根通过给定属性路径所引用的所有实体。注意：语句名称的前缀类型是聚合根的名称，而不是要删除实体的类型。 | `deleteAll` |
+`getDomainType`: 要删除的实体类型
+
+| `deleteAll` | 删除作为前缀使用的类型的所有聚合根 | `deleteAll` |
+`getDomainType`: 要删除的实体类型
+
+| `delete-<propertyPath>` | 删除通过给定属性路径被某个聚合根引用的所有实体 | `deleteById` |
+`getId`: 要删除其引用实体的聚合根的 ID
+
+`getDomainType`: 要删除的实体类型
+
+| `findById` | 根据 ID 查询聚合根 | `findById` |
+`getId`: 要加载的实体的 ID
+
+`getDomainType`: 要加载的实体类型
+
+| `findAll` | 查询所有聚合根 | `findAll` |
+`getDomainType`: 要加载的实体类型
+
+| `findAllById` | 根据 ID 列表查询一组聚合根 | `findAllById` |
+`getId`: 要加载的实体 ID 列表
+
+`getDomainType`: 要加载的实体类型
+
+| `findAllByProperty-<propertyName>` | 查询被另一个实体引用的一组实体。引用实体的类型作为前缀，被引用实体的类型作为后缀。_此方法已弃用，请改用 `findAllByPath`_ | 所有 `find*` 方法。若未为 `findAllByPath` 定义查询，则使用此方法 |
+`getId`: 被引用实体所属的引用实体的 ID
+
+`getDomainType`: 要加载的实体类型
+
+
+| `findAllByPath-<propertyPath>` | 通过属性路径查询被另一个实体引用的一组实体 | 所有 `find*` 方法 |
+`getIdentifier`: 包含聚合根 ID 以及所有路径元素的键和列表索引的 `Identifier`
+
+`getDomainType`: 要加载的实体类型
+
+| `findAllSorted` | 查询所有聚合根，并进行排序 | `findAll(Sort)` |
+`getSort`: 排序规范
+
+| `findAllPaged` | 分页查询聚合根，可选排序 | `findAll(Page)` |
+`getPageable`: 分页规范
+
+| `count` | 统计作为前缀类型的聚合根数量 | `count` |
+`getDomainType`: 要统计的聚合根类型
+|===

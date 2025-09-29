@@ -1,0 +1,62 @@
+[[migration-guide]]
+= 迁移指南
+
+以下章节说明了如何迁移到 Spring Data R2DBC 的较新版本。
+
+[[upgrading.1.1-1.2]]
+== 从 1.1.x 升级到 1.2.x
+
+Spring Data R2DBC 最初的开发目的是评估 R2DBC 与 Spring 应用程序集成的效果。  
+其中一个主要目标是：一旦 R2DBC 支持被证明有用，就将其核心功能移入 Spring 框架中。  
+Spring Framework 5.3 引入了一个新模块：Spring R2DBC（`spring-r2dbc`）。
+
+`spring-r2dbc` 包含了原本由 Spring Data R2DBC 提供的核心 R2DBC 功能（一个轻量版的 `DatabaseClient`、事务管理器、连接工厂初始化、异常转换等）。  
+1.2.0 版本通过以下各节所述的多项变更，与 Spring R2DBC 所提供的功能保持一致。
+
+Spring R2DBC 的 `DatabaseClient` 是一个更轻量的实现，封装了一个纯 SQL 导向的接口。  
+你会注意到执行 SQL 语句的方法已从 `DatabaseClient.execute(…)` 变更为 `DatabaseClient.sql(…)`。  
+用于 CRUD 操作的流式 API 已迁移至 `R2dbcEntityTemplate`。
+
+如果你使用日志记录 SQL 语句，并通过日志记录器前缀 `org.springframework.data.r2dbc` 进行配置，请确保将其更新为 `org.springframework.r2dbc`（即去掉 `.data`），以指向 Spring R2DBC 的相关组件。
+
+[[upgrading.1.1-1.2.deprecation]]
+=== 已弃用的功能
+
+* 弃用 `o.s.d.r2dbc.core.DatabaseClient` 及其支持类 `ConnectionAccessor`、`FetchSpec`、`SqlProvider` 等。  
+  像 `NamedParameterExpander` 这样的命名参数支持类已被 Spring R2DBC 的 `DatabaseClient` 实现所封装，因此我们不再提供替代方案，因为这些原本就是内部 API。  
+  请改用 `o.s.r2dbc.core.DatabaseClient` 及其在 `org.springframework.r2dbc.core` 中提供的 Spring R2DBC 替代类。  
+  基于实体的操作方法（如 `select`/`insert`/`update`/`delete`）可通过 `R2dbcEntityTemplate` 使用，该类自 1.1 版本起引入。
+* 弃用 `o.s.d.r2dbc.connectionfactory`、`o.s.d.r2dbc.connectionfactory.init` 和 `o.s.d.r2dbc.connectionfactory.lookup` 包。  
+  请使用 Spring R2DBC 对应的版本，位于 `o.s.r2dbc.connection` 包下。
+* 弃用 `o.s.d.r2dbc.convert.ColumnMapRowMapper`。  
+  请改用 `o.s.r2dbc.core.ColumnMapRowMapper`。
+* 弃用绑定支持类 `o.s.d.r2dbc.dialect.Bindings`、`BindMarker`、`BindMarkers`、`BindMarkersFactory` 及相关类型。  
+  请使用 `org.springframework.r2dbc.core.binding` 中的替代类。
+* 弃用 `BadSqlGrammarException`、`UncategorizedR2dbcException` 以及 `o.s.d.r2dbc.support` 中的异常转换机制。  
+  Spring R2DBC 目前提供了一个轻量级的异常转换机制，但暂不包含 SPI，可通过 `o.s.r2dbc.connection.ConnectionFactoryUtils#convertR2dbcException` 使用。
+
+[[upgrading.1.1-1.2.replacements]]
+=== 使用 Spring R2DBC 提供的替代类
+
+为了简化迁移过程，多个已弃用的类型现在已成为 Spring R2DBC 提供的对应替代类的子类型。  
+Spring Data R2DBC 修改了一些方法或引入了新的方法，以接受 Spring R2DBC 的类型。  
+具体涉及以下类：
+
+* `R2dbcEntityTemplate`
+* `R2dbcDialect`
+* `org.springframework.data.r2dbc.query` 中的类型
+
+如果你直接使用这些类型，我们建议你检查并更新你的导入语句。
+
+[[breaking-changes]]
+=== 不兼容的变更（Breaking Changes）
+
+* `OutboundRow` 和语句映射器从使用 `SettableValue` 切换为使用 `Parameter`。
+* 仓库工厂（Repository factory）现在要求使用 `o.s.r2dbc.core.DatabaseClient`，而非 `o.s.data.r2dbc.core.DatabaseClient`。
+
+[[upgrading.1.1-1.2.dependencies]]
+=== 依赖项变更
+
+要使用 Spring R2DBC，请确保添加以下依赖：
+
+* `org.springframework:spring-r2dbc`

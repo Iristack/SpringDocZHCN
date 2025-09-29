@@ -1,0 +1,105 @@
+[[jdbc.entity-persistence]]
+= 实体持久化
+
+可以通过 `CrudRepository.save(…)` 方法保存聚合（aggregate）。  
+如果该聚合是新的，将会首先为聚合根插入一条记录，然后依次插入所有直接或间接引用的实体。
+
+如果聚合根已存在，则会先删除所有引用的子实体，接着更新聚合根，最后重新插入所有引用的实体。  
+需要注意的是，一个实例是否为“新”属于其实例状态的一部分。
+
+NOTE: 这种方式存在一些明显的缺点。  
+如果被引用的实体中仅有少数发生了变化，那么全部删除再重新插入的操作将是低效且浪费资源的。  
+虽然这一过程未来可能会得到改进，但 Spring Data JDBC 本身存在一定的局限性：它无法得知聚合的先前状态。  
+因此，任何更新操作都必须基于数据库中的当前数据，并确保将其转换为传递给 `save` 方法的实体所代表的状态。
+
+更多详情，请参见 xref:repositories/core-concepts.adoc#is-new-state-detection[实体状态检测]。
+
+[[jdbc.loading-aggregates]]
+== 加载聚合
+
+Spring Data JDBC 提供了两种加载聚合的方式：
+
+. 传统方式（在 3.2 版本之前是唯一的方式）非常简单：
+每个查询都会独立地加载聚合根，无论该查询是基于 `CrudRepository` 的方法、派生查询还是注解查询。
+如果聚合根引用了其他实体，则这些实体将通过额外的 SQL 语句单独加载。
+
+. Spring Data JDBC 3.2 引入了 _单查询加载_（Single Query Loading）功能。
+使用此功能，可以通过一条 SQL 查询完整加载任意数量的聚合。
+这对于由多个实体组成的复杂聚合来说，性能上有显著提升。
++
+目前，单查询加载在以下几个方面仍有限制：
+
+1. 聚合不能包含嵌套集合，包括 `Map` 类型。
+未来计划移除此项限制。
+
+2. 聚合不能使用 `AggregateReference` 或内嵌实体（embedded entities）。
+未来计划移除此项限制。
+
+3. 数据库方言必须支持该功能。
+Spring Data JDBC 提供的方言中，除了 H2 和 HSQL 外均支持此功能。
+H2 和 HSQL 不支持分析函数（即窗口函数）。
+
+4. 仅对 `CrudRepository` 中的查找方法有效，不适用于派生查询和注解查询。
+未来计划移除此项限制。
+
+5. 必须通过调用 `JdbcMappingContext` 的 `setSingleQueryLoadingEnabled(true)` 方法显式启用单查询加载功能。
+
+只要上述任一条件未满足，Spring Data JDBC 将回退到默认的聚合加载方式。
+
+NOTE: 单查询加载目前被视为实验性功能。  
+我们非常欢迎你提供使用反馈。
+
+NOTE: 尽管“单查询加载”可简写为 SQL，但我们强烈建议不要这样做，因为这极易与“结构化查询语言”（Structured Query Language）混淆。
+
+include::partial$id-generation.adoc[]
+
+[[jdbc.template]]
+== 模板 API
+
+作为 Repository 的替代方案，Spring Data JDBC 提供了 javadoc:org.springframework.data.jdbc.core.JdbcAggregateTemplate[]，用于更直接地在关系型数据库中加载和持久化实体。  
+实际上，Repository 的大多数功能正是通过 `JdbcAggregateTemplate` 来实现的。
+
+本节仅重点介绍 `JdbcAggregateTemplate` 中最值得关注的功能部分。  
+如需更全面的了解，请参考其 JavaDoc 文档。
+
+=== 访问 JdbcAggregateTemplate
+
+`JdbcAggregateTemplate` 设计为作为 Spring Bean 使用。  
+如果你的应用已经配置了 Spring Data JDBC，那么可以在任意 Spring Bean 中声明对 `JdbcAggregateTemplate` 的依赖，Spring 框架便会自动注入一个正确配置的实例。
+
+这也包括你在自定义 Spring Data Repository 方法时使用的代码片段，从而可以利用 `JdbcAggregateTemplate` 来定制和扩展你的 Repository。
+
+=== 持久化操作
+
+`JdbcAggregateTemplate` 提供了三种类型的持久化方法：`save`、`insert` 和 `update`。  
+每种方法都有两个版本：
+- 操作单个聚合，名称如上所示；
+- 带有 `All` 后缀的版本，用于操作 `Iterable` 集合。
+
+`save` 方法的行为与 Repository 中同名方法一致。
+
+`insert` 和 `update` 方法则跳过是否为新实体的判断，直接根据方法名假设实体为新建或已存在。
+
+=== 查询操作
+
+`JdbcAggregateTemplate` 提供了丰富的聚合查询和集合查询方法。  
+其中有一类方法需要特别注意：即接受 `Query` 对象作为参数的方法。  
+它们允许执行程序化构建的查询，例如：
+
+[source,java]
+----
+template.findOne(query(where("name").is("Gandalf")), Person.class);
+----
+
+`query` 方法返回的 javadoc:org.springframework.data.relational.core.query.Query[] 对象定义了要选择的列列表、一个 where 子句（通过 CriteriaDefinition 表示），以及 limit 和 offset 的设置。  
+关于 `Query` 类的更多细节，请参阅其 JavaDoc。
+
+javadoc:org.springframework.data.relational.core.query.Criteria[] 类（`where` 是其静态成员）提供了 org.springframework.data.relational.core.query.CriteriaDefinition[] 的实现，用于表示查询的 where 条件部分。
+
+[[jdbc.criteria]]
+include::../commons/criteria-methods.adoc[]
+
+[[jdbc.entity-persistence.optimistic-locking]]
+== 乐观锁
+
+include::partial$optimistic-locking.adoc[]

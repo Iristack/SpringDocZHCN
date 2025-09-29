@@ -1,0 +1,224 @@
+[[mapping]]
+= 映射（Mapping）
+
+`MappingR2dbcConverter` 提供了丰富的映射支持，它拥有一个强大的元数据模型，可将领域对象映射到数据库行。该元数据模型通过在领域对象上使用注解来填充。然而，这一基础设施并不仅限于使用注解作为唯一的元数据来源。`MappingR2dbcConverter` 还允许你在不提供额外元数据的情况下，遵循一组约定来实现对象与数据行之间的映射。
+
+本节介绍 `MappingR2dbcConverter` 的功能，包括如何使用约定进行对象到行的映射，以及如何通过基于注解的元数据覆盖这些约定。
+
+在继续阅读本章之前，请先了解 xref:object-mapping.adoc[] 中关于对象映射的基础知识。
+
+[[mapping.conventions]]
+== 基于约定的映射
+
+当未提供额外的映射元数据时，`MappingR2dbcConverter` 提供了一些默认的映射约定。这些约定如下：
+
+* **类名和字段名到表名和列名的映射方式**：Java 类的短名称会按照一定规则映射为表名。例如，`com.bigbank.SavingsAccount` 类会被映射到名为 `SAVINGS_ACCOUNT` 的表。同样的命名规则也适用于字段到列名的映射，如 `firstName` 字段映射为 `FIRST_NAME` 列。你可以通过提供自定义的 `NamingStrategy` 来控制这种映射关系。详见 <<mapping.configuration,映射配置>> 部分。
+  
+  默认情况下，从属性或类名派生出的表名和列名在 SQL 语句中是不带引号使用的。你可以通过设置 `RelationalMappingContext.setForceQuote(true)` 来改变此行为。
+
+* **不支持嵌套对象**。
+
+* 转换器会使用注册在 `CustomConversions` 中的任何 Spring Converter，以覆盖对象属性到行列及其值的默认映射。
+
+* 对象的字段用于与行中的列进行相互转换。公共的 `JavaBean` 属性不会被使用。
+
+* 如果存在一个非零参数构造函数，并且其参数名与行中顶级列名匹配，则使用该构造函数；否则使用无参构造函数。如果有多个非零参数构造函数，则会抛出异常。更多细节请参见 xref:object-mapping.adoc#mapping.object-creation[对象创建]。
+
+[[mapping.configuration]]
+== 映射配置
+
+默认情况下（除非显式配置），当你创建 `DatabaseClient` 时，会自动创建一个 `MappingR2dbcConverter` 实例。你也可以手动创建自己的 `MappingR2dbcConverter` 实例，从而注册 Spring Converter，以实现特定类与数据库之间的映射。
+
+你可以使用基于 Java 的元数据配置 `MappingR2dbcConverter`、`DatabaseClient` 和 `ConnectionFactory`。以下示例展示了如何使用 Spring 的基于 Java 的配置：
+
+如果你将 `R2dbcMappingContext` 的 `setForceQuote` 设置为 `true`，那么从类和属性派生出的表名和列名将在 SQL 中使用数据库特定的引号包裹。这意味着即使使用了 SQL 保留字（如 `order`）作为名称也是允许的。你可以通过重写 `AbstractR2dbcConfiguration` 的 `r2dbcMappingContext(Optional<NamingStrategy>)` 方法来实现这一点。
+
+Spring Data 会将此类名称的大小写转换为配置的数据库在未加引号时所使用的格式。因此，只要你的名称中不包含关键字或特殊字符，就可以在建表时使用不带引号的名称。对于符合 SQL 标准的数据库，这意味着名称会被转换为大写形式。引号字符以及名称的大小写规则由所使用的 `Dialect` 控制。有关如何配置自定义方言的信息，请参见 xref:r2dbc/getting-started.adoc#r2dbc.dialects[R2DBC 驱动程序]。
+
+.@Configuration 类配置 R2DBC 映射支持
+[source,java]
+----
+@Configuration
+public class MyAppConfig extends AbstractR2dbcConfiguration {
+
+    public ConnectionFactory connectionFactory() {
+        return ConnectionFactories.get("r2dbc:…");
+    }
+
+    // 以下是可选项
+
+    @Override
+    protected List<Object> getCustomConverters() {
+        return List.of(new PersonReadConverter(), new PersonWriteConverter());
+    }
+}
+----
+
+`AbstractR2dbcConfiguration` 要求你实现一个定义 `ConnectionFactory` 的方法。
+
+你可以通过重写 `r2dbcCustomConversions` 方法向转换器添加更多的自定义转换器。
+
+你可以通过将 `NamingStrategy` 注册为 Bean 来配置自定义的命名策略。`NamingStrategy` 控制类名和属性名如何转换为表名和列名。
+
+NOTE: `AbstractR2dbcConfiguration` 会创建一个 `DatabaseClient` 实例，并将其以 `databaseClient` 的名称注册到容器中。
+
+[[mapping.usage]]
+== 基于元数据的映射
+
+为了充分利用 Spring Data R2DBC 支持中的对象映射功能，建议使用 `@Table` 注解标注你的映射对象。尽管映射框架并不强制要求此注解（即使没有注解，POJO 也能正确映射），但使用它可以使得类路径扫描器能够发现并预处理你的领域对象，提取必要的元数据。如果不使用此注解，首次存储领域对象时应用会有轻微的性能损耗，因为映射框架需要构建内部的元数据模型，以了解领域对象的属性及其持久化方式。下面是一个领域对象的示例：
+
+.示例领域对象
+[source,java]
+----
+package com.mycompany.domain;
+
+@Table
+public class Person {
+
+    @Id
+    private Long id;
+
+    private Integer ssn;
+
+    private String firstName;
+
+    private String lastName;
+}
+----
+
+IMPORTANT: `@Id` 注解告诉映射器哪个属性应作为主键使用。
+
+[[mapping.types]]
+=== 默认类型映射
+
+下表说明实体的属性类型如何影响映射行为：
+
+|===
+|源类型 | 目标类型 | 备注
+
+|基本类型及其包装类型
+|透传（Passthru）
+|可通过 <<mapping.explicit.converters,显式转换器>> 自定义。
+
+|JSR-310 日期/时间类型
+|透传（Passthru）
+|可通过 <<mapping.explicit.converters,显式转换器>> 自定义。
+
+|`String`, `BigInteger`, `BigDecimal`, 和 `UUID`
+|透传（Passthru）
+|可通过 <<mapping.explicit.converters,显式转换器>> 自定义。
+
+|`Enum`
+|字符串（String）
+|可通过注册 <<mapping.explicit.converters,显式转换器>> 自定义。
+
+|`Blob` 和 `Clob`
+|透传（Passthru）
+|可通过 <<mapping.explicit.converters,显式转换器>> 自定义。
+
+|`byte[]`, `ByteBuffer`
+|透传（Passthru）
+|被视为二进制负载。
+
+|`Collection<T>`
+|`T` 的数组
+|如果配置的 xref:r2dbc/getting-started.adoc#requirements[驱动] 支持数组类型则可转换，否则不支持。
+
+|基本类型数组、包装类型数组和 `String` 数组
+|包装类型数组（例如 `int[]` → `Integer[]`）
+|如果配置的 xref:r2dbc/getting-started.adoc#requirements[驱动] 支持数组类型则可转换，否则不支持。
+
+|驱动特定类型
+|透传（Passthru）
+|由所使用的 `R2dbcDialect` 作为简单类型提供。
+
+|复杂对象
+|目标类型取决于已注册的 `Converter`
+|需要 <<mapping.explicit.converters,显式转换器>>，否则不支持。
+
+|===
+
+NOTE: 列的原生数据类型取决于 R2DBC 驱动的类型映射。驱动可以贡献额外的简单类型，例如几何类型（Geometry types）。
+
+[[mapping.usage.annotations]]
+=== 映射注解概览
+
+include::partial$mapping-annotations.adoc[]
+进一步参考请见 xref:r2dbc/entity-persistence.adoc#r2dbc.entity-persistence.optimistic-locking[乐观锁]。
+
+映射元数据基础设施定义在独立的 `spring-data-commons` 项目中，该项目与具体技术无关。R2DBC 支持中使用了特定的子类来支持基于注解的元数据。其他策略也可以被实现（如果有需求的话）。
+
+include::partial$mapping.adoc[]
+
+[[mapping.explicit.converters]]
+== 使用显式转换器覆盖映射
+
+在存储和查询对象时，通常希望有一个 `R2dbcConverter` 实例来处理所有 Java 类型到 `OutboundRow` 实例的映射。但有时你可能希望 `R2dbcConverter` 完成大部分工作的同时，对某一特定类型的转换进行手动控制——例如为了优化性能。
+
+要实现对特定类型的转换控制，可以将一个或多个 `org.springframework.core.convert.converter.Converter` 实例注册到 `R2dbcConverter` 中。
+
+你可以通过 `AbstractR2dbcConfiguration` 中的 `r2dbcCustomConversions` 方法来配置这些转换器。本章开头的 xref:r2dbc/mapping.adoc#mapping.configuration[示例] 展示了如何使用 Java 进行配置。
+
+NOTE: 自定义顶层实体转换需要不对称的转换类型。输入数据从 R2DBC 的 `Row` 中提取；输出数据（用于 `INSERT`/`UPDATE` 语句）表示为 `OutboundRow`，之后再组装成 SQL 语句。
+
+以下是一个 Spring Converter 实现的示例，用于将 `Row` 转换为 `Person` POJO：
+
+[source,java]
+----
+@ReadingConverter
+public class PersonReadConverter implements Converter<Row, Person> {
+
+    public Person convert(Row source) {
+        Person p = new Person(source.get("id", String.class),source.get("name", String.class));
+        p.setAge(source.get("age", Integer.class));
+        return p;
+    }
+}
+----
+
+请注意，转换器应用于单个属性。集合属性（例如 `Collection<Person>`）会被逐元素迭代并转换。不支持集合级别的转换器（例如 `Converter<List<Person>, OutboundRow>`）。
+
+NOTE: R2DBC 使用包装类型（如 `Integer.class` 而非 `int.class`）返回原始值。
+
+以下示例展示如何将 `Person` 转换为 `OutboundRow`：
+
+[source,java]
+----
+@WritingConverter
+public class PersonWriteConverter implements Converter<Person, OutboundRow> {
+
+    public OutboundRow convert(Person source) {
+        OutboundRow row = new OutboundRow();
+        row.put("id", Parameter.from(source.getId()));
+        row.put("name", Parameter.from(source.getFirstName()));
+        row.put("age", Parameter.from(source.getAge()));
+        return row;
+    }
+}
+----
+
+[[mapping.explicit.enum.converters]]
+=== 使用显式转换器覆盖枚举映射
+
+某些数据库（如 https://github.com/pgjdbc/r2dbc-postgresql#postgres-enum-types[Postgres]）能够原生地使用其特有的枚举列类型来写入枚举值。Spring Data 默认将 `Enum` 值转换为 `String` 值，以保证最大兼容性。若要保留实际的枚举值，需注册一个 `@WritingConverter`，其源类型和目标类型均为具体的枚举类型，以避免使用 `Enum.name()` 的字符串转换。此外，还需在驱动层面配置枚举类型，使驱动知道如何表示该枚举类型。
+
+以下示例展示了如何原生读写 `Color` 枚举值的相关组件：
+
+[source,java]
+----
+enum Color {
+    Grey, Blue
+}
+
+class ColorConverter extends EnumWriteSupport<Color> {
+
+}
+
+
+class Product {
+    @Id long id;
+    Color color;
+
+    // …
+}
+----

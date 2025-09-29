@@ -1,0 +1,189 @@
+[[entity-persistence.naming-strategy]]
+== 命名策略
+
+按照约定，Spring Data 会应用一个 `NamingStrategy` 来确定表名、列名和模式名称，默认采用 https://zh.wikipedia.org/wiki/%E9%A9%BC%E5%B0%8F%E5%BC%8F[蛇形命名法（snake case）]。
+例如，名为 `firstName` 的对象属性将被映射为 `first_name`。
+你可以通过在应用程序上下文中提供一个 javadoc:org.springframework.data.relational.core.mapping.NamingStrategy[] 来自定义该策略。
+
+[[entity-persistence.custom-table-name]]
+== 覆盖表名
+
+当表的命名策略与数据库中的实际表名不匹配时，可以使用 javadoc:org.springframework.data.relational.core.mapping.Table[] 注解来覆盖默认的表名。
+该注解的 `value` 元素用于指定自定义的表名。以下示例将 `MyEntity` 类映射到数据库中的 `CUSTOM_TABLE_NAME` 表：
+
+[source,java]
+----
+@Table("CUSTOM_TABLE_NAME")
+class MyEntity {
+    @Id
+    Integer id;
+
+    String name;
+}
+----
+
+你可以使用 xref:value-expressions.adoc[Spring Data 的 SpEL 支持] 动态生成表名。一旦生成，表名会被缓存，因此仅在每个映射上下文中是动态的。
+
+[[entity-persistence.custom-column-name]]
+== 覆盖列名
+
+当列的命名策略不符合数据库列名时，可以使用 javadoc:org.springframework.data.relational.core.mapping.Column[] 注解来覆盖列名。
+该注解的 `value` 元素用于指定自定义列名。以下示例将 `MyEntity` 类中的 `name` 属性映射到数据库中的 `CUSTOM_COLUMN_NAME` 列：
+
+[source,java]
+----
+class MyEntity {
+    @Id
+    Integer id;
+
+    @Column("CUSTOM_COLUMN_NAME")
+    String name;
+}
+----
+
+ifdef::mapped-collection[]
+
+javadoc:org.springframework.data.relational.core.mapping.MappedCollection[] 注解可用于引用类型（一对一关系），也可用于集合类型如 Set、List 和 Map（一对多关系）。
+该注解的 `idColumn` 元素用于自定义外键列的名称，该外键指向另一张表的主键列。
+在下面的例子中，`MySubEntity` 类对应的表包含一个 `NAME` 列，并且有一个名为 `CUSTOM_MY_ENTITY_ID_COLUMN_NAME` 的列用于存储 `MyEntity` 的 ID 以表示关联关系：
+
+[source,java]
+----
+class MyEntity {
+    @Id
+    Integer id;
+
+    @MappedCollection(idColumn = "CUSTOM_MY_ENTITY_ID_COLUMN_NAME")
+    Set<MySubEntity> subEntities;
+}
+
+class MySubEntity {
+    String name;
+}
+----
+
+当使用 `List` 或 `Map` 时，必须额外使用一列来保存数据集在 `List` 中的位置索引，或实体在 `Map` 中的键值。
+这个附加列的名称可以通过 javadoc:org.springframework.data.relational.core.mapping.MappedCollection[] 注解的 `keyColumn` 元素进行自定义：
+
+[source,java]
+----
+class MyEntity {
+    @Id
+    Integer id;
+
+    @MappedCollection(idColumn = "CUSTOM_COLUMN_NAME", keyColumn = "CUSTOM_KEY_COLUMN_NAME")
+    List<MySubEntity> name;
+}
+
+class MySubEntity {
+    String name;
+}
+----
+endif::[]
+
+你可以使用 xref:value-expressions.adoc[Spring Data 的 SpEL 支持] 动态创建列名。生成后的列名会被缓存，因此仅在每个映射上下文中是动态的。
+
+ifdef::embedded-entities[]
+
+[[entity-persistence.embedded-entities]]
+== 嵌入式实体
+
+嵌入式实体允许你在 Java 数据模型中使用值对象，即使数据库中只有一张表。
+在以下示例中，`MyEntity` 使用了 `@Embedded` 注解进行映射。
+这意味着数据库中应存在一张名为 `my_entity` 的表，包含两列：`id` 和 `name`（来自 `EmbeddedEntity` 类）。
+
+然而，如果结果集中 `name` 列的实际值为 `null`，则根据 `@Embedded` 注解的 `onEmpty` 属性设置，整个 `embeddedEntity` 属性将被设为 `null` —— 当所有嵌套属性均为 `null` 时，`USE_NULL` 会导致对象整体为 `null`。
+相反地，`USE_EMPTY` 会尝试使用默认构造函数或接受可空参数的构造函数来创建一个新的实例。
+
+.嵌入对象的示例代码
+====
+[source,java]
+----
+class MyEntity {
+
+    @Id
+    Integer id;
+
+    @Embedded(onEmpty = USE_NULL) <1>
+    EmbeddedEntity embeddedEntity;
+}
+
+class EmbeddedEntity {
+    String name;
+}
+----
+
+<1> 如果 `name` 为 `null`，则 `embeddedEntity` 整体也为 `null`。使用 `USE_EMPTY` 可以让 `embeddedEntity` 被实例化，即使 `name` 属性可能为 `null`。
+====
+
+如果你需要在一个实体中多次使用同一个值对象，可以通过 `@Embedded` 注解的可选 `prefix` 元素实现。
+该元素表示一个前缀，会添加到嵌入对象中每个列名的前面。
+
+[TIP]
+====
+使用快捷方式 `@Embedded.Nullable` 和 `@Embedded.Empty` 分别替代 `@Embedded(onEmpty = USE_NULL)` 和 `@Embedded(onEmpty = USE_EMPTY)`，以减少冗余代码，并同时正确设置 JSR-305 的 `@javax.annotation.Nonnull` 注解。
+
+[source,java]
+----
+class MyEntity {
+
+    @Id
+    Integer id;
+
+    @Embedded.Nullable <1>
+    EmbeddedEntity embeddedEntity;
+}
+----
+
+<1> 相当于 `@Embedded(onEmpty = USE_NULL)` 的简写形式。
+====
+注意：如果嵌入式实体包含 `Collection` 或 `Map`，则始终被视为非空，因为它们至少会包含一个空集合或空映射。
+因此，即便使用了 `@Embedded(onEmpty = USE_NULL)`，此类实体也永远不会为 `null`。
+endif::[]
+
+[[entity-persistence.read-only-properties]]
+== 只读属性
+
+使用 `@ReadOnlyProperty` 注解的属性不会被 Spring Data 写入数据库，但在加载实体时会被读取。
+
+Spring Data 不会在写入后自动重新加载实体。
+因此，如果你想查看数据库为此类列生成的数据，必须显式地重新加载该实体。
+
+如果被注解的属性是一个实体或实体集合，它将在其他独立表中由一行或多行表示。
+Spring Data 不会对这些行执行任何插入、删除或更新操作。
+
+[[entity-persistence.insert-only-properties]]
+== 仅插入属性
+
+使用 `@InsertOnlyProperty` 注解的属性仅在插入操作期间被 Spring Data 写入数据库，在更新操作中这些属性将被忽略。
+
+`@InsertOnlyProperty` 仅支持聚合根（aggregate root）。
+
+[[mapping.custom.object.construction]]
+== 自定义对象构造
+
+映射子系统允许通过使用 `@PersistenceConstructor` 注解标记构造函数来自定义对象的构造过程。
+构造函数参数的值按以下方式解析：
+
+* 如果某个参数使用了 `@Value` 注解，则会计算其表达式，并将结果作为参数值。
+* 如果 Java 类型中存在一个属性名与输入行中的字段名匹配，则使用该属性信息来确定应将输入字段值传递给哪个构造函数参数。
+  这种方式要求 Java `.class` 文件中包含参数名称信息，可通过在编译源码时启用调试信息，或在 Java 8 中使用 `javac` 的 `-parameters` 命令行选项来实现。
+* 否则，将抛出 `MappingException` 异常，表示无法绑定给定的构造函数参数。
+
+[source,java]
+----
+class OrderItem {
+
+    private @Id final String id;
+    private final int quantity;
+    private final double unitPrice;
+
+    OrderItem(String id, int quantity, double unitPrice) {
+        this.id = id;
+        this.quantity = quantity;
+        this.unitPrice = unitPrice;
+    }
+
+    // getter/setter 省略
+}
+----

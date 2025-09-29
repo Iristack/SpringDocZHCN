@@ -1,0 +1,222 @@
+[[mapping]]
+= Mapping
+
+Rich mapping support is provided by the `MappingJdbcConverter`. `MappingJdbcConverter` has a rich metadata model that allows mapping domain objects to a data row.
+The mapping metadata model is populated by using annotations on your domain objects.
+However, the infrastructure is not limited to using annotations as the only source of metadata information.
+The `MappingJdbcConverter` also lets you map objects to rows without providing any additional metadata, by following a set of conventions.
+
+This section describes the features of the `MappingJdbcConverter`, including how to use conventions for mapping objects to rows and how to override those conventions with annotation-based mapping metadata.
+
+Read on the basics about xref:object-mapping.adoc[] before continuing with this chapter.
+
+[[mapping.conventions]]
+== Convention-based Mapping
+
+`MappingJdbcConverter` has a few conventions for mapping objects to rows when no additional mapping metadata is provided.
+The conventions are:
+
+* The short Java class name is mapped to the table name in the following manner.
+The `com.bigbank.SavingsAccount` class maps to the `SAVINGS_ACCOUNT` table name.
+The same name mapping is applied for mapping fields to column names.
+For example, the `firstName` field maps to the `FIRST_NAME` column.
+You can control this mapping by providing a custom `NamingStrategy`.
+See <<mapping.configuration,Mapping Configuration>> for more detail.
+Table and column names that are derived from property or class names are used in SQL statements without quotes by default.
+You can control this behavior by setting `RelationalMappingContext.setForceQuote(true)`.
+
+* The converter uses any Spring Converters registered with `CustomConversions` to override the default mapping of object properties to row columns and values.
+
+* The fields of an object are used to convert to and from columns in the row.
+Public `JavaBean` properties are not used.
+
+* If you have a single non-zero-argument constructor whose constructor argument names match top-level column names of the row, that constructor is used.
+Otherwise, the zero-argument constructor is used.
+If there is more than one non-zero-argument constructor, an exception is thrown.
+Refer to xref:object-mapping.adoc#mapping.object-creation[Object Creation] for further details.
+
+[[jdbc.entity-persistence.types]]
+== Supported Types in Your Entity
+
+The properties of the following types are currently supported:
+
+* All primitive types and their boxed types (`int`, `float`, `Integer`, `Float`, and so on)
+
+* Enums get mapped to their name.
+
+* `String`
+
+* `java.util.Date`, `java.time.LocalDate`, `java.time.LocalDateTime`, and `java.time.LocalTime`
+
+* Arrays and Collections of the types mentioned above can be mapped to columns of array type if your database supports that.
+
+* Anything your database driver accepts.
+
+* References to other entities.
+They are considered a one-to-one relationship, or an embedded type.
+It is optional for one-to-one relationship entities to have an `id` attribute.
+The table of the referenced entity is expected to have an additional column with a name based on the referencing entity see <<jdbc.entity-persistence.types.backrefs>>.
+Embedded entities do not need an `id`.
+If one is present it gets mapped as a normal attribute without any special meaning.
+
+* `Set<some entity>` is considered a one-to-many relationship.
+The table of the referenced entity is expected to have an additional column with a name based on the referencing entity see <<jdbc.entity-persistence.types.backrefs>>.
+
+* `Map<simple type, some entity>` is considered a qualified one-to-many relationship.
+The table of the referenced entity is expected to have two additional columns: One named based on the referencing entity for the foreign key (see <<jdbc.entity-persistence.types.backrefs>>) and one with the same name and an additional `_key` suffix for the map key.
+
+* `List<some entity>` is mapped as a  `Map<Integer, some entity>`. The same additional columns are expected and the names used can be customized in the same way.
++
+For `List`, `Set`, and `Map` naming of the back reference can be controlled by implementing `NamingStrategy.getReverseColumnName(RelationalPersistentEntity<?> owner)` and `NamingStrategy.getKeyColumn(RelationalPersistentProperty property)`, respectively.
+Alternatively you may annotate the attribute with `@MappedCollection(idColumn="your_column_name", keyColumn="your_key_column_name")`.
+Specifying a key column for a `Set` has no effect.
+
+* Types for which you registered suitable xref:#mapping.explicit.converters[custom converters].
+
+
+[[mapping.usage.annotations]]
+=== Mapping Annotation Overview
+
+include::partial$mapping-annotations.adoc[]
+
+See xref:jdbc/entity-persistence.adoc#jdbc.entity-persistence.optimistic-locking[Optimistic Locking] for further reference.
+
+The mapping metadata infrastructure is defined in the separate `spring-data-commons` project that is technology-agnostic.
+Specific subclasses are used in the JDBC support to support annotation based metadata.
+Other strategies can also be put in place (if there is demand).
+
+[[jdbc.entity-persistence.types.referenced-entities]]
+=== Referenced Entities
+
+The handling of referenced entities is limited.
+This is based on the idea of aggregate roots as described above.
+If you reference another entity, that entity is, by definition, part of your aggregate.
+So, if you remove the reference, the previously referenced entity gets deleted.
+This also means references are 1-1 or 1-n, but not n-1 or n-m.
+
+If you have n-1 or n-m references, you are, by definition, dealing with two separate aggregates.
+References between those may be encoded as simple `id` values, which map properly with Spring Data JDBC.
+A better way to encode these, is to make them instances of `AggregateReference`.
+An `AggregateReference` is a wrapper around an id value which marks that value as a reference to a different aggregate.
+Also, the type of that aggregate is encoded in a type parameter.
+
+[[jdbc.entity-persistence.types.backrefs]]
+=== Back References
+
+All references in an aggregate result in a foreign key relationship in the opposite direction in the database.
+By default, the name of the foreign key column is the table name of the referencing entity.
+
+Alternatively you may choose to have them named by the entity name of the referencing entity ignoring `@Table` annotations.
+You activate this behaviour by calling `setForeignKeyNaming(ForeignKeyNaming.IGNORE_RENAMING)` on the `RelationalMappingContext`.
+
+For `List` and `Map` references an additional column is required for holding the list index or map key.
+It is based on the foreign key column with an additional `_KEY` suffix.
+
+If you want a completely different way of naming these back references you may implement `NamingStrategy.getReverseColumnName(RelationalPersistentEntity<?> owner)` in a way that fits your needs.
+
+.Declaring and setting an `AggregateReference`
+[source,java]
+----
+class Person {
+    @Id long id;
+    AggregateReference<Person, Long> bestFriend;
+}
+
+// ...
+
+Person p1, p2 = // some initialization
+
+p1.bestFriend = AggregateReference.to(p2.id);
+
+----
+
+You should not include attributes in your entities to hold the actual value of a back reference, nor of the key column of maps or lists.
+If you want these value to be available in your domain model we recommend to do this in a `AfterConvertCallback` and store the values in transient values.
+
+:mapped-collection: true
+:embedded-entities: true
+include::partial$mapping.adoc[]
+
+[[mapping.explicit.converters]]
+== Overriding Mapping with Explicit Converters
+
+Spring Data allows registration of custom converters to influence how values are mapped in the database.
+Currently, converters are only applied on property-level, i.e. you can only convert single values in your domain to single values in the database and back.
+Conversion between complex objects and multiple columns isn't supported.
+
+[[custom-converters.writer]]
+=== Writing a Property by Using a Registered Spring Converter
+
+The following example shows an implementation of a `Converter` that converts from a `Boolean` object to a `String` value:
+
+[source,java]
+----
+import org.springframework.core.convert.converter.Converter;
+
+@WritingConverter
+public class BooleanToStringConverter implements Converter<Boolean, String> {
+
+    @Override
+    public String convert(Boolean source) {
+        return source != null && source ? "T" : "F";
+    }
+}
+----
+
+There are a couple of things to notice here: `Boolean` and `String` are both simple types hence Spring Data requires a hint in which direction this converter should apply (reading or writing).
+By annotating this converter with `@WritingConverter` you instruct Spring Data to write every `Boolean` property as `String` in the database.
+
+[[custom-converters.reader]]
+=== Reading by Using a Spring Converter
+
+The following example shows an implementation of a `Converter` that converts from a `String` to a `Boolean` value:
+
+[source,java]
+----
+@ReadingConverter
+public class StringToBooleanConverter implements Converter<String, Boolean> {
+
+    @Override
+    public Boolean convert(String source) {
+        return source != null && source.equalsIgnoreCase("T") ? Boolean.TRUE : Boolean.FALSE;
+    }
+}
+----
+
+There are a couple of things to notice here: `String` and `Boolean` are both simple types hence Spring Data requires a hint in which direction this converter should apply (reading or writing).
+By annotating this converter with `@ReadingConverter` you instruct Spring Data to convert every `String` value from the database that should be assigned to a `Boolean` property.
+
+[[jdbc.custom-converters.configuration]]
+=== Registering Spring Converters with the `JdbcConverter`
+
+[source,java]
+----
+class MyJdbcConfiguration extends AbstractJdbcConfiguration {
+
+    // …
+
+    @Override
+    protected List<?> userConverters() {
+        return Arrays.asList(new BooleanToStringConverter(), new StringToBooleanConverter());
+    }
+
+}
+----
+
+NOTE: In previous versions of Spring Data JDBC it was recommended to directly overwrite `AbstractJdbcConfiguration.jdbcCustomConversions()`.
+This is no longer necessary or even recommended, since that method assembles conversions intended for all databases, conversions registered by the `Dialect` used and conversions registered by the user.
+If you are migrating from an older version of Spring Data JDBC and have `AbstractJdbcConfiguration.jdbcCustomConversions()` overwritten conversions from your `Dialect` will not get registered.
+
+[TIP]
+====
+If you want to rely on https://spring.io/projects/spring-boot[Spring Boot] to bootstrap Spring Data JDBC, but still want to override certain aspects of the configuration, you may want to expose beans of that type.
+For custom conversions you may e.g. choose to register a bean of type `JdbcCustomConversions` that will be picked up the by the Boot infrastructure.
+To learn more about this please make sure to read the Spring Boot https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#data.sql.jdbc[Reference Documentation].
+====
+
+[[jdbc.custom-converters.jdbc-value]]
+=== JdbcValue
+
+Value conversion uses `JdbcValue` to enrich values propagated to JDBC operations with a `java.sql.Types` type.
+Register a custom write converter if you need to specify a JDBC-specific type instead of using type derivation.
+This converter should convert the value to `JdbcValue` which has a field for the value and for the actual `JDBCType`.

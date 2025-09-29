@@ -1,0 +1,123 @@
+[[r2dbc.repositories]]
+= R2DBC 仓库
+
+[[r2dbc.repositories.intro]]
+本章介绍 R2DBC 仓库支持的特殊之处。  
+该功能基于 xref:repositories/introduction.adoc[使用 Spring Data 仓库] 中所解释的核心仓库支持构建而成。  
+在阅读本章之前，您应充分理解其中所述的基本概念。
+
+[[r2dbc.repositories.usage]]
+== 使用方式
+
+要访问存储在关系型数据库中的领域实体，您可以使用我们提供的高级仓库支持，它能显著简化实现过程。  
+为此，请为您的仓库创建一个接口。  
+考虑以下 `Person` 类：
+
+.示例 Person 实体
+[source,java]
+----
+public class Person {
+
+    @Id
+    private Long id;
+    private String firstname;
+    private String lastname;
+
+    // … getter 和 setter 方法省略
+}
+----
+
+下面的示例展示了一个用于上述 `Person` 类的仓库接口：
+
+.用于持久化 Person 实体的基础仓库接口
+[source,java]
+----
+public interface PersonRepository extends ReactiveCrudRepository<Person, Long> {
+
+    // 自定义查询方法放在这里
+}
+----
+
+要配置 R2DBC 仓库，可以使用 `@EnableR2dbcRepositories` 注解。  
+如果没有配置基础包路径，则基础设施会扫描带有注解的配置类所在的包。  
+以下示例展示了如何使用 Java 配置来设置仓库：
+
+.仓库的 Java 配置
+[source,java]
+----
+@Configuration
+@EnableR2dbcRepositories
+class ApplicationConfig extends AbstractR2dbcConfiguration {
+
+      @Override
+      public ConnectionFactory connectionFactory() {
+        return …
+      }
+}
+----
+
+由于我们的领域仓库继承自 `ReactiveCrudRepository`，因此它提供了响应式的 CRUD 操作以访问实体。  
+除了 `ReactiveCrudRepository` 外，还有 `ReactiveSortingRepository`，它增加了额外的排序功能，类似于 `PagingAndSortingRepository` 的功能。  
+使用仓库实例只需将其依赖注入到客户端即可。  
+因此，您可以使用以下代码检索所有 `Person` 对象：
+
+.分页访问 Person 实体
+[source,java,indent=0]
+----
+include::example$r2dbc/PersonRepositoryTests.java[tags=class]
+----
+
+上述示例通过 Spring 的单元测试支持创建了一个应用上下文，该上下文对测试用例执行基于注解的依赖注入。  
+在测试方法内部，我们使用仓库查询数据库。  
+我们使用 `StepVerifier` 作为测试辅助工具，以验证结果是否符合预期。
+
+[[projections.resultmapping]]
+=== 结果映射
+
+返回接口或 DTO 投影的查询方法，其背后的数据来源于实际查询的结果。  
+接口投影通常依赖于先将结果映射到领域类型，以便考虑可能存在的 `@Column` 类型映射；而实际的投影代理则使用一个可能部分实例化的实体来暴露投影数据。
+
+DTO 投影的结果映射取决于具体的查询类型。  
+派生查询（derived queries）使用领域类型来映射结果，Spring Data 仅从领域类型中可用的属性创建 DTO 实例。  
+不支持在 DTO 中声明领域类型中不存在的属性。
+
+基于字符串的查询采用不同的方式，因为实际查询（特别是字段投影）与结果类型的声明紧密相关。  
+与使用 `@Query` 注解的查询方法一起使用的 DTO 投影，会直接将查询结果映射到 DTO 类型中。  
+此时不会考虑领域类型上的字段映射。  
+直接使用 DTO 类型时，您的查询方法可以获得更动态的投影能力，而不受领域模型的限制。
+
+[[r2dbc.multiple-databases]]
+== 使用多个数据库
+
+当处理多个、可能是不同类型的数据库时，您的应用程序需要采用不同的配置方式。  
+所提供的 `AbstractR2dbcConfiguration` 支持类假设只有一个 `ConnectionFactory`，并从中推导出 `Dialect`。  
+这意味着您需要自己手动定义一些 Bean，才能让 Spring Data R2DBC 支持多个数据库。
+
+R2DBC 仓库需要 `R2dbcEntityOperations` 来实现仓库功能。  
+一个不使用 `AbstractR2dbcConfiguration` 而仅扫描仓库的简单配置如下所示：
+
+[source,java]
+----
+@Configuration
+@EnableR2dbcRepositories(basePackages = "com.acme.mysql", entityOperationsRef = "mysqlR2dbcEntityOperations")
+static class MySQLConfiguration {
+
+    @Bean
+    @Qualifier("mysql")
+    public ConnectionFactory mysqlConnectionFactory() {
+        return …
+    }
+
+    @Bean
+    public R2dbcEntityOperations mysqlR2dbcEntityOperations(@Qualifier("mysql") ConnectionFactory connectionFactory) {
+
+        DatabaseClient databaseClient = DatabaseClient.create(connectionFactory);
+
+        return new R2dbcEntityTemplate(databaseClient, MySqlDialect.INSTANCE);
+    }
+}
+----
+
+请注意，`@EnableR2dbcRepositories` 允许通过 `databaseClientRef` 或 `entityOperationsRef` 进行配置。  
+当连接多个相同类型的数据库时，使用多个 `DatabaseClient` Bean 是有用的。  
+而当连接不同类型、方言不同的数据库系统时，应使用 `@EnableR2dbcRepositories(entityOperationsRef = …)` 方式进行配置。

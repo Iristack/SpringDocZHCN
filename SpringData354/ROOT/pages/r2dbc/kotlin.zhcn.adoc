@@ -1,0 +1,28 @@
+[[kotlin]]
+= Kotlin
+
+参考文档的这一部分介绍了 Spring Data R2DBC 提供的特定 Kotlin 功能。  
+有关 Spring Data 提供的通用功能，请参见 xref:kotlin.adoc[]。
+
+在 Java 中，若要获取 `SWCharacter` 对象列表，通常需要编写如下代码：
+
+[source,java]
+----
+Flux<SWCharacter> characters = client.select().from(SWCharacter.class).fetch().all();
+----
+
+而在 Kotlin 中结合 Spring Data 的扩展功能，你可以改写为：
+
+[source,kotlin]
+----
+val characters =  client.select().from<SWCharacter>().fetch().all()
+// 或者（两者等价）
+val characters : Flux<SWCharacter> = client.select().from().fetch().all()
+----
+
+与 Java 一样，在 Kotlin 中 `characters` 是强类型的，但得益于 Kotlin 聪明的类型推断机制，语法可以更加简洁。
+
+Spring Data R2DBC 提供了以下 Kotlin 扩展功能：
+
+* 为 `DatabaseClient` 和 `Criteria` 提供实化泛型支持。
+* 为 `DatabaseClient` 提供 xref:kotlin/coroutines.adoc[] 协程扩展。

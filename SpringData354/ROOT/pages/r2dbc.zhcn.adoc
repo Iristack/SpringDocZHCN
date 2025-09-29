@@ -1,0 +1,21 @@
+[[r2dbc.repositories]]
+= R2DBC
+:page-section-summary-toc: 1
+
+Spring Data R2DBC 模块将 Spring 的核心概念应用于基于 R2DBC 数据库驱动程序的解决方案开发，且遵循 xref:jdbc/domain-driven-design.adoc[领域驱动设计原则]。  
+我们提供了一个名为 "`template`" 的高级抽象，用于存储和查询聚合根（aggregates）。
+
+本文档是 Spring Data R2DBC 支持的参考指南，解释了相关概念、语义和语法。
+
+本章重点介绍针对 JDBC 的仓库（Repository）支持特性。这些内容建立在 xref:repositories/introduction.adoc[使用 Spring Data 仓库]中所描述的核心仓库支持基础之上。你应该先充分理解其中讲解的基本概念。
+
+R2DBC 提供了丰富的功能：
+
+* 基于 Java 的 xref:r2dbc/getting-started.adoc#r2dbc.connectionfactory[`@Configuration`] 类配置支持，用于配置 R2DBC 驱动实例。
+* xref:r2dbc/entity-persistence.adoc[`R2dbcEntityTemplate`] 作为实体绑定操作的核心类，在执行常见 R2DBC 操作时提升开发效率，集成了行数据与 POJO 之间的对象映射功能。
+* 功能丰富的 xref:r2dbc/mapping.adoc[对象映射]功能，并与 Spring 的 Conversion Service 集成。
+* xref:r2dbc/mapping.adoc#mapping.usage.annotations[基于注解的映射元数据]，可扩展以支持其他元数据格式。
+* xref:r2dbc/repositories.adoc[自动实现 Repository 接口]，包括对 xref:repositories/custom-implementations.adoc[自定义查询方法]的支持。
+
+对于大多数任务，建议使用 `R2dbcEntityTemplate` 或仓库支持，二者均利用了强大的映射功能。  
+若需执行临时的 CRUD 操作，`R2dbcEntityTemplate` 是首选的访问入口。

@@ -1,0 +1,8 @@
+[[common.basics]]
+= 简介
+:page-section-summary-toc: 1
+
+本章介绍 Spring Data 仓库的基本概念。  
+在继续学习 JDBC 或 R2DBC 的具体细节之前，请确保您已充分理解此处所讲解的基础概念。
+
+Spring Data 仓库抽象的目标是显著减少为各种持久化存储实现数据访问层所需的样板代码量。

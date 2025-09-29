@@ -1,0 +1,87 @@
+[[jdbc.schema]]
+= 模式创建（Schema Creation）
+
+在使用 SQL 数据库时，数据库模式（schema）是至关重要的一部分。  
+Spring Data JDBC 支持多种模式配置选项，但在从领域模型开始开发时，可能难以设计出初始的模式结构。为了帮助你采用“代码优先”（code-first）的方式，Spring Data JDBC 集成了 https://www.liquibase.org/[Liquibase]，可用于自动生成数据库变更集（change sets）。
+
+考虑以下领域实体：
+
+[source,java]
+----
+@Table
+class Person {
+    @Id long id;
+    String firstName;
+    String lastName;
+    LocalDate birthday;
+    boolean active;
+}
+----
+
+通过以下代码生成初始的 ChangeSet：
+
+[source,java]
+----
+RelationalMappingContext context = … // 上下文应包含 Person 实体，最好通过 initialEntitySet 初始化
+LiquibaseChangeSetWriter writer = new LiquibaseChangeSetWriter(context);
+
+writer.writeChangeSet(new FileSystemResource(new File(…)));
+----
+
+将生成如下变更日志（changelog）：
+
+[source,yaml]
+----
+databaseChangeLog:
+- changeSet:
+    id: '1685969572426'
+    author: Spring Data Relational
+    objectQuotingStrategy: LEGACY
+    changes:
+    - createTable:
+        columns:
+        - column:
+            autoIncrement: true
+            constraints:
+              nullable: false
+              primaryKey: true
+            name: id
+            type: BIGINT
+        - column:
+            constraints:
+              nullable: true
+            name: first_name
+            type: VARCHAR(255 BYTE)
+        - column:
+            constraints:
+              nullable: true
+            name: last_name
+            type: VARCHAR(255 BYTE)
+        - column:
+            constraints:
+              nullable: true
+            name: birthday
+            type: DATE
+        - column:
+            constraints:
+              nullable: false
+            name: active
+            type: TINYINT
+        tableName: person
+----
+
+列类型由实现 `SqlTypeMapping` 策略接口的对象计算得出。  
+可空性（nullability）则根据字段类型推断：如果属性使用 Java 原始类型（primitive），则该字段被设为非空（`nullable: false`）。
+
+模式支持功能可以在整个应用开发周期中为你提供帮助。在**差异模式**（differential mode）下，你可以向模式写入器（schema writer）传入一个已存在的 Liquibase `Database` 实例，写入器会比较当前数据库中的表与映射的实体，并根据差异决定需要创建或删除哪些表和列。
+
+默认情况下，**不会删除任何表或列**，除非你显式配置了 `dropTableFilter` 和 `dropColumnFilter`。这两个过滤谓词分别接收表名和列名作为参数，你可以据此编写逻辑来判断哪些表或列可以被安全删除。
+
+[source,java]
+----
+writer.setDropTableFilter(tableName -> …);
+writer.setDropColumnFilter((tableName, columnName) -> …);
+----
+
+NOTE: 模式支持只能识别新增和未映射的移除操作，例如添加数据库中尚不存在的列，或删除未在实体中映射的表/列。  
+**无法重命名列，也无法迁移数据**，因为实体映射不包含模式演变过程的具体信息。

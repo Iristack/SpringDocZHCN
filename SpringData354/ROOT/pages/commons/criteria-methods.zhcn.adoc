@@ -1,0 +1,19 @@
+=== Criteria 类的方法
+
+`Criteria` 类提供了以下方法，所有这些方法都对应于 SQL 操作符：
+
+* `Criteria` *and* `(String column)`：向当前 `Criteria` 添加一个指定 `property` 的链式 `Criteria`，并返回新创建的 `Criteria`。
+* `Criteria` *or* `(String column)`：向当前 `Criteria` 添加一个指定 `property` 的链式 `Criteria`，并返回新创建的 `Criteria`。
+* `Criteria` *greaterThan* `(Object o)`：使用 `>` 操作符创建一个条件。
+* `Criteria` *greaterThanOrEquals* `(Object o)`：使用 `>=` 操作符创建一个条件。
+* `Criteria` *in* `(Object... o)`：对可变参数使用 `IN` 操作符创建一个条件。
+* `Criteria` *in* `(Collection<?> collection)`：使用集合并通过 `IN` 操作符创建一个条件。
+* `Criteria` *is* `(Object o)`：通过列匹配（`property = value`）创建一个条件。
+* `Criteria` *isNull* `()`：使用 `IS NULL` 操作符创建一个条件。
+* `Criteria` *isNotNull* `()`：使用 `IS NOT NULL` 操作符创建一个条件。
+* `Criteria` *lessThan* `(Object o)`：使用 `<` 操作符创建一个条件。
+* `Criteria` *lessThanOrEquals* `(Object o)`：使用 `<=` 操作符创建一个条件。
+* `Criteria` *like* `(Object o)`：使用 `LIKE` 操作符创建一个条件，不进行转义字符处理。
+* `Criteria` *not* `(Object o)`：使用 `!=` 操作符创建一个条件。
+* `Criteria` *notIn* `(Object... o)`：对可变参数使用 `NOT IN` 操作符创建一个条件。
+* `Criteria` *notIn* `(Collection<?> collection)`：使用集合并通过 `NOT IN` 操作符创建一个条件。

@@ -1,0 +1,224 @@
+[[r2dbc.repositories.queries]]
+= 查询方法
+
+通常在仓库（Repository）上触发的大多数数据访问操作都会导致对数据库执行查询。  
+定义这样的查询只需在仓库接口中声明一个方法即可，如下例所示：
+
+.带有查询方法的 PersonRepository
+====
+[source,java]
+----
+interface ReactivePersonRepository extends ReactiveSortingRepository<Person, Long> {
+
+    Flux<Person> findByFirstname(String firstname);                                   <1>
+
+    Flux<Person> findByFirstname(Publisher<String> firstname);                        <2>
+
+    Flux<Person> findByFirstnameOrderByLastname(String firstname, Pageable pageable); <3>
+
+    Mono<Person> findByFirstnameAndLastname(String firstname, String lastname);       <4>
+
+    Mono<Person> findFirstByLastname(String lastname);                                <5>
+
+    @Query("SELECT * FROM person WHERE lastname = :lastname")
+    Flux<Person> findByLastname(String lastname);                                     <6>
+
+    @Query("SELECT firstname, lastname FROM person WHERE lastname = $1")
+    Mono<Person> findFirstByLastname(String lastname);                                <7>
+}
+----
+
+<1> 该方法用于查询所有具有指定 `firstname` 的人员。查询语句通过解析方法名中的约束条件（可使用 `And` 或 `Or` 连接）生成，因此该方法对应生成的 SQL 为：`SELECT … FROM person WHERE firstname = :firstname`。
+<2> 该方法用于查询当给定的 `Publisher` 发出 `firstname` 后，所有匹配该名字的人员。
+<3> 使用 `Pageable` 向数据库传递偏移量和排序参数。
+<4> 根据给定条件查找单个实体。如果结果不唯一，则会抛出 `IncorrectResultSizeDataAccessException` 异常。
+<5> 与 <4> 不同的是，即使查询返回多条记录，也只会发出第一条匹配的实体。
+<6> `findByLastname` 方法用于查询所有姓氏为指定值的人员。
+<7> 查询单个 `Person` 实体，并仅投影 `firstname` 和 `lastname` 字段。注解中的查询使用了原生绑定占位符，在此示例中为 PostgreSQL 的 `$1` 风格绑定参数。
+====
+
+请注意：在 `@Query` 注解中使用的 SELECT 语句的列名必须与 `NamingStrategy` 为相应属性生成的名称相匹配。如果 SELECT 语句未包含对应的列，则该属性不会被赋值；若该属性是持久化构造函数所必需的，则将提供 null 值或（对于基本类型）默认值。
+
+下表列出了查询方法支持的关键字：
+
+[cols="1,2,3",options="header",subs="quotes"]
+.查询方法支持的关键字
+|===
+| 关键字
+| 示例
+| 逻辑结果
+
+| `After`
+| `findByBirthdateAfter(Date date)`
+| `birthdate > date`
+
+| `GreaterThan`
+| `findByAgeGreaterThan(int age)`
+| `age > age`
+
+| `GreaterThanEqual`
+| `findByAgeGreaterThanEqual(int age)`
+| `age >= age`
+
+| `Before`
+| `findByBirthdateBefore(Date date)`
+| `birthdate < date`
+
+| `LessThan`
+| `findByAgeLessThan(int age)`
+| `age < age`
+
+| `LessThanEqual`
+| `findByAgeLessThanEqual(int age)`
+| `age \<= age`
+
+| `Between`
+| `findByAgeBetween(int from, int to)`
+| `age BETWEEN from AND to`
+
+| `NotBetween`
+| `findByAgeNotBetween(int from, int to)`
+| `age NOT BETWEEN from AND to`
+
+| `In`
+| `findByAgeIn(Collection<Integer> ages)`
+| `age IN (age1, age2, ageN)`
+
+| `NotIn`
+| `findByAgeNotIn(Collection ages)`
+| `age NOT IN (age1, age2, ageN)`
+
+| `IsNotNull`, `NotNull`
+| `findByFirstnameNotNull()`
+| `firstname IS NOT NULL`
+
+| `IsNull`, `Null`
+| `findByFirstnameNull()`
+| `firstname IS NULL`
+
+| `Like`, `StartingWith`, `EndingWith`
+| `findByFirstnameLike(String name)`
+| `firstname LIKE name`
+
+| `NotLike`, `IsNotLike`
+| `findByFirstnameNotLike(String name)`
+| `firstname NOT LIKE name`
+
+| `Containing`（字符串类型）
+| `findByFirstnameContaining(String name)`
+| `firstname LIKE '%' + name + '%'`
+
+| `NotContaining`（字符串类型）
+| `findByFirstnameNotContaining(String name)`
+| `firstname NOT LIKE '%' + name + '%'`
+
+| （无关键字）
+| `findByFirstname(String name)`
+| `firstname = name`
+
+| `Not`
+| `findByFirstnameNot(String name)`
+| `firstname != name`
+
+| `IsTrue`, `True`
+| `findByActiveIsTrue()`
+| `active IS TRUE`
+
+| `IsFalse`,  `False`
+| `findByActiveIsFalse()`
+| `active IS FALSE`
+|===
+
+[[r2dbc.repositories.modifying]]
+== 修改型查询（Modifying Queries）
+
+前面的部分介绍了如何声明用于访问特定实体或实体集合的查询方法。结合上表中的关键字，还可以使用 `delete…By` 或 `remove…By` 来创建派生查询，以删除匹配的行。
+
+.`Delete…By` 查询示例
+====
+[source,java]
+----
+interface ReactivePersonRepository extends ReactiveSortingRepository<Person, String> {
+
+    Mono<Integer> deleteByLastname(String lastname);            <1>
+
+    Mono<Void> deletePersonByLastname(String lastname);         <2>
+
+    Mono<Boolean> deletePersonByLastname(String lastname);      <3>
+}
+----
+
+<1> 返回类型为 `Mono<Integer>` 时，表示返回受影响的行数。
+<2> 使用 `Void` 类型仅表示删除成功与否，不发射具体数值。
+<3> 使用 `Boolean` 类型表示是否至少有一行被删除。
+====
+
+虽然上述方式适用于许多场景，但对于更复杂的自定义功能，你可以通过在查询方法上添加 `@Modifying` 注解来编写仅需参数绑定的修改型查询，如下例所示：
+
+[source,java,indent=0]
+----
+include::example$r2dbc/PersonRepository.java[tags=atModifying]
+----
+
+修改型查询的结果可以是以下几种类型之一：
+
+* `Void`（或 Kotlin 中的 `Unit`）：忽略更新计数，仅等待操作完成。
+* `Integer` 或其他数值类型：发射受影响的行数。
+* `Boolean`：表示是否至少更新了一行。
+
+注意：`@Modifying` 注解仅与 `@Query` 注解一起使用时才有效。通过方法名推导的自定义方法不需要此注解。
+
+修改型查询直接在数据库上执行，**不会触发任何事件或回调**。因此，如果审计字段（如 `@CreatedDate`, `@LastModifiedBy` 等）没有在注解的查询中显式更新，它们也不会自动更新。
+
+此外，你也可以参考 xref:repositories/custom-implementations.adoc[Spring Data 仓库的自定义实现] 中描述的方法，来添加自定义的修改行为。
+
+[[r2dbc.query-methods.at-query]]
+== 使用 `@Query`
+
+以下示例展示了如何使用 `@Query` 注解声明查询方法：
+
+.使用 @Query 声明查询方法
+[source,java]
+----
+interface UserRepository extends ReactiveCrudRepository<User, Long> {
+
+    @Query("select firstName, lastName from User u where u.emailAddress = :email")
+    Flux<User> findByEmailAddress(@Param("email") String email);
+}
+----
+
+WARNING: 注意基于字符串的查询不支持分页，也不接受 `Sort`、`PageRequest` 或 `Limit` 作为查询参数，因为这些查询需要重写 SQL 才能实现分页。如果你希望限制结果数量，请在 SQL 中显式表达此意图，并自行绑定相关参数。
+
+NOTE: Spring 完全支持 Java 8 的参数名发现机制，前提是编译时启用了 `-parameters` 编译器标志。使用该标志（替代调试信息）后，命名参数可以省略 `@Param` 注解。
+
+[[r2dbc.repositories.queries.spel]]
+=== 使用 SpEL 表达式的查询
+
+查询字符串定义可与 SpEL（Spring Expression Language）表达式结合使用，从而在运行时创建动态查询。SpEL 表达式有两种使用方式。
+
+第一种方式是提供谓词值，这些值会在执行查询前被求值。
+
+表达式通过数组访问方法参数，数组中包含所有传入的参数。以下查询使用 `[0]` 来设置 `lastname` 的谓词值（等价于使用 `:lastname` 参数绑定）：
+
+[source,java,indent=0]
+----
+include::example$r2dbc/PersonRepository.java[tags=spel]
+----
+
+这种表达式支持可通过 Query SPI 扩展：`org.springframework.data.spel.spi.EvaluationContextExtension`。该 SPI 可以向求值上下文中添加属性和函数，并可自定义根对象。扩展将在构建查询并进行 SpEL 求值时从应用上下文中获取。
+
+TIP: 当在普通参数之外使用 SpEL 表达式时，建议使用命名参数（如 `:param`）而非原生绑定标记（如 `$1`），以确保正确的参数绑定顺序。
+
+第二种用法是在查询语句中间嵌入 SpEL 表达式，且独立于方法参数。
+
+表达式的求值结果将替换查询字符串中的表达式部分。
+
+.在查询中使用 SpEL 表达式
+[source,java,indent=0]
+----
+include::example$r2dbc/PersonRepository.java[tags=spel2]
+----
+
+该表达式在首次执行前求值一次，使用的是 `StandardEvaluationContext`，并预先添加了两个变量：`tableName` 和 `qualifiedTableName`。这种方式特别适用于表名本身是动态的情况。
+
+在查询字符串中使用 SpEL 是增强查询灵活性的强大手段，但也可能引入恶意输入风险。你应该确保在将字符串传入查询前对其进行清理和校验，防止意外或恶意修改查询逻辑。

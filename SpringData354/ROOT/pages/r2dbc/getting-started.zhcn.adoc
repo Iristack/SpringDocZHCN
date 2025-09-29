@@ -1,0 +1,188 @@
+[[r2dbc.getting-started]]
+= 入门指南
+
+快速搭建一个可运行环境的简便方法是使用 https://spring.io/tools[Spring Tools] 或 https://start.spring.io[Spring Initializr] 创建一个基于 Spring 的项目。
+
+首先，你需要设置一个正在运行的数据库服务器。  
+请参考你的数据库厂商文档，了解如何配置数据库以支持 R2DBC 访问。
+
+[[requirements]]
+== 环境要求
+
+Spring Data R2DBC 需要 {springdocsurl}[Spring Framework] {springVersion} 或更高版本。
+
+在数据库方面，Spring Data R2DBC 需要一个 <<r2dbc.drivers,驱动程序>> 来抽象不同厂商数据库之间的通用 SQL 功能。  
+Spring Data R2DBC 直接支持以下数据库：
+
+* https://github.com/r2dbc/r2dbc-h2[H2] (`io.r2dbc:r2dbc-h2`)
+* https://github.com/mariadb-corporation/mariadb-connector-r2dbc[MariaDB] (`org.mariadb:r2dbc-mariadb`)
+* https://github.com/r2dbc/r2dbc-mssql[Microsoft SQL Server] (`io.r2dbc:r2dbc-mssql`)
+* https://github.com/asyncer-io/r2dbc-mysql[MySQL] (`io.asyncer:r2dbc-mysql`)
+* https://github.com/jasync-sql/jasync-sql[jasync-sql MySQL] (`com.github.jasync-sql:jasync-r2dbc-mysql`)
+* https://github.com/r2dbc/r2dbc-postgresql[Postgres] (`io.r2dbc:r2dbc-postgresql`)
+* https://github.com/oracle/oracle-r2dbc[Oracle] (`com.oracle.database.r2dbc:oracle-r2dbc`)
+
+如果你使用的数据库不在上述列表中，则应用程序将无法启动。  
+有关此类情况的进一步说明，请参见 <<r2dbc.dialects,方言（Dialect）>> 章节。
+
+[[r2dbc.hello-world]]
+== Hello World 示例
+
+在 STS 中创建 Spring 项目的步骤如下：
+
+. 选择 `File -> New -> Spring Template Project -> Simple Spring Utility Project`，提示时点击 Yes。然后输入项目名称和包名，例如 `org.spring.r2dbc.example`。
+. 将以下内容添加到 `pom.xml` 文件的 `dependencies` 元素中：
++
+
+. 将以下依赖项添加到 `pom.xml` 文件的 `dependencies` 元素中：
++
+[source,xml,subs="+attributes"]
+----
+<dependencies>
+
+    <!-- 其他依赖项已省略 -->
+
+    <dependency>
+        <groupId>org.springframework.data</groupId>
+        <artifactId>spring-data-r2dbc</artifactId>
+        <version>{version}</version>
+    </dependency>
+
+    <!-- 一个 R2DBC 驱动 -->
+    <dependency>
+        <groupId>io.r2dbc</groupId>
+        <artifactId>r2dbc-h2</artifactId>
+        <version>x.y.z</version>
+    </dependency>
+
+</dependencies>
+----
+
+. 修改 `pom.xml` 中 Spring 的版本为：
++
+[source,xml,subs="+attributes"]
+----
+<spring.version>{springVersion}</spring.version>
+----
+
+. 添加 Spring 里程碑仓库地址到 `pom.xml` 中，使其与 `<dependencies/>` 元素同级：
++
+[source,xml]
+----
+<repositories>
+    <repository>
+        <id>spring-milestone</id>
+        <name>Spring Maven MILESTONE Repository</name>
+        <url>https://repo.spring.io/milestone</url>
+    </repository>
+</repositories>
+----
+
+该仓库也可以通过 https://repo.spring.io/milestone/org/springframework/data/[此链接] 浏览。
+
+你可能还希望将日志级别设为 `DEBUG` 以查看更多详细信息。为此，请编辑 `application.properties` 文件，添加以下内容：
+
+[source]
+----
+logging.level.org.springframework.r2dbc=DEBUG
+----
+
+接下来，你可以创建一个用于持久化的 `Person` 类，如下所示：
+
+[source,java,indent=0]
+----
+include::example$r2dbc/Person.java[tags=class]
+----
+
+接着，需要在数据库中创建相应的表结构，如下所示：
+
+[source,sql]
+----
+CREATE TABLE person(
+    id VARCHAR(255) PRIMARY KEY,
+    name VARCHAR(255),
+    age INT
+);
+----
+
+还需要一个主程序来运行，示例如下：
+
+[source,java,indent=0]
+----
+include::example$r2dbc/R2dbcApp.java[tag=class]
+----
+
+运行主程序后，上述示例将产生类似如下的输出：
+
+[source]
+----
+2018-11-28 10:47:03,893 DEBUG amework.core.r2dbc.DefaultDatabaseClient: 310 - Executing SQL statement [CREATE TABLE person(
+     id VARCHAR(255) PRIMARY KEY,
+     name VARCHAR(255),
+     age INT
+ )]
+2018-11-28 10:47:04,074 DEBUG amework.core.r2dbc.DefaultDatabaseClient: 908 - Executing SQL statement [INSERT INTO person (id, name, age) VALUES($1, $2, $3)]
+2018-11-28 10:47:04,092 DEBUG amework.core.r2dbc.DefaultDatabaseClient: 575 - Executing SQL statement [SELECT id, name, age FROM person]
+2018-11-28 10:47:04,436  INFO        org.spring.r2dbc.example.R2dbcApp:  43 - Person [id='joe', name='Joe', age=34]
+----
+
+即使在这个简单的例子中，也有几点值得注意：
+
+* 你可以通过标准的 `io.r2dbc.spi.ConnectionFactory` 对象创建 Spring Data R2DBC 的核心辅助类实例（即 `R2dbcEntityTemplate`）。
+* 映射器可以直接作用于标准 POJO 对象，无需额外元数据（当然，你也可以选择提供这些信息——详见 xref:r2dbc/mapping.adoc[此处]）。
+* 映射约定支持字段访问。注意，`Person` 类只定义了 getter 方法。
+* 如果构造函数参数名与存储行的列名匹配，则会使用这些参数来实例化对象。
+
+[[r2dbc.examples-repo]]
+== 示例仓库
+
+有一个包含多个示例的 https://github.com/spring-projects/spring-data-examples[GitHub 仓库]，你可以下载并尝试运行，以便更好地理解该库的工作方式。
+
+[[r2dbc.connecting]]
+== 使用 Spring 连接到关系型数据库
+
+在使用关系型数据库和 Spring 时，首要任务之一就是通过 IoC 容器创建一个 `io.r2dbc.spi.ConnectionFactory` 实例。  
+请确保使用<<requirements,受支持的数据库和驱动>>。
+
+[[r2dbc.connectionfactory]]
+== 使用 Java 配置注册 `ConnectionFactory` 实例
+
+以下示例展示了如何使用基于 Java 的 Bean 元数据注册 `io.r2dbc.spi.ConnectionFactory` 实例：
+
+.使用 Java 配置注册 `io.r2dbc.spi.ConnectionFactory` 实例
+[source,java]
+----
+@Configuration
+public class ApplicationConfiguration extends AbstractR2dbcConfiguration {
+
+    @Override
+    @Bean
+    public ConnectionFactory connectionFactory() {
+        return …
+    }
+}
+----
+
+这种方式允许你使用标准的 `io.r2dbc.spi.ConnectionFactory` 实例，并由容器通过 Spring 的 `AbstractR2dbcConfiguration` 提供配置支持。相比直接注册 `ConnectionFactory` 实例，这种配置方式还有一个优势：它会自动向容器提供一个 `ExceptionTranslator` 实现，该实现能将 R2DBC 异常转换为 Spring 可移植的 `DataAccessException` 层次结构中的异常，适用于标注了 `@Repository` 注解的数据访问类。这一异常层次结构及 `@Repository` 的使用在 {spring-framework-docs}/data-access.html[Spring 的 DAO 支持特性] 中有详细描述。
+
+`AbstractR2dbcConfiguration` 还会注册 `DatabaseClient`，这是进行数据库交互和实现 Repository 所必需的组件。
+
+[[r2dbc.dialects]]
+== 方言（Dialects）
+
+Spring Data R2DBC 使用 `Dialect` 来封装特定于某个数据库或其驱动的行为。  
+Spring Data R2DBC 通过检查 `ConnectionFactory` 来识别数据库的具体特性，并据此选择合适的数据库方言。  
+如果使用的数据库没有可用的方言，则应用程序将无法启动。  
+在这种情况下，你可以请求数据库供应商提供一个 `Dialect` 实现，或者自行实现一个 `Dialect`。
+
+[TIP]
+====
+方言是通过 javadoc:org.springframework.data.r2dbc./dialect.DialectResolver[] 从 `ConnectionFactory` 解析出来的，通常是通过检查 `ConnectionFactoryMetadata` 来完成的。  
+你可以通过在 `META-INF/spring.factories` 中注册一个实现了 `org.springframework.data.r2dbc.dialect.DialectResolver$R2dbcDialectProvider` 接口的类，让 Spring 自动发现你的 `R2dbcDialect`。  
+`DialectResolver` 使用 Spring 的 `SpringFactoriesLoader` 从类路径中发现方言提供者实现。具体操作步骤如下：
+
+. 实现你自己的 `Dialect`。
+. 实现一个返回该 `Dialect` 的 `R2dbcDialectProvider`。
+. 创建一个位于 `META-INF` 下的 `spring.factories` 资源文件，并添加如下一行完成注册： +
+`org.springframework.data.r2dbc.dialect.DialectResolver$R2dbcDialectProvider=<你的 R2dbcDialectProvider 的完整类名>`
+====

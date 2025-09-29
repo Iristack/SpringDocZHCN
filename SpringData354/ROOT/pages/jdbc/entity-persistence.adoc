@@ -1,0 +1,105 @@
+[[jdbc.entity-persistence]]
+= Persisting Entities
+
+Saving an aggregate can be performed with the `CrudRepository.save(…)` method.
+If the aggregate is new, this results in an insert for the aggregate root, followed by insert statements for all directly or indirectly referenced entities.
+
+If the aggregate root is not new, all referenced entities get deleted, the aggregate root gets updated, and all referenced entities get inserted again.
+Note that whether an instance is new is part of the instance's state.
+
+NOTE: This approach has some obvious downsides.
+If only few of the referenced entities have been actually changed, the deletion and insertion is wasteful.
+While this process could and probably will be improved, there are certain limitations to what Spring Data JDBC can offer.
+It does not know the previous state of an aggregate.
+So any update process always has to take whatever it finds in the database and make sure it converts it to whatever is the state of the entity passed to the save method.
+
+See also xref:repositories/core-concepts.adoc#is-new-state-detection[Entity State Detection] for further details.
+
+[[jdbc.loading-aggregates]]
+== Loading Aggregates
+
+Spring Data JDBC offers two ways how it can load aggregates:
+
+. The traditional and before version 3.2 the only way is really simple:
+Each query loads the aggregate roots, independently if the query is based on a `CrudRepository` method, a derived query or a annotated query.
+If the aggregate root references other entities those are loaded with separate statements.
+
+. Spring Data JDBC 3.2 allows the use of _Single Query Loading_.
+With this an arbitrary number of aggregates can be fully loaded with a single SQL query.
+This should be significantly more efficient, especially for complex aggregates, consisting of many entities.
++
+Currently, Single Query Loading is restricted in different ways:
+
+1. The aggregate must not have nested collections, this includes `Map`.
+The plan is to remove this constraint in the future.
+
+2. The aggregate must not use `AggregateReference` or embedded entities.
+The plan is to remove this constraint in the future.
+
+3. The database dialect must support it.Of the dialects provided by Spring Data JDBC all but H2 and HSQL support this.
+H2 and HSQL don't support analytic functions (aka windowing functions).
+
+4. It only works for the find methods in `CrudRepository`, not for derived queries and not for annotated queries.
+The plan is to remove this constraint in the future.
+
+5. Single Query Loading needs to be enabled in the `JdbcMappingContext`, by calling `setSingleQueryLoadingEnabled(true)`
+
+If any condition is not fulfilled Spring Data JDBC falls back to the default approach of loading aggregates.
+
+NOTE: Single Query Loading is to be considered experimental.
+We appreciate feedback on how it works for you.
+
+NOTE: While Single Query Loading can be abbreviated as SQL, but we highly discourage doing so since confusion with Structured Query Language is almost guaranteed.
+
+include::partial$id-generation.adoc[]
+
+[[jdbc.template]]
+== Template API
+
+As an alternative to repositories Spring Data JDBC offers the javadoc:org.springframework.data.jdbc.core.JdbcAggregateTemplate[] as a more direct means to load and persist entities in a relational database.
+To a large extent, repositories use `JdbcAggregateTemplate` to implement their features.
+
+This section highlights only the most interesting parts of the `JdbcAggregateTemplate`.
+For a more complete overview, see the JavaDoc of `JdbcAggregateTemplate`.
+
+=== Accessing the JdbcAggregateTemplate
+
+`JdbcAggregateTemplate` is intended to be used as a Spring bean.
+If you have set up your application to include Spring Data JDBC, you can configure a dependency on `JdbcAggregateTemplate` in any Spring bean, and the Spring Framework injects a properly configured instance.
+
+This includes fragments you use to implement custom methods for your Spring Data Repositories, letting you to use `JdbcAggregateTemplate` to customize and extend your repositories.
+
+=== Persisting
+
+`JdbcAggregateTemplate` offers three types of methods for persisting entities: `save`, `insert`, and `update`.
+Each comes in two flavors:
+Operating on single aggregates, named exactly as mentioned above, and with an `All` suffix operation on an `Iterable`.
+
+`save` does the same as the method of same name in a repository.
+
+`insert` and `update` skip the test if the entity is new and assume a new or existing aggregate as indicated by their name.
+
+=== Querying
+
+`JdbcAggregateTemplate` offers a considerable array of methods for querying aggregates and about collections of aggregates.
+There is one type of method that requires special attention.
+That's the methods taking a `Query` as an argument.
+They allow the execution of programmatically constructed queries, as follows:
+
+[source,java]
+----
+template.findOne(query(where("name").is("Gandalf")), Person.class);
+----
+
+The javadoc:org.springframework.data.relational.core.query.Query[] returned by the `query` method defines the list of columns to select, a where clause (through a CriteriaDefinition), and specification of limit and offset clauses.
+For details of the `Query` class, see its JavaDoc.
+
+The javadoc:org.springframework.data.relational.core.query.Criteria[] class, of which `where` is a static member, provides implementations of org.springframework.data.relational.core.query.CriteriaDefinition[], which represent the where-clause of the query.
+
+[[jdbc.criteria]]
+include::../commons/criteria-methods.adoc[]
+
+[[jdbc.entity-persistence.optimistic-locking]]
+== Optimistic Locking
+
+include::partial$optimistic-locking.adoc[]

@@ -1,0 +1,111 @@
+[[jdbc.transactions]]
+= 事务性
+
+默认情况下，`CrudRepository` 实例的方法是具备事务性的。对于读取操作，事务配置中的 `readOnly` 标志被设置为 `true`；其他所有操作则使用简单的 `@Transactional` 注解进行配置，因此会应用默认的事务配置。更多细节，请参见 javadoc:org.springframework.data.jdbc.repository.support.SimpleJdbcRepository[] 的 Javadoc 文档。
+
+如果你需要调整仓库中某个方法的事务配置，可以在你的仓库接口中重新声明该方法，如下所示：
+
+.自定义 CRUD 方法的事务配置
+[source,java]
+----
+interface UserRepository extends CrudRepository<User, Long> {
+
+    @Override
+    @Transactional(timeout = 10)
+    List<User> findAll();
+
+    // 其他查询方法声明
+}
+----
+
+上述代码将导致 `findAll()` 方法以 10 秒的超时时间执行，并且不设置 `readOnly` 标志（即允许写入操作）。
+
+另一种修改事务行为的方式是使用外观模式（facade）或服务实现类，通常这类实现会涉及多个仓库的操作。其目的是为非 CRUD 操作定义事务边界。以下示例展示了如何创建这样的外观类：
+
+.使用外观类为多个仓库调用定义事务
+[source,java]
+----
+@Service
+public class UserManagementImpl implements UserManagement {
+
+    private final UserRepository userRepository;
+    private final RoleRepository roleRepository;
+
+    UserManagementImpl(UserRepository userRepository,
+        RoleRepository roleRepository) {
+        this.userRepository = userRepository;
+        this.roleRepository = roleRepository;
+    }
+
+    @Transactional
+    public void addRoleToAllUsers(String roleName) {
+
+        Role role = roleRepository.findByName(roleName);
+
+        for (User user : userRepository.findAll()) {
+            user.addRole(role);
+            userRepository.save(user);
+        }
+    }
+}
+----
+
+上述示例中，对 `addRoleToAllUsers(…)` 的调用将在一个事务内部执行（参与已存在的事务，或在没有事务时新建一个）。此时忽略各个仓库自身的事务配置，因为外层的事务配置决定了实际使用的事务行为。
+
+注意：你必须显式启用 `<tx:annotation-driven />` 或使用 `@EnableTransactionManagement` 注解，才能使基于注解的事务配置在 facade 类上生效。此外，前述示例假设你启用了组件扫描（component scanning）。
+
+[[jdbc.transaction.query-methods]]
+== 事务性查询方法
+
+若希望你的查询方法具备事务性，可在你定义的仓库接口上使用 `@Transactional` 注解，如下例所示：
+
+.在查询方法上使用 @Transactional
+[source,java]
+----
+@Transactional(readOnly = true)
+interface UserRepository extends CrudRepository<User, Long> {
+
+    List<User> findByLastname(String lastname);
+
+    @Modifying
+    @Transactional
+    @Query("delete from User u where u.active = false")
+    void deleteInactiveUsers();
+}
+----
+
+通常建议将 `readOnly` 标志设为 `true`，因为大多数查询方法仅用于读取数据。与此相反，`deleteInactiveUsers()` 方法使用了 `@Modifying` 注解并重写了事务配置，因此该方法将以 `readOnly = false` 执行（即允许修改操作）。
+
+NOTE: **强烈建议**将查询方法设为事务性的。这些方法可能会执行多个查询来填充实体对象。如果没有统一的事务，Spring Data JDBC 会在不同的数据库连接中执行这些查询，这可能导致连接池压力过大，甚至在多个方法同时请求新连接而持有旧连接时引发死锁。
+
+NOTE: 将只读查询明确标记为只读（通过设置 `readOnly = true`）是非常合理的做法。但这并不会阻止你执行修改型查询（尽管某些数据库会在只读事务中拒绝 `INSERT` 和 `UPDATE` 语句）。实际上，`readOnly` 标志只是作为性能优化提示传递给底层 JDBC 驱动程序的一个线索。
+
+[[jdbc.locking]]
+== JDBC 锁机制
+
+Spring Data JDBC 支持在派生查询方法上使用锁机制。要在仓库中的某个派生查询方法上启用锁，可以使用 `@Lock` 注解进行标注。`LockMode` 类型的参数提供两个可选值：
+
+- `PESSIMISTIC_READ`：保证你正在读取的数据不会被其他事务修改；
+- `PESSIMISTIC_WRITE`：获取写锁以修改数据。
+
+某些数据库并不区分这两种模式，在这种情况下两者等同于 `PESSIMISTIC_WRITE`。
+
+.在派生查询方法上使用 @Lock
+[source,java]
+----
+interface UserRepository extends CrudRepository<User, Long> {
+
+    @Lock(LockMode.PESSIMISTIC_READ)
+    List<User> findByLastname(String lastname);
+}
+----
+
+如上所示，`findByLastname(String lastname)` 方法将以悲观读锁的方式执行。如果你使用的是 MySQL 方言，这将生成类似如下的 SQL 查询：
+
+.MySQL 方言下的实际 SQL 查询结果
+[source,sql]
+----
+SELECT * FROM user u WHERE u.lastname = lastname LOCK IN SHARE MODE
+----
+
+NOTE: 当前 `@Lock` 注解**不支持**基于字符串的查询方法（即使用 `@Query` 注解定义的查询）。使用 `@Query` 创建的查询方法会**忽略** `@Lock` 提供的锁信息。在基于字符串的查询方法上使用 `@Lock` 将导致日志中出现警告信息。未来的版本中可能会抛出异常。

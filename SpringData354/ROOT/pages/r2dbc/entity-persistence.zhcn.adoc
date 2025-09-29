@@ -1,0 +1,189 @@
+[[r2dbc.entity-persistence]]
+= 持久化实体
+
+`R2dbcEntityTemplate` 是 Spring Data R2DBC 的核心入口点。  
+它提供了面向实体的直接方法，以及一个更简洁、流畅的接口，适用于常见的临时性用例，例如查询、插入、更新和删除数据。
+
+这些入口方法（如 `insert()`、`select()`、`update()` 等）遵循基于操作类型的自然命名规范。从入口开始，API 设计为仅提供上下文相关的链式方法，最终通过终止方法生成并执行 SQL 语句。  
+Spring Data R2DBC 使用 `R2dbcDialect` 抽象来确定绑定占位符、分页支持以及底层驱动原生支持的数据类型。
+
+NOTE: 所有终止方法始终返回一个 `Publisher` 类型，代表所需的操作。实际的 SQL 语句在订阅时才会发送到数据库。
+
+[[r2dbc.entityoperations.save-insert]]
+== 插入与更新实体的方法
+
+`R2dbcEntityTemplate` 提供了多个便捷方法用于保存和插入对象。  
+若要对转换过程进行更精细的控制，你可以通过 `R2dbcCustomConversions` 注册 Spring 转换器 —— 例如 `Converter<Person, OutboundRow>` 和 `Converter<Row, Person>`。
+
+最简单的使用场景是保存一个 POJO 对象。此时，表名由类名（非完全限定名）决定。你也可以在调用保存操作时指定具体的表名。此外，可通过映射元数据覆盖用于存储对象的目标表。
+
+在插入或保存时，如果 `Id` 属性未设置，则默认其值将由数据库自动生成。因此，若希望启用自增功能，类中的 `Id` 属性或字段类型必须为 `Long` 或 `Integer`。
+
+以下示例展示了如何插入一行数据并检索其内容：
+
+.使用 `R2dbcEntityTemplate` 插入并检索实体
+[source,java,indent=0]
+----
+include::example$r2dbc/R2dbcEntityTemplateSnippets.java[tag=insertAndSelect]
+----
+
+以下是可用的插入和更新操作：
+
+一组类似的插入操作如下所示：
+
+* `Mono<T>` *insert* `(T objectToSave)`：将对象插入默认表。
+* `Mono<T>` *update* `(T objectToSave)`：更新对象（若不存在则插入）至默认表。
+
+可以通过使用流式 API 自定义表名。
+
+[[r2dbc.entityoperations.selecting]]
+== 查询数据
+
+`R2dbcEntityTemplate` 上的 `select(…)` 和 `selectOne(…)` 方法用于从表中选择数据。  
+这两个方法都接受一个 <<r2dbc.datbaseclient.fluent-api.criteria,`Query`>> 对象，该对象定义了字段投影、`WHERE` 子句、`ORDER BY` 子句以及分页限制/偏移量。  
+无论底层数据库如何，分页功能对应用程序都是透明的。此功能由 xref:r2dbc/getting-started.adoc#r2dbc.dialects[`R2dbcDialect` 抽象] 支持，以适应不同 SQL 方言之间的差异。
+
+.使用 `R2dbcEntityTemplate` 查询实体
+[source,java,indent=0]
+----
+include::example$r2dbc/R2dbcEntityTemplateSnippets.java[tag=select]
+----
+
+[[r2dbc.entityoperations.fluent-api]]
+== 流式 API
+
+本节介绍流式 API 的使用方式。考虑以下简单查询：
+
+[source,java,indent=0]
+----
+include::example$r2dbc/R2dbcEntityTemplateSnippets.java[tag=simpleSelect]
+----
+
+<1> 使用 `Person` 类配合 `select(…)` 方法，可将表格结果映射为 `Person` 实体对象。  
+<2> 调用 `all()` 获取所有行，返回一个 `Flux<Person>`，不进行结果数量限制。
+
+下面的例子展示了一个更复杂的查询，其中指定了表名、`WHERE` 条件和 `ORDER BY` 子句：
+
+[source,java,indent=0]
+----
+include::example$r2dbc/R2dbcEntityTemplateSnippets.java[tag=fullSelect]
+----
+
+<1> 按名称指定表，使用给定的领域类型映射结果。  
+<2> 生成的查询在 `firstname` 和 `lastname` 列上添加 `WHERE` 条件以过滤结果。  
+<3> 可按列名排序结果，生成 `ORDER BY` 子句。  
+<4> 使用 `one()` 仅获取单个结果，表示期望查询返回恰好一条记录。如果查询返回多于一条结果，`Mono` 将以 `IncorrectResultSizeDataAccessException` 异常完成。
+
+TIP: 你可以通过 `select(Class<?>)` 直接应用 xref:repositories/projections.adoc[投影（Projections）] 到结果中。
+
+你可以通过以下终止方法切换获取单个实体或多个实体：
+
+* `first()`：仅消费第一条记录，返回 `Mono`。若查询无结果，`Mono` 成功完成但不发射任何对象。  
+* `one()`：精确消费一条记录，返回 `Mono`。若无结果则不发射；若有多条结果，则抛出 `IncorrectResultSizeDataAccessException`。  
+* `all()`：消费所有返回的行，返回 `Flux`。  
+* `count()`：执行计数投影，返回 `Mono<Long>`。  
+* `exists()`：判断查询是否返回任意行，返回 `Mono<Boolean>`。
+
+你可以使用 `select()` 入口点表达你的 `SELECT` 查询。生成的 `SELECT` 查询支持常用子句（如 `WHERE` 和 `ORDER BY`），并支持分页。  
+流式 API 风格允许你链式调用多个方法，同时保持代码清晰易懂。为了提高可读性，可以使用静态导入，避免在创建 `Criteria` 实例时使用 `new` 关键字。
+
+[[r2dbc.datbaseclient.fluent-api.criteria]]
+include::../commons/criteria-methods.adoc[]
+你可以在 `SELECT`、`UPDATE` 和 `DELETE` 查询中使用 `Criteria`。
+
+[[r2dbc.entityoperations.fluent-api.insert]]
+== 插入数据
+
+你可以使用 `insert()` 入口点插入数据。
+
+考虑以下简单的类型化插入操作：
+
+[source,java,indent=0]
+----
+include::example$r2dbc/R2dbcEntityTemplateSnippets.java[tag=insert]
+----
+
+<1> 使用 `Person` 并调用 `into(…)` 方法，根据映射元数据设置目标表，并准备插入语句以接收 `Person` 类型的对象。  
+<2> 提供一个具体的 `Person` 对象。或者，你也可以传入一个 `Publisher` 来批量执行一系列 `INSERT` 语句。该方法会提取所有非 `null` 值并插入。
+
+[[r2dbc.entityoperations.fluent-api.update]]
+== 更新数据
+
+你可以使用 `update()` 入口点更新数据行。  
+更新操作首先需要指定目标表，并接受一个 `Update` 对象来设置字段赋值，同时接受一个 `Query` 对象构建 `WHERE` 条件。
+
+考虑以下简单的类型化更新操作：
+
+[source,java]
+----
+Person modified = …
+
+include::example$r2dbc/R2dbcEntityTemplateSnippets.java[tag=update]
+----
+
+<1> 更新 `Person` 对象，并基于映射元数据应用字段映射。  
+<2> 调用 `inTable(…)` 方法设置不同的表名。  
+<3> 指定一个查询条件，转换为 `WHERE` 子句。  
+<4> 应用 `Update` 对象，此处将 `age` 设置为 `42`，并返回受影响的行数。
+
+[[r2dbc.entityoperations.fluent-api.delete]]
+== 删除数据
+
+你可以使用 `delete()` 入口点删除数据行。  
+删除操作从指定待删除的表开始，可选地接受一个 `Criteria` 来构建 `WHERE` 条件。
+
+考虑以下简单的删除操作：
+
+[source,java]
+----
+include::example$r2dbc/R2dbcEntityTemplateSnippets.java[tag=delete]
+----
+
+<1> 删除 `Person` 对象，并基于映射元数据应用字段映射。  
+<2> 调用 `from(…)` 方法设置不同的表名。  
+<3> 指定一个查询条件，转换为 `WHERE` 子句。  
+<4> 执行删除操作，并返回受影响的行数。
+
+[[r2dbc.entity-persistence.saving]]
+使用 Repository 时，可以通过 `ReactiveCrudRepository.save(…)` 方法保存实体。  
+如果实体是新的，则执行插入操作；如果不是新的，则执行更新操作。  
+注意：实体是否为“新”是其实例状态的一部分。
+
+NOTE: 这种方式存在明显缺点。如果只有少数引用实体实际发生了变化，这种删除后重新插入的方式会造成资源浪费。虽然这一过程未来可能会优化，但 Spring Data R2DBC 存在一定局限性 —— 它无法知道聚合的先前状态。因此，每次更新操作都必须基于当前数据库中的数据，并确保将其转换为传递给 `save` 方法的实体所代表的状态。
+
+include::partial$id-generation.adoc[]
+
+[[r2dbc.entity-persistence.optimistic-locking]]
+== 乐观锁
+
+include::partial$optimistic-locking.adoc[]
+
+[source,java]
+----
+@Table
+class Person {
+
+    @Id Long id;
+    String firstname;
+    String lastname;
+    @Version Long version;
+}
+
+R2dbcEntityTemplate template = …;
+
+Mono<Person> daenerys = template.insert(new Person("Daenerys"));                      <1>
+
+Person other = template.select(Person.class)
+                 .matching(query(where("id").is(daenerys.getId())))
+                 .first().block();                                                    <2>
+
+daenerys.setLastname("Targaryen");
+template.update(daenerys);                                                            <3>
+
+template.update(other).subscribe(); // 发出 OptimisticLockingFailureException        <4>
+----
+
+<1> 首次插入记录，`version` 字段初始化为 `0`。  
+<2> 加载刚刚插入的记录，此时 `version` 仍为 `0`。  
+<3> 使用 `version = 0` 更新该行，设置 `lastname` 并将 `version` 递增至 `1`。  
+<4> 尝试更新之前加载的、`version` 仍为 `0` 的对象，操作失败并抛出 `OptimisticLockingFailureException`，因为当前版本已是 `1`。

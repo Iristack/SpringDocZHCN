@@ -1,0 +1,34 @@
+:support-qbe-collection: false
+include::{commons}@data-commons::query-by-example.adoc[]
+
+以下是一个示例：
+
+[source,java,indent=0]
+----
+include::example$r2dbc/QueryByExampleTests.java[tag=example]
+----
+
+<1> 使用查询条件创建一个领域对象（字段值为 `null` 的将被忽略）。
+<2> 使用该领域对象创建一个 `Example` 实例。
+<3> 通过仓库接口执行查询（若要查询单个结果，可使用 `findOne` 方法）。
+
+此示例展示了如何使用领域对象构建一个简单的探测器（probe）。  
+在本例中，查询将基于 `Employee` 对象的 `name` 字段等于 `Frodo` 进行。  
+字段值为 `null` 的将被忽略。
+
+[source,java,indent=0]
+----
+include::example$r2dbc/QueryByExampleTests.java[tag=example-2]
+----
+
+<1> 创建一个自定义的 `ExampleMatcher`，使其匹配**所有字段**（使用 `matchingAny()` 可实现匹配任意字段）。
+<2> 针对 `name` 字段，使用通配符，使其与字段末尾进行匹配。
+<3> 设置为匹配值为 `null` 的列（注意：在关系型数据库中，`NULL` 不等于 `NULL`）。
+<4> 在生成查询时忽略 `role` 字段。
+<5> 将自定义的 `ExampleMatcher` 应用于探测器（probe）中。
+
+还可以对任意属性应用 `withTransform()`，允许你在构建查询前转换属性值。  
+例如，你可以在创建查询之前，对基于 `String` 类型的属性调用 `toUpperCase()` 进行大写转换。
+
+当你无法预先确定查询所需的所有字段时，查询示例（Query By Example）显得尤为强大。  
+例如，在网页上构建一个用户可自由选择筛选字段的过滤器时，Query By Example 是一种非常灵活且高效的方式来捕获这些动态条件并生成相应的查询。

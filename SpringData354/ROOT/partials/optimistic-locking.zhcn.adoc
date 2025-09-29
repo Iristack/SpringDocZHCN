@@ -1,0 +1,10 @@
+Spring Data 通过在聚合根上使用 {spring-data-commons-javadoc-base}/org/springframework/data/annotation/Version.html[`@Version`] 注解的数值属性来支持乐观锁。每当 Spring Data 保存带有此类版本属性的聚合时，会发生以下两件事：
+
+* 聚合根的更新语句将包含一个 WHERE 子句，用于检查数据库中存储的版本是否确实未发生变化。
+* 如果情况并非如此，则会抛出 `OptimisticLockingFailureException` 异常。
+
+此外，版本属性在实体和数据库中都会递增，因此并发操作能够察觉到该变化，并在适用的情况下如上所述抛出 `OptimisticLockingFailureException`。
+
+此过程同样适用于插入新的聚合：当版本为 `null` 或 `0` 时，表示这是一个新实例；之后版本递增，表明该实例已不再是新实例。这种机制与在对象构造期间生成 ID 的场景（例如使用 UUID）配合得非常好。
+
+在执行删除操作时，同样会进行版本检查，但不会递增版本号。

@@ -1,0 +1,21 @@
+[[r2dbc.auditing]]
+= 审计（Auditing）
+
+从 Spring Data R2DBC 1.2 版本开始，可以通过在配置类上添加 `@EnableR2dbcAuditing` 注解来启用审计功能，如下例所示：
+
+.使用 JavaConfig 启用审计
+[source,java]
+----
+@Configuration
+@EnableR2dbcAuditing
+class Config {
+
+    @Bean
+    public ReactiveAuditorAware<AuditableUser> myAuditorProvider() {
+        return new AuditorAwareImpl();
+    }
+}
+----
+
+如果向 `ApplicationContext` 中注册了一个类型为 `ReactiveAuditorAware` 的 Bean，审计基础设施会自动识别并使用它来确定需要设置到领域对象上的当前用户。  
+如果你在 `ApplicationContext` 中注册了多个实现，可以通过显式设置 `@EnableR2dbcAuditing` 注解的 `auditorAwareRef` 属性来指定要使用的实现。

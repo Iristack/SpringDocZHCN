@@ -1,0 +1,57 @@
+主键属性（使用 `@Id` 注解）也可以使用 `@Sequence` 注解。  
+`@Sequence` 注解的存在表示，该属性的初始值应在插入对象时从数据库序列中获取。  
+数据库是否具备生成序列的能力由所使用的 <<sequences.dialects,数据库方言>> 决定。  
+如果没有使用 `@Sequence` 注解，则假定在插入行时，数据库会自动生成对应列的值。
+
+考虑以下实体：
+
+.使用序列生成 ID 的实体
+[source,java]
+----
+@Table
+class MyEntity {
+
+    @Id
+    @Sequence(
+        sequence = "my_seq",
+        schema = "public"
+    )
+    private Long id;
+
+    // …
+}
+----
+
+在持久化此实体时，在执行 SQL `INSERT` 之前，Spring Data 将先发出一条额外的 `SELECT` 语句，以从序列中获取下一个值。  
+例如，对于 PostgreSQL，Spring Data 发出的查询如下所示：
+
+.PostgreSQL 中获取序列下一个值的查询
+[source,sql]
+----
+SELECT nextval('public.my_seq');
+----
+
+获取到的标识符值将在插入时被包含在 `VALUES` 子句中：
+
+.包含 ID 值的插入语句
+[source,sql]
+----
+INSERT INTO "my_entity"("id", "name") VALUES(?, ?);
+----
+
+NOTE: 从序列获取值和插入对象是两个独立的操作。  
+我们强烈建议在外部事务中执行这些操作，以确保原子性。
+
+[[sequences.dialects]]
+== 支持的方言
+
+以下方言支持序列：
+
+* H2
+* HSQL
+* PostgreSQL
+* DB2
+* Oracle
+* Microsoft SQL Server
+
+请注意，MySQL 不支持序列。

@@ -1,0 +1,164 @@
+[[jdbc.getting-started]]
+= 入门指南
+
+快速搭建工作环境的一个简单方法是在 https://spring.io/tools[Spring Tools] 中创建一个基于 Spring 的项目，或者通过 https://start.spring.io[Spring Initializr] 创建。
+
+首先，你需要配置一个正在运行的数据库服务器。  
+请参考你的数据库厂商文档，了解如何为 JDBC 访问配置数据库。
+
+[[requirements]]
+== 要求
+
+Spring Data JDBC 需要 {springdocsurl}[Spring Framework] {springVersion} 或更高版本。
+
+在数据库方面，Spring Data JDBC 需要一个 <<jdbc.dialects,方言>>（dialect），用于在不同厂商特定的 SQL 实现之上抽象通用的 SQL 功能。  
+Spring Data JDBC 直接支持以下数据库：
+
+* DB2
+* H2
+* HSQLDB
+* MariaDB
+* Microsoft SQL Server
+* MySQL
+* Oracle
+* Postgres
+
+如果你使用的是其他数据库，则应用程序将无法启动。  
+<<jdbc.dialects,dialect>> 章节会进一步说明在这种情况下应如何处理。
+
+[[jdbc.hello-world]]
+== Hello World
+
+要在 STS 中创建一个 Spring 项目：
+
+. 进入 File -> New -> Spring Template Project -> Simple Spring Utility Project，提示时点击 Yes。  
+然后输入项目名称和包名，例如 `org.spring.jdbc.example`。
+. 在 `pom.xml` 文件的 `dependencies` 元素中添加以下内容：
++
+[source,xml,subs="+attributes"]
+----
+<dependencies>
+
+    <!-- 其他依赖项已省略 -->
+
+    <dependency>
+        <groupId>org.springframework.data</groupId>
+        <artifactId>spring-data-jdbc</artifactId>
+        <version>{version}</version>
+    </dependency>
+
+</dependencies>
+----
+
+. 修改 `pom.xml` 中 Spring 的版本为：
++
+[source,xml,subs="+attributes"]
+----
+<spring.version>{springVersion}</spring.version>
+----
+
+. 将 Spring 里程碑仓库地址添加到 `pom.xml` 中，与 `<dependencies/>` 同级：
++
+[source,xml]
+----
+<repositories>
+    <repository>
+        <id>spring-milestone</id>
+        <name>Spring Maven MILESTONE Repository</name>
+        <url>https://repo.spring.io/milestone</url>
+    </repository>
+</repositories>
+----
+
+该仓库也可以在这里 https://repo.spring.io/milestone/org/springframework/data/[直接浏览]。
+
+[[jdbc.logging]]
+=== 日志
+
+Spring Data JDBC 自身几乎不进行日志记录。  
+相反，SQL 语句的执行是通过 `JdbcTemplate` 机制完成的，因此日志也由其提供。  
+所以，如果你想查看执行了哪些 SQL 语句，请为 Spring 的 {spring-framework-docs}/data-access.html#jdbc-JdbcTemplate[`NamedParameterJdbcTemplate`] 或 https://www.mybatis.org/mybatis-3/logging.html[MyBatis] 启用日志记录。
+
+你可能还需要将日志级别设置为 `DEBUG` 以查看更多详细信息。为此，请编辑 `application.properties` 文件，添加如下内容：
+
+[source]
+----
+logging.level.org.springframework.jdbc=DEBUG
+----
+
+// TODO: 添加类似示例
+
+[[jdbc.examples-repo]]
+== 示例仓库
+
+我们有一个包含多个示例的 https://github.com/spring-projects/spring-data-examples[GitHub 仓库]，你可以下载并运行这些示例，以更好地理解该库的工作方式。
+
+[[jdbc.java-config]]
+== 配置
+
+Spring Data JDBC 的仓库功能可以通过 Java 配置中的注解来启用，如下例所示：
+
+.Spring Data JDBC 仓库使用 Java 配置
+[source,java]
+----
+@Configuration
+@EnableJdbcRepositories                                                                // <1>
+class ApplicationConfig extends AbstractJdbcConfiguration {                            // <2>
+
+    @Bean
+    DataSource dataSource() {                                                         // <3>
+
+        EmbeddedDatabaseBuilder builder = new EmbeddedDatabaseBuilder();
+        return builder.setType(EmbeddedDatabaseType.HSQL).build();
+    }
+
+    @Bean
+    NamedParameterJdbcOperations namedParameterJdbcOperations(DataSource dataSource) { // <4>
+        return new NamedParameterJdbcTemplate(dataSource);
+    }
+
+    @Bean
+    TransactionManager transactionManager(DataSource dataSource) {                     // <5>
+        return new DataSourceTransactionManager(dataSource);
+    }
+}
+----
+
+<1> `@EnableJdbcRepositories` 会为继承自 `Repository` 接口的接口生成实现类  
+<2> javadoc:org.springframework.data.jdbc.repository.config.AbstractJdbcConfiguration[] 提供了 Spring Data JDBC 所需的各种默认 Bean  
+<3> 创建连接数据库的 `DataSource`。这是接下来两个 Bean 方法所必需的  
+<4> 创建 Spring Data JDBC 用于访问数据库的 `NamedParameterJdbcOperations`  
+<5> Spring Data JDBC 使用 Spring JDBC 提供的事务管理功能  
+
+前面的例子通过 `spring-jdbc` 的 `EmbeddedDatabaseBuilder` API 设置了一个嵌入式 HSQL 数据库。  
+`DataSource` 被用来配置 `NamedParameterJdbcOperations` 和 `TransactionManager`。  
+最后，我们通过 `@EnableJdbcRepositories` 启用了 Spring Data JDBC 仓库。  
+如果没有指定基础包路径，则默认使用配置类所在的包。  
+继承 `AbstractJdbcConfiguration` 可确保注册各种必要的 Bean。重写其方法可用于自定义配置（见下文）。
+
+如果使用 Spring Boot，此配置可以进一步简化。  
+只要在依赖中包含了 `spring-boot-starter-data-jdbc` 启动器，Spring Boot 会自动配置其余部分，仅需提供一个 `DataSource` 即可。
+
+在此设置中，有一些地方可能需要自定义。
+
+[[jdbc.dialects]]
+== 方言（Dialects）
+
+Spring Data JDBC 使用 `Dialect` 接口的实现来封装特定于数据库或其 JDBC 驱动的行为。  
+默认情况下，javadoc:org.springframework.data.jdbc.repository.config.AbstractJdbcConfiguration[] 会尝试通过获取数据库连接并注册正确的 `Dialect` 来确定当前使用的方言。  
+你可以通过重写 `AbstractJdbcConfiguration.jdbcDialect(NamedParameterJdbcOperations)` 方法来自定义方言的选择。
+
+如果你使用的数据库没有对应的方言实现，则应用程序将无法启动。  
+此时，你需要请求数据库厂商提供一个 `Dialect` 实现，或者自行实现一个 `Dialect`。
+
+[TIP]
+====
+方言由 javadoc:org.springframework.data.jdbc.core.dialect.DialectResolver[] 根据 `JdbcOperations` 实例解析，通常通过检查 `Connection.getMetaData()` 来完成。  
+你可以通过在 `META-INF/spring.factories` 中注册一个实现了 `org.springframework.data.jdbc.core.dialect.DialectResolver$JdbcDialectProvider` 的类，让 Spring 自动发现你的 javadoc:org.springframework.data.jdbc.core.dialect.JdbcDialect[]。  
+`DialectResolver` 使用 Spring 的 `SpringFactoriesLoader` 从类路径中发现方言提供者实现。具体操作步骤如下：
+
+. 实现你自己的 `Dialect`。  
+. 实现一个 `JdbcDialectProvider`，使其返回你的 `Dialect` 实例。  
+. 通过在 `META-INF` 目录下创建 `spring.factories` 资源文件，并添加如下一行来注册提供者：  
+`org.springframework.data.jdbc.core.dialect.DialectResolver$JdbcDialectProvider`=<你的 JdbcDialectProvider 的全限定类名>
+====

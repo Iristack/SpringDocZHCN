@@ -1,0 +1,192 @@
+[[r2dbc.getting-started]]
+= Getting Started
+
+An easy way to bootstrap setting up a working environment is to create a Spring-based project in https://spring.io/tools[Spring Tools] or from https://start.spring.io[Spring Initializr].
+
+First, you need to set up a running database server.
+Refer to your vendor documentation on how to configure your database for R2DBC access.
+
+[[requirements]]
+== Requirements
+
+Spring Data R2DBC requires {springdocsurl}[Spring Framework] {springVersion} and above.
+
+In terms of databases, Spring Data R2DBC requires a <<r2dbc.drivers,driver>> to abstract common SQL functionality over vendor-specific flavours.
+Spring Data R2DBC includes direct support for the following databases:
+
+* https://github.com/r2dbc/r2dbc-h2[H2] (`io.r2dbc:r2dbc-h2`)
+* https://github.com/mariadb-corporation/mariadb-connector-r2dbc[MariaDB] (`org.mariadb:r2dbc-mariadb`)
+* https://github.com/r2dbc/r2dbc-mssql[Microsoft SQL Server] (`io.r2dbc:r2dbc-mssql`)
+* https://github.com/asyncer-io/r2dbc-mysql[MySQL] (`io.asyncer:r2dbc-mysql`)
+* https://github.com/jasync-sql/jasync-sql[jasync-sql MySQL] (`com.github.jasync-sql:jasync-r2dbc-mysql`)
+* https://github.com/r2dbc/r2dbc-postgresql[Postgres] (`io.r2dbc:r2dbc-postgresql`)
+* https://github.com/oracle/oracle-r2dbc[Oracle] (`com.oracle.database.r2dbc:oracle-r2dbc`)
+
+If you use a different database then your application won’t start up.
+The <<r2dbc.dialects,dialect>> section contains further detail on how to proceed in such case.
+
+[[r2dbc.hello-world]]
+== Hello World
+
+To create a Spring project in STS:
+
+. Go to File -> New -> Spring Template Project -> Simple Spring Utility Project, and press Yes when prompted.
+Then enter a project and a package name, such as `org.spring.r2dbc.example`.
+. Add the following to the `pom.xml` files `dependencies` element:
++
+
+. Add the following to the pom.xml files `dependencies` element:
++
+[source,xml,subs="+attributes"]
+----
+<dependencies>
+
+    <!-- other dependency elements omitted -->
+
+    <dependency>
+        <groupId>org.springframework.data</groupId>
+        <artifactId>spring-data-r2dbc</artifactId>
+        <version>{version}</version>
+    </dependency>
+
+    <!-- a R2DBC driver -->
+    <dependency>
+        <groupId>io.r2dbc</groupId>
+        <artifactId>r2dbc-h2</artifactId>
+        <version>x.y.z</version>
+    </dependency>
+
+</dependencies>
+----
+
+. Change the version of Spring in the pom.xml to be
++
+[source,xml,subs="+attributes"]
+----
+<spring.version>{springVersion}</spring.version>
+----
+
+. Add the following location of the Spring Milestone repository for Maven to your `pom.xml` such that it is at the same level as your `<dependencies/>` element:
++
+[source,xml]
+----
+<repositories>
+    <repository>
+        <id>spring-milestone</id>
+        <name>Spring Maven MILESTONE Repository</name>
+        <url>https://repo.spring.io/milestone</url>
+    </repository>
+</repositories>
+----
+
+The repository is also https://repo.spring.io/milestone/org/springframework/data/[browseable here].
+
+You may also want to set the logging level to `DEBUG` to see some additional information.
+To do so, edit the `application.properties` file to have the following content:
+
+[source]
+----
+logging.level.org.springframework.r2dbc=DEBUG
+----
+
+Then you can, for example, create a `Person` class to persist, as follows:
+
+[source,java,indent=0]
+----
+include::example$r2dbc/Person.java[tags=class]
+----
+
+Next, you need to create a table structure in your database, as follows:
+
+[source,sql]
+----
+CREATE TABLE person(
+    id VARCHAR(255) PRIMARY KEY,
+    name VARCHAR(255),
+    age INT
+);
+----
+
+You also need a main application to run, as follows:
+
+[source,java,indent=0]
+----
+include::example$r2dbc/R2dbcApp.java[tag=class]
+----
+
+When you run the main program, the preceding examples produce output similar to the following:
+
+[source]
+----
+2018-11-28 10:47:03,893 DEBUG amework.core.r2dbc.DefaultDatabaseClient: 310 - Executing SQL statement [CREATE TABLE person(
+     id VARCHAR(255) PRIMARY KEY,
+     name VARCHAR(255),
+     age INT
+ )]
+2018-11-28 10:47:04,074 DEBUG amework.core.r2dbc.DefaultDatabaseClient: 908 - Executing SQL statement [INSERT INTO person (id, name, age) VALUES($1, $2, $3)]
+2018-11-28 10:47:04,092 DEBUG amework.core.r2dbc.DefaultDatabaseClient: 575 - Executing SQL statement [SELECT id, name, age FROM person]
+2018-11-28 10:47:04,436  INFO        org.spring.r2dbc.example.R2dbcApp:  43 - Person [id='joe', name='Joe', age=34]
+----
+
+Even in this simple example, there are few things to notice:
+
+* You can create an instance of the central helper class in Spring Data R2DBC (`R2dbcEntityTemplate`) by using a standard `io.r2dbc.spi.ConnectionFactory` object.
+* The mapper works against standard POJO objects without the need for any additional metadata (though you can, optionally, provide that information -- see xref:r2dbc/mapping.adoc[here].).
+* Mapping conventions can use field access.Notice that the `Person` class has only getters.
+* If the constructor argument names match the column names of the stored row, they are used to instantiate the object.
+
+[[r2dbc.examples-repo]]
+== Examples Repository
+
+There is a https://github.com/spring-projects/spring-data-examples[GitHub repository with several examples] that you can download and play around with to get a feel for how the library works.
+
+[[r2dbc.connecting]]
+== Connecting to a Relational Database with Spring
+
+One of the first tasks when using relational databases and Spring is to create a `io.r2dbc.spi.ConnectionFactory` object by using the IoC container.
+Make sure to use a <<requirements,supported database and driver>>.
+
+[[r2dbc.connectionfactory]]
+== Registering a `ConnectionFactory` Instance using Java Configuration
+
+The following example shows an example of using Java-based bean metadata to register an instance of `io.r2dbc.spi.ConnectionFactory`:
+
+.Registering a `io.r2dbc.spi.ConnectionFactory` object using Java Configuration
+[source,java]
+----
+@Configuration
+public class ApplicationConfiguration extends AbstractR2dbcConfiguration {
+
+    @Override
+    @Bean
+    public ConnectionFactory connectionFactory() {
+        return …
+    }
+}
+----
+
+This approach lets you use the standard `io.r2dbc.spi.ConnectionFactory` instance, with the container using Spring's `AbstractR2dbcConfiguration`.As compared to registering a `ConnectionFactory` instance directly, the configuration support has the added advantage of also providing the container with an `ExceptionTranslator` implementation that translates R2DBC exceptions to exceptions in Spring's portable `DataAccessException` hierarchy for data access classes annotated with the `@Repository` annotation.This hierarchy and the use of `@Repository` is described in {spring-framework-docs}/data-access.html[Spring's DAO support features].
+
+`AbstractR2dbcConfiguration` also registers `DatabaseClient`, which is required for database interaction and for Repository implementation.
+
+[[r2dbc.dialects]]
+== Dialects
+
+Spring Data R2DBC uses a `Dialect` to encapsulate behavior that is specific to a database or its driver.
+Spring Data R2DBC reacts to database specifics by inspecting the `ConnectionFactory` and selects the appropriate database dialect accordingly.
+If you use a database for which no dialect is available, then your application won’t start up.
+In that case, you’ll have to ask your vendor to provide a `Dialect` implementation.
+Alternatively, you can implement your own `Dialect`.
+
+[TIP]
+====
+Dialects are resolved by javadoc:org.springframework.data.r2dbc./dialect.DialectResolver[] from a `ConnectionFactory`, typically by inspecting `ConnectionFactoryMetadata`.
++ You can let Spring auto-discover your `R2dbcDialect` by registering a class that implements `org.springframework.data.r2dbc.dialect.DialectResolver$R2dbcDialectProvider` through `META-INF/spring.factories`.
+`DialectResolver` discovers dialect provider implementations from the class path using Spring's `SpringFactoriesLoader`.
+To do so:
+
+. Implement your own `Dialect`.
+. Implement a `R2dbcDialectProvider` returning the `Dialect`.
+. Register the provider by creating a `spring.factories`  resource under `META-INF` and perform the registration by adding a line +
+`org.springframework.data.r2dbc.dialect.DialectResolver$R2dbcDialectProvider=<fully qualified name of your R2dbcDialectProvider>`
+====
