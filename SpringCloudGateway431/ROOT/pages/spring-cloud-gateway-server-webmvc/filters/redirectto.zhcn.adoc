@@ -1,0 +1,48 @@
+[[redirectto-filter]]
+= `RedirectTo` 过滤器
+
+`RedirectTo` 过滤器接受两个参数：`status` 和 `url`。  
+`status` 参数应为一个 300 系列的 HTTP 重定向状态码，例如 301。  
+`url` 参数应为一个有效的 URL，该值将作为 `Location` 响应头的内容。  
+对于相对路径的重定向，你应该在路由定义中使用 `uri: no://op`。  
+以下示例展示了如何配置一个 `RedirectTo` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: redirectto_route
+          uri: https://example.org
+          predicates:
+          - Path=/**
+          filters:
+          - RedirectTo=302, https://acme.org
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.FilterFunctions.redirectTo;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRedirectTo() {
+        return route("redirectto_route")
+            .GET("/**", http())
+            .before(uri("https://example.org"))
+            .filter(redirectTo(302, URI.create("acme.org")))
+            .build();
+    }
+}
+----
+
+上述配置会发送一个状态码为 302 的响应，并包含 `Location: https://acme.org` 响应头，以执行重定向操作。

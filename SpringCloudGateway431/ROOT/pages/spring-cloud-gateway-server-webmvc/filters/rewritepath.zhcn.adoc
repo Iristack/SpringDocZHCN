@@ -1,0 +1,47 @@
+[[rewritepath-filter]]
+= `RewritePath` 过滤器
+
+`RewritePath` 过滤器接受一个路径 `regexp` 参数和一个 `replacement` 参数。  
+它使用 Java 正则表达式，以灵活的方式重写请求路径。以下示例配置了一个 `RewritePath` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: rewritepath_route
+          uri: https://example.org
+          predicates:
+          - Path=/red/**
+          filters:
+          - RewritePath=/red/?(?<segment>.*), /$\{segment}
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.rewritePath;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRewritePath() {
+        return route("rewritepath_route")
+            .GET("/red/**", http())
+            .before(uri("https://example.org"))
+            .before(rewritePath("/red/(?<segment>.*)", "/${segment}"))
+            .build();
+    }
+}
+----
+
+对于请求路径 `/red/blue`，在向下游服务发起请求之前，该过滤器会将路径设置为 `/blue`。请注意，在 `application.yml` 文件中，由于 YAML 规范的限制，`$` 需要替换为 `$\`。
+
+WARNING: 如果同时使用了 `lb()` 过滤器，则必须将其置于 `rewritePath()` 过滤器之后，否则生成的 URL 可能不正确。在配置中使用 `lb:` 协议方案时，系统会自动将该过滤器置于最高优先级顺序，因此需特别注意其与 `rewritePath` 的执行顺序。

@@ -1,0 +1,11 @@
+[[observability-conventions]]
+=== 可观测性 - 约定
+
+以下是本项目声明的所有 `GlobalObservationConvention` 和 `ObservationConvention` 列表。
+
+.ObservationConvention 实现
+|===
+|ObservationConvention 类名 | 适用的 ObservationContext 类名
+|`org.springframework.cloud.gateway.filter.headers.observation.DefaultGatewayObservationConvention`|`GatewayContext`
+|`org.springframework.cloud.gateway.filter.headers.observation.GatewayObservationConvention`|`GatewayContext`
+|===

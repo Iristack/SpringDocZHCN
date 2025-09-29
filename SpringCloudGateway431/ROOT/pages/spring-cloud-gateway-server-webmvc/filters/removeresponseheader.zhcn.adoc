@@ -1,0 +1,46 @@
+[[removeresponseheader-filter]]
+= `RemoveResponseHeader` 过滤器
+
+`RemoveResponseHeader` 过滤器接收一个 `name` 参数，该参数指定了要移除的响应头名称。以下示例配置了一个 `RemoveResponseHeader` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: removeresponseheader_route
+          uri: https://example.org
+          predicates:
+          - Path=/anything/removeresponseheader
+          filters:
+          - RemoveResponseHeader=X-Response-Foo
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.AfterFilterFunctions.removeResponseHeader;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRemoveResponseHeader() {
+        return route("removeresponseheader_route")
+            .GET("/anything/removeresponseheader", http())
+            .before(uri("https://example.org"))
+            .after(removeResponseHeader("X-Response-Foo"))
+            .build();
+    }
+}
+----
+
+上述配置会在将响应返回给网关客户端之前，从响应中移除 `X-Response-Foo` 头。
+
+若要移除任何类型的敏感响应头，你应该为可能需要此功能的所有路由配置该过滤器。此外，你也可以通过 `spring.cloud.gateway.default-filters` 全局配置一次该过滤器，使其应用于所有路由。

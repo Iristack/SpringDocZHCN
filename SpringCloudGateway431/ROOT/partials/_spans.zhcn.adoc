@@ -1,0 +1,23 @@
+[[observability-spans]]
+=== 可观测性 - 跨度（Spans）
+
+以下是本项目声明的所有跨度列表。
+
+[[observability-spans-gateway-http-client-observation]]
+==== 网关 HTTP 客户端观测跨度（Gateway Http Client Observation Span）
+
+> 在通过网关发送请求时创建的观测。
+
+**跨度名称** `http.client.requests`（由约定类 `org.springframework.cloud.gateway.filter.headers.observation.DefaultGatewayObservationConvention` 定义）。
+
+包含该跨度的类的完全限定名：`org.springframework.cloud.gateway.filter.headers.observation.GatewayDocumentedObservation`。
+
+.Tag 键
+|===
+|名称 | 描述
+|`http.method` _(必需)_|HTTP 方法。
+|`http.status_code` _(必需)_|HTTP 状态码。
+|`http.uri` _(必需)_|完整的 HTTP URI。
+|`spring.cloud.gateway.route.id` _(必需)_|路由 ID。
+|`spring.cloud.gateway.route.uri` _(必需)_|从路由中获取的 HTTP URI。
+|===

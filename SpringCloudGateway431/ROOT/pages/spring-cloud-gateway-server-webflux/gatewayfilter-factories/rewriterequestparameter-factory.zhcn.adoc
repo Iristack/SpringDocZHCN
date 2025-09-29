@@ -1,0 +1,26 @@
+= `RewriteRequestParameter` `GatewayFilter` 工厂
+
+`RewriteRequestParameter` `GatewayFilter` 工厂接受一个 `name` 参数和一个 `replacement` 参数。  
+它会重写指定 `name` 的请求参数的值。  
+如果存在多个同名的请求参数，它们将被替换为单个值。  
+如果没有找到对应的请求参数，则不会进行任何更改。  
+以下配置示例定义了一个 `RewriteRequestParameter` `GatewayFilter`：
+
+.application.yml
+====
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: rewriterequestparameter_route
+        uri: https://example.org
+        predicates:
+        - Path=/products
+        filters:
+        - RewriteRequestParameter=campaign,fall2023
+----
+====
+
+对于请求 `/products?campaign=old`，该配置会将请求参数修改为 `campaign=fall2023`。

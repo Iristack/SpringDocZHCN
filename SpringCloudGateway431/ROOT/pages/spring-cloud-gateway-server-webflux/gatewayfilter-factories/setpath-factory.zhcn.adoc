@@ -1,0 +1,22 @@
+[[setpath-gatewayfilter-factory]]
+= `SetPath` `GatewayFilter` 工厂
+
+`SetPath` `GatewayFilter` 工厂接受一个路径 `template`（模板）参数。  
+它提供了一种简单的方式来操作请求路径，允许使用路径的模板化片段。该功能使用 Spring Framework 的 URI 模板，支持多个匹配片段。以下示例配置了一个 `SetPath` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: setpath_route
+        uri: https://example.org
+        predicates:
+        - Path=/red/{segment}
+        filters:
+        - SetPath=/{segment}
+----
+
+对于路径为 `/red/blue` 的请求，在向下游服务转发请求之前，该配置会将路径设置为 `/blue`。

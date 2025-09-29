@@ -1,0 +1,337 @@
+[[writing-custom-predicates-and-filters]]
+= 编写自定义断言和过滤器
+
+Spring Cloud Gateway Server MVC 使用 https://docs.spring.io/spring-framework/reference/web/webmvc-functional.html[Spring WebMvc.fn] API（https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/package-summary.html[javadoc]）作为 API 网关功能的基础。
+
+Spring Cloud Gateway Server MVC 可通过这些 API 进行扩展。用户通常希望编写 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RequestPredicate.html[`RequestPredicate`] 和 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/HandlerFilterFunction.html[`HandlerFilterFunction`] 的自定义实现，以及 `HandlerFilterFunction` 的两种变体：一种用于“前置”过滤器，另一种用于“后置”过滤器。
+
+== 基础知识
+
+Spring WebMvc.fn API 中最基本的接口是 https://docs.spring.io/spring-framework/reference/web/webmvc-functional.html#webmvc-fn-request[`ServerRequest`]（https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/ServerRequest.html[javadoc]）和 https://docs.spring.io/spring-framework/reference/web/webmvc-functional.html#webmvc-fn-response[ServerResponse]（https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/ServerResponse.html[javadoc]）。它们提供了对 HTTP 请求和响应所有部分的访问。
+
+NOTE: Spring WebMvc.fn 文档 https://docs.spring.io/spring-framework/reference/web/webmvc-functional.html#webmvc-fn-handler-functions[声明]，"`ServerRequest` 和 `ServerResponse` 是不可变接口。在某些情况下，Spring Cloud Gateway Server MVC 必须提供替代实现，以便某些内容可变，以满足 API 网关的代理需求。
+
+== 实现 RequestPredicate
+
+Spring WebMvc.fn 的 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RouterFunctions.Builder.html[RouterFunctions.Builder] 需要一个 https://docs.spring.io/spring-framework/reference/web/webmvc-functional.html#webmvc-fn-predicates[`RequestPredicate`]（https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RequestPredicate.html[javadoc]）来匹配给定的 https://docs.spring.io/spring-framework/reference/web/webmvc-functional.html#webmvc-fn-routes[路由]。`RequestPredicate` 是一个函数式接口，因此可以通过 Lambda 表达式实现。需要实现的方法签名为：
+
+[source]
+----
+boolean test(ServerRequest request)
+----
+
+=== 示例 RequestPredicate 实现
+
+在此示例中，我们将实现一个断言，用于检查特定 HTTP 头是否存在于 HTTP 请求中。
+
+Spring WebMvc.fn 中的 `RequestPredicate` 实现位于 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RequestPredicates.html[`RequestPredicates`]，而 Spring Cloud Gateway 中的实现在 https://github.com/spring-cloud/spring-cloud-gateway/blob/main/spring-cloud-gateway-server-mvc/src/main/java/org/springframework/cloud/gateway/server/mvc/predicate/GatewayRequestPredicates.java[GatewayRequestPredicates]。我们这里也采用相同方式，将其实现为静态方法。
+
+.SampleRequestPredicates.java
+[source,java]
+----
+import org.springframework.web.servlet.function.RequestPredicate;
+
+class SampleRequestPredicates {
+    public static RequestPredicate headerExists(String header) {
+		return request -> request.headers().asHttpHeaders().containsKey(header);
+    }
+}
+----
+
+该实现是一个简单的 Lambda 表达式，它将 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/ServerRequest.Headers.html[ServerRequest.Headers] 对象转换为更丰富的 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/http/HttpHeaders.html[HttpHeaders] API。这使得断言可以检测指定 `header` 是否存在。
+
+=== 如何使用自定义 RequestPredicate
+
+要使用我们新建的 `headerExists` `RequestPredicate`，我们需要将其插入到 `RouterFunctions.Builder` 的适当方法中，例如 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RouterFunctions.Builder.html#route(org.springframework.web.servlet.function.RequestPredicate,org.springframework.web.servlet.function.HandlerFunction)[route()]。当然，`headerExists` 方法中的 Lambda 也可以直接内联写入下面的例子中。
+
+.RouteConfiguration.java
+[source,java]
+----
+import static SampleRequestPredicates.headerExists;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> headerExistsRoute() {
+        return route("header_exists_route")
+            .route(headerExists("X-Green"), http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+当 HTTP 请求包含名为 `X-Green` 的头时，上述路由将被匹配。
+
+== 编写自定义 HandlerFilterFunction 实现
+
+`RouterFunctions.Builder` 提供了三种添加过滤器的方式：https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RouterFunctions.Builder.html#filter(org.springframework.web.servlet.function.HandlerFilterFunction)[filter]、https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RouterFunctions.Builder.html#before(java.util.function.Function)[before] 和 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RouterFunctions.Builder.html#after(java.util.function.BiFunction)[after]。`before` 和 `after` 方法是通用 `filter` 方法的特化形式。
+
+=== 实现 HandlerFilterFunction
+
+`filter` 方法接受一个 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/HandlerFilterFunction.html[HandlerFilterFunction] 作为参数。`HandlerFilterFunction<T extends ServerResponse, R extends ServerResponse>` 是一个函数式接口，因此可以通过 Lambda 实现。需要实现的方法签名为：
+
+[source]
+----
+R filter(ServerRequest request, HandlerFunction<T> next)
+----
+
+该方法允许访问 `ServerRequest`，并在调用 `next.handle(request)` 后获得对 `ServerResponse` 的访问权限。
+
+==== 示例 HandlerFilterFunction 实现
+
+此示例展示如何向请求和响应都添加一个头。
+
+.SampleHandlerFilterFunctions.java
+[source,java]
+----
+import org.springframework.web.servlet.function.HandlerFilterFunction;
+import org.springframework.web.servlet.function.ServerRequest;
+import org.springframework.web.servlet.function.ServerResponse;
+
+class SampleHandlerFilterFunctions {
+	public static HandlerFilterFunction<ServerResponse, ServerResponse> instrument(String requestHeader, String responseHeader) {
+		return (request, next) -> {
+			ServerRequest modified = ServerRequest.from(request).header(requestHeader, generateId()).build();
+			ServerResponse response = next.handle(modified);
+			response.headers().add(responseHeader, generateId());
+			return response;
+		};
+	}
+}
+----
+
+首先，从现有请求创建一个新的 `ServerRequest`，从而可以使用 `header()` 方法添加头。然后调用 `next.handle()` 并传入修改后的 `ServerRequest`。接着，使用返回的 `ServerResponse` 将头添加到响应中。
+
+==== 如何使用自定义 HandlerFilterFunction 实现
+
+.RouteConfiguration.java
+[source,java]
+----
+import static SampleHandlerFilterFunctions.instrument;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> instrumentRoute() {
+		return route("instrument_route")
+                .GET("/**", http())
+				.filter(instrument("X-Request-Id", "X-Response-Id"))
+                .before(uri("https://example.org"))
+                .build();
+    }
+}
+----
+
+上述路由将在请求中添加 `X-Request-Id` 头，并在响应中添加 `X-Response-Id` 头。
+
+=== 编写自定义前置过滤器（Before Filter）实现
+
+`before` 方法接收一个 `Function<ServerRequest, ServerRequest>` 作为参数。这允许创建一个带有更新数据的新 `ServerRequest` 并由函数返回。
+
+NOTE: 前置函数可通过 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/HandlerFilterFunction.html#ofRequestProcessor(java.util.function.Function)[HandlerFilterFunction.ofRequestProcessor()] 被适配为 `HandlerFilterFunction` 实例。
+
+==== 示例前置过滤器实现
+
+在此示例中，我们将向请求添加一个带有生成值的头。
+
+.SampleBeforeFilterFunctions.java
+[source,java]
+----
+import java.util.function.Function;
+import org.springframework.web.servlet.function.ServerRequest;
+
+class SampleBeforeFilterFunctions {
+	public static Function<ServerRequest, ServerRequest> instrument(String header) {
+		return request -> ServerRequest.from(request).header(header, generateId()).build();
+	}
+}
+----
+
+从现有请求创建一个新的 `ServerRequest`，从而可以使用 `header()` 方法添加头。这种实现比 `HandlerFilterFunction` 更简单，因为我们只处理 `ServerRequest`。
+
+==== 如何使用自定义前置过滤器实现
+
+.RouteConfiguration.java
+[source,java]
+----
+import static SampleBeforeFilterFunctions.instrument;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> instrumentRoute() {
+        return route("instrument_route").GET("/**", http())
+            .before(uri("https://example.org"))
+            .before(instrument("X-Request-Id"))
+            .build();
+    }
+}
+----
+
+上述路由会在请求中添加 `X-Request-Id` 头。注意此处使用的是 `before()` 方法，而非 `filter()`。
+
+=== 编写自定义后置过滤器（After Filter）实现
+
+`after` 方法接收一个 `BiFunction<ServerRequest,ServerResponse,ServerResponse>` 参数。这允许同时访问 `ServerRequest` 和 `ServerResponse`，并能返回一个包含更新信息的新 `ServerResponse`。
+
+NOTE: 后置函数可通过 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/HandlerFilterFunction.html#ofResponseProcessor(java.util.function.BiFunction)[HandlerFilterFunction.ofResponseProcessor()] 被适配为 `HandlerFilterFunction` 实例。
+
+==== 示例后置过滤器实现
+
+在此示例中，我们将向响应添加一个带有生成值的头。
+
+.SampleAfterFilterFunctions.java
+[source,java]
+----
+import java.util.function.BiFunction;
+import org.springframework.web.servlet.function.ServerRequest;
+import org.springframework.web.servlet.function.ServerResponse;
+
+class SampleAfterFilterFunctions {
+	public static BiFunction<ServerRequest, ServerResponse, ServerResponse> instrument(String header) {
+		return (request, response) -> {
+			response.headers().add(header, generateId());
+			return response;
+		};
+	}
+}
+----
+
+在这种情况下，我们只需将头添加到响应中并返回。
+
+==== 如何使用自定义后置过滤器实现
+
+.RouteConfiguration.java
+[source,java]
+----
+import static SampleAfterFilterFunctions.instrument;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> instrumentRoute() {
+        return route("instrument_route")
+            .GET("/**", http())
+            .before(uri("https://example.org"))
+            .after(instrument("X-Response-Id"))
+            .build();
+    }
+}
+----
+
+上述路由将在响应中添加 `X-Response-Id` 头。注意此处使用的是 `after()` 方法，而非 `filter()`。
+
+== 如何注册用于配置的自定义断言和过滤器
+
+要在外部配置中使用自定义断言和过滤器，你需要创建一个特殊的 Supplier 类，并将其作为 Bean 注册到应用上下文中。
+
+=== 注册自定义断言
+
+要注册自定义断言，你需要实现 `PredicateSupplier` 接口。`PredicateDiscoverer` 会查找返回 `RequestPredicate` 的静态方法进行注册。
+
+SampleFilterSupplier.java
+[source,java]
+----
+package com.example;
+
+import org.springframework.cloud.gateway.server.mvc.predicate.PredicateSupplier;
+
+class SamplePredicateSupplier implements PredicateSupplier {
+
+	@Override
+	public Collection<Method> get() {
+		return Arrays.asList(SampleRequestPredicates.class.getMethods());
+	}
+
+}
+----
+
+要将 `PredicateSupplier` 注册为可在配置文件中使用，你需要将其作为 Bean 添加到上下文中，如下例所示：
+
+.PredicateConfiguration.java
+[source,java]
+----
+package com.example;
+
+@Configuration
+class PredicateConfiguration {
+
+    @Bean
+    public SamplePredicateSupplier samplePredicateSupplier() {
+        return new SamplePredicateSupplier();
+    }
+}
+----
+
+将类添加到 `META-INF/spring.factories` 的要求已被弃用，将在下一个主要版本中移除。
+
+.META-INF/spring.factories
+[source]
+----
+org.springframework.cloud.gateway.server.mvc.predicate.PredicateSupplier=\
+  com.example.SamplePredicateSupplier
+----
+
+=== 注册自定义过滤器
+
+`SimpleFilterSupplier` 可以方便地注册自定义过滤器。`FilterDiscoverer` 会查找返回 `HandlerFilterFunction` 的静态方法进行注册。如果你需要比 `SimpleFilterSupplier` 更高的灵活性，可以直接实现 `FilterSupplier` 接口。
+
+.SampleFilterSupplier.java
+[source,java]
+----
+package com.example;
+
+import org.springframework.cloud.gateway.server.mvc.filter.SimpleFilterSupplier;
+
+class SampleFilterSupplier extends SimpleFilterSupplier {
+
+    public SampleFilterSupplier() {
+		super(SampleAfterFilterFunctions.class);
+	}
+}
+----
+
+要将 `FilterSupplier` 注册为可在配置文件中使用，你需要将其作为 Bean 添加到上下文中，如下例所示：
+
+.FilterConfiguration.java
+[source,java]
+----
+package com.example;
+
+@Configuration
+class FilterConfiguration {
+
+    @Bean
+    public SampleFilterSupplier sampleFilterSupplier() {
+        return new SampleFilterSupplier();
+    }
+}
+----
+
+将类添加到 `META-INF/spring.factories` 的要求已被弃用，将在下一个主要版本中移除。
+
+.META-INF/spring.factories
+[source]
+----
+org.springframework.cloud.gateway.server.mvc.filter.FilterSupplier=\
+  com.example.SampleFilterSupplier
+----
+
+// TODO: 高级主题，如属性、Bean 和更多内容

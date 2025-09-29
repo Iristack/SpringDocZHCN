@@ -1,0 +1,23 @@
+[[maprequestheader-gatewayfilter-factory]]
+= `MapRequestHeader` 网关过滤器工厂
+
+`MapRequestHeader` `GatewayFilter` 工厂接收 `fromHeader` 和 `toHeader` 两个参数。  
+它会创建一个新命名的请求头（`toHeader`），其值从传入的 HTTP 请求中现有的指定请求头（`fromHeader`）提取。  
+如果源请求头不存在，则该过滤器不会产生任何影响。  
+如果目标请求头已存在，则其值会被新增的值所扩展（即原值保留，并追加新值）。  
+以下示例展示了如何配置一个 `MapRequestHeader`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: map_request_header_route
+        uri: https://example.org
+        filters:
+        - MapRequestHeader=Blue, X-Request-Red
+----
+
+此配置会从传入 HTTP 请求的 `Blue` 请求头中提取值，并将其添加为下游请求中的 `X-Request-Red:<values>` 请求头。

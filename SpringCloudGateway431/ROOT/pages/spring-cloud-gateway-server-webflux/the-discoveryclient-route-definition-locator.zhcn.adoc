@@ -1,0 +1,63 @@
+[[discoveryclient-route-definition-locator]]
+= `DiscoveryClient` 路由定义定位器
+
+你可以配置网关，使其基于在与 `DiscoveryClient` 兼容的服务注册中心中注册的服务来创建路由。
+
+默认情况下，创建的路由使用协议 `lb://service-name`（其中 `service-name` 是 `DiscoveryClient::getServices` 方法返回的字符串），这意味着这些路由是负载均衡的。因此，你也需要引入 `org.springframework.cloud:spring-cloud-starter-loadbalancer` 依赖，以确保其在类路径中可用。
+
+要启用此功能，请设置 `spring.cloud.gateway.discovery.locator.enabled=true`，并确保类路径上存在且启用了某个 `DiscoveryClient` 实现（例如 Netflix Eureka、Consul、Zookeeper 或 Kubernetes）。
+
+[[configuring-predicates-and-filters-for-discoveryclient-routes]]
+== 为 `DiscoveryClient` 路由配置断言和过滤器
+
+默认情况下，网关为通过 `DiscoveryClient` 创建的路由定义了一个断言和一个过滤器。
+
+默认的断言是一个路径断言（Path Predicate），其模式为 `/serviceId/**`，其中 `serviceId` 是来自 `DiscoveryClient` 的服务 ID。
+
+默认的过滤器是一个重写路径过滤器（RewritePath Filter），其正则表达式为 `/serviceId/?(?<remaining>.*)`，替换为 `/$\{remaining}`。这会在请求向下转发之前从路径中剥离服务 ID。
+
+如果你想自定义 `DiscoveryClient` 路由所使用的断言或过滤器，可以设置 `spring.cloud.gateway.discovery.locator.predicates[x]` 和 `spring.cloud.gateway.discovery.locator.filters[y]`。  
+如果仍希望保留默认行为，则必须显式包含前面提到的默认断言和过滤器。以下示例展示了在 properties 和 YAML 格式中的配置方式：
+
+.application.properties
+[source,properties]
+====
+----
+spring.cloud.gateway.discovery.locator.predicates[0].name=Path
+spring.cloud.gateway.discovery.locator.predicates[0].args[pattern]="'/'+serviceId+'/**'"
+spring.cloud.gateway.discovery.locator.predicates[1].name=Host
+spring.cloud.gateway.discovery.locator.predicates[1].args[pattern]="'**.foo.com'"
+spring.cloud.gateway.discovery.locator.filters[0].name=CircuitBreaker
+spring.cloud.gateway.discovery.locator.filters[0].args[name]=serviceId
+spring.cloud.gateway.discovery.locator.filters[1].name=RewritePath
+spring.cloud.gateway.discovery.locator.filters[1].args[regexp]="'/' + serviceId + '/?(?<remaining>.*)'"
+spring.cloud.gateway.discovery.locator.filters[1].args[replacement]="'/$\{remaining}'"
+----
+====
+
+.application.yml
+====
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          predicates:
+          - name: Host
+            args:
+              pattern: "'**.foo.com'"
+          - name: Path
+            args:
+              pattern: "'/'+serviceId+'/**'"
+          filters:
+          - name: CircuitBreaker
+            args:
+              name: serviceId
+          - name: RewritePath
+            args:
+              regexp: "'/' + serviceId + '/?(?<remaining>.*)'"
+              replacement: "'/${remaining}'"
+----
+====

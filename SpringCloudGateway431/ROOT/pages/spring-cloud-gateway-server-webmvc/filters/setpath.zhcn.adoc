@@ -1,0 +1,47 @@
+[[setpath-filter]]
+= `SetPath` 过滤器
+
+`SetPath` 过滤器接受一个路径 `template` 参数。  
+它提供了一种简单的方式来操作请求路径，允许使用模板化的路径段。该功能基于 Spring Framework 的 URI 模板语法，支持多个匹配的路径段。以下示例展示了如何配置一个 `SetPath` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: setpath_route
+          uri: https://example.org
+          predicates:
+          - Path=/red/{segment}
+          filters:
+          - SetPath=/{segment}
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.setPath;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsSetPath() {
+        return route("setpath_route")
+            .GET("/red/{segment}", http())
+            .before(uri("https://example.org"))
+            .before(setPath("/{segment"))
+            .build();
+    }
+}
+----
+
+对于路径为 `/red/blue` 的请求，在转发到下游服务之前，路径将被设置为 `/blue`。
+
+WARNING: 如果同时使用 `lb()` 过滤器，则必须将其置于 `setPath()` 过滤器之后，否则可能导致生成的 URL 不正确。在配置中使用 `lb:` 协议方案时，系统会自动将该过滤器置于最高优先级顺序。

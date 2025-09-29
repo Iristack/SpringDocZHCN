@@ -1,0 +1,49 @@
+[[configuring-route-predicate-factories-and-gateway-filter-factories]]
+= 配置路由断言工厂和网关过滤器工厂
+
+配置断言（predicates）和过滤器（filters）有两种方式：快捷方式和完全展开的参数方式。下面的大多数示例都使用了快捷方式。
+
+名称以及参数名在每个小节的前一两句话中以 `code` 形式列出。参数通常按照快捷配置所需的顺序进行排列。
+
+[[shortcut-configuration]]
+== 快捷配置
+
+快捷配置通过过滤器名称识别，后跟一个等号（`=`），然后是用逗号（`,`）分隔的参数值。
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: after_route
+        uri: https://example.org
+        predicates:
+        - Cookie=mycookie,mycookievalue
+----
+
+上述示例使用两个参数定义了 `Cookie` 路由断言工厂：cookie 名称为 `mycookie`，要匹配的值为 `mycookievalue`。
+
+[[fully-expanded-arguments]]
+== 完全展开的参数配置
+
+完全展开的参数配置更类似于标准的 YAML 配置格式，采用名称/值对的形式。通常会包含一个 `name` 键和一个 `args` 键。`args` 键是一个键值对映射，用于配置断言或过滤器。
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: after_route
+        uri: https://example.org
+        predicates:
+        - name: Cookie
+          args:
+            name: mycookie
+            regexp: mycookievalue
+----
+
+这是上面所示 `Cookie` 断言的快捷配置对应的完整配置形式。

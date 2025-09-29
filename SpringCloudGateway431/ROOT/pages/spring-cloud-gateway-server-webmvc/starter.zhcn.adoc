@@ -1,0 +1,12 @@
+[[gateway-starter]]
+= 如何引入 Spring Cloud Gateway Server Web MVC
+:page-section-summary-toc: 1
+
+要在项目中引入 Spring Cloud Gateway Server Web MVC，请使用 Group ID 为 `org.springframework.cloud`、Artifact ID 为 `spring-cloud-starter-gateway-server-webmvc` 的 Starter。有关如何使用当前 Spring Cloud Release Train 配置构建系统的详细信息，请参阅 https://projects.spring.io/spring-cloud/[Spring Cloud 项目页面]。
+
+如果您引入了该 Starter，但不希望启用网关功能，请设置 `spring.cloud.gateway.server.webmvc.enabled=false`。
+
+IMPORTANT: Spring Cloud Gateway Server MVC 基于 https://spring.io/projects/spring-boot#learn[Spring Boot] 和 https://docs.spring.io/spring-framework/reference/web/webmvc-functional.html[Spring WebMvc.fn] 构建。  
+因此，在使用 Spring Cloud Gateway Server MVC 时，许多异步或响应式库可能并不适用。
+
+IMPORTANT: Spring Cloud Gateway Server MVC 可与传统的 Servlet 容器（如 Tomcat 和 Jetty）协同工作。

@@ -1,0 +1,73 @@
+[[proxy-exchange-gateway]]
+= 使用 Spring Web MVC 或 WebFlux 的代理交换网关（Proxy Exchange Gateway）
+
+WARNING: 以下描述的是一种替代风格的网关。后续内容不适用于 Spring Cloud Gateway Server 的相关文档。
+
+== 如何引入 Spring Cloud Gateway Proxy Exchange
+
+要在项目中引入 Spring Cloud Gateway Proxy Exchange，对于基于 MVC 的代理交换，请使用 `org.springframework.cloud` 作为组 ID、`spring-cloud-gateway-proxyexchange-webmvc` 作为构件 ID 的依赖；对于基于 WebFlux 的代理交换，请使用组 ID 为 `org.springframework.cloud`、构件 ID 为 `spring-cloud-gateway-proxyexchange-webflux` 的依赖。
+
+有关如何使用当前 Spring Cloud Release Train 配置构建系统的详细信息，请参阅 https://projects.spring.io/spring-cloud/[Spring Cloud 项目页面]。
+
+== 使用 Proxy Exchange
+
+Spring Cloud Gateway 提供了一个名为 `ProxyExchange` 的工具对象。你可以将其作为方法参数，在普通的 Spring Web 处理器方法中使用。它通过与 HTTP 动词对应的方法支持基本的下游 HTTP 请求交互。在使用 MVC 时，还支持通过 `forward()` 方法转发到本地处理器。
+
+要使用 `ProxyExchange`，请确保将正确的模块添加到类路径中（即 `spring-cloud-gateway-proxyexchange-webmvc` 或 `spring-cloud-gateway-proxyexchange-webflux`）。
+
+以下 MVC 示例将 `/test` 路径的请求代理到远程服务器：
+
+[source,java]
+----
+@RestController
+@SpringBootApplication
+public class GatewaySampleApplication {
+
+	@Value("${remote.home}")
+	private URI home;
+
+	@GetMapping("/test")
+	public ResponseEntity<?> proxy(ProxyExchange<byte[]> proxy) throws Exception {
+		return proxy.uri(home.toString() + "/image/png").get();
+	}
+
+}
+----
+
+以下示例使用 WebFlux 实现相同功能：
+
+[source,java]
+----
+@RestController
+@SpringBootApplication
+public class GatewaySampleApplication {
+
+	@Value("${remote.home}")
+	private URI home;
+
+	@GetMapping("/test")
+	public Mono<ResponseEntity<?>> proxy(ProxyExchange<byte[]> proxy) throws Exception {
+		return proxy.uri(home.toString() + "/image/png").get();
+	}
+
+}
+----
+
+`ProxyExchange` 上提供的便捷方法允许处理器方法发现并增强传入请求的 URI 路径。例如，你可能希望提取路径末尾的部分并传递给下游服务：
+
+[source,java]
+----
+@GetMapping("/proxy/path/**")
+public ResponseEntity<?> proxyPath(ProxyExchange<byte[]> proxy) throws Exception {
+  String path = proxy.path("/proxy/path/");
+  return proxy.uri(home.toString() + "/foos/" + path).get();
+}
+----
+
+Spring MVC 和 WebFlux 的所有功能均可用于网关处理器方法。因此，你可以注入请求头和查询参数，并可通过映射注解中的声明来限制传入请求。更多细节请参考 Spring MVC 中 `@RequestMapping` 注解的相关文档。
+
+你可以使用 `ProxyExchange` 上的 `header()` 方法向下游响应中添加头部信息。
+
+此外，还可以通过向 `get()` 方法（以及其他方法）添加一个映射函数（mapper）来操作响应头或响应中的其他任何内容。该映射函数是一个 `Function`，接收传入的 `ResponseEntity` 并将其转换为传出的 `ResponseEntity`。
+
+对 "`sensitive`"（敏感）头信息（默认包括 `cookie` 和 `authorization`）、"`skipped`"（跳过）头信息（默认包括 `content-length` 和 `host`，这些头不会向下传递），以及 "`proxy`"（代理）头信息（如 `x-forwarded-*`）提供了原生支持。所谓 "`skipped`" 头的设计理念是：若直接复制这些头到下游请求中可能会引发问题。例如：由于 `ProxyExchange` 调用下游端点的方式，内容长度可能发生改变，甚至可能使用 `Transfer-Encoding: chunked` 而不是 `Content-Length` 头。

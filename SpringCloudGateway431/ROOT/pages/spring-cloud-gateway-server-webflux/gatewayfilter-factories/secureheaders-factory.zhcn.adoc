@@ -1,0 +1,107 @@
+[[secureheaders-gatewayfilter-factory]]
+= `SecureHeaders` `GatewayFilter` 工厂
+
+`SecureHeaders` `GatewayFilter` 工厂会向响应中添加多个安全相关的 HTTP 头，具体依据来自 https://blog.appcanary.com/2017/http-security-headers.html[这篇博客文章] 的建议。
+
+以下响应头（括号内为默认值）将被自动添加：
+
+* `X-Xss-Protection: 1 (mode=block)`
+* `Strict-Transport-Security: max-age=631138519`
+* `X-Frame-Options: DENY`
+* `X-Content-Type-Options: nosniff`
+* `Referrer-Policy: no-referrer`
+* `Content-Security-Policy: default-src 'self' https:; font-src 'self' https: data:; img-src 'self' https: data:; object-src 'none'; script-src https:; style-src 'self' https: 'unsafe-inline'`
+* `X-Download-Options: noopen`
+* `X-Permitted-Cross-Domain-Policies: none`
+
+要修改这些默认值，可以在 `spring.cloud.gateway.filter.secure-headers` 命名空间下设置相应的属性。可用的配置项包括：
+
+* `xss-protection-header`
+* `strict-transport-security`
+* `frame-options`
+* `content-type-options`
+* `referrer-policy`
+* `content-security-policy`
+* `download-options`
+* `permitted-cross-domain-policies`
+
+若要禁用某些默认头，可通过设置 `spring.cloud.gateway.filter.secure-headers.disable` 属性，并以逗号分隔指定要禁用的头名称。例如：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      filter:
+        secure-headers:
+          disable: x-frame-options,strict-transport-security
+----
+
+若要将 `SecureHeaders` 过滤器应用于特定路由，请将其添加到该路由的过滤器列表中。你可以通过参数对路由级别的过滤器进行自定义配置，此时路由配置将覆盖全局默认配置。
+
+.application.yml
+[source,yaml]
+----
+      - id: secureheaders_route
+        uri: http://example.org
+        predicates:
+        - Path=/**
+        filters:
+          - name: SecureHeaders
+            args:
+              disable: x-frame-options
+----
+
+NOTE: 禁用某个安全头时，必须使用其小写的完整名称。
+
+== 更多选项
+
+你还可以选择启用 `Permissions-Policy` 响应头。`Permissions-Policy` 是一种安全头，允许 Web 开发者控制网站可以使用哪些浏览器功能。请参考：
+https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Permissions-Policy[Permissions-Policy] 和
+https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Permissions-Policy#directives[Directives] 文档，根据你的环境进行配置。
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      filter:
+        secure-headers:
+          enable: permissions-policy
+          permissions-policy: geolocation=(self "https://example.com")
+----
+
+在上述 https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Permissions-Policy/geolocation[示例] 中，
+Geolocation API 在所有浏览上下文中均被禁用，除非来源是自身或 `"https://example.com"`。
+`Permissions-Policy` 可以为每个路由单独配置。
+
+.application.yml
+[source,yaml]
+----
+      - id: secureheaders_route
+        uri: http://anotherexample.org
+        predicates:
+        - Path=/**
+        filters:
+          - name: SecureHeaders
+            args:
+              disable: x-frame-options
+              enable: permissions-policy
+              permissions-policy: geolocation=("https://anotherexample.org")
+----
+
+WARNING: 当你启用了 `Permissions-Policy` 但未显式配置任何指令时，系统将应用一个默认值。该默认值会禁用大量标准和实验性功能。这种行为可能不适用于你的特定环境或使用场景。
+
+当启用 `Permissions-Policy` 且无显式配置时，默认值如下：
+
+`Permissions-Policy: accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), cross-origin-isolated=(),
+display-capture=(), document-domain=(), encrypted-media=(), execution-while-not-rendered=(), execution-while-out-of-viewport=(),
+fullscreen=(), geolocation=(), gyroscope=(), keyboard-map=(), magnetometer=(), microphone=(), midi=(), navigation-override=(),
+payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), sync-xhr=(), usb=(),
+web-share=(), xr-spatial-tracking=()`
+
+NOTE: 你可以通过 https://developer.chrome.com/docs/privacy-security/permissions-policy#chrome_devtools_integration[DevTools 集成功能] 查看 Chrome 浏览器支持的 Permissions Policy 功能列表。
+
+在为你的环境配置 `Permissions-Policy` 头时，请务必检查浏览器控制台是否存在语法错误。

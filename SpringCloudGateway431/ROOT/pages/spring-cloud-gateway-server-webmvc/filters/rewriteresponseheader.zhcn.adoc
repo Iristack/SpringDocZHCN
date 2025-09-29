@@ -1,0 +1,47 @@
+[[rewriteresponseheader-filter]]
+= `RewriteResponseHeader` 过滤器
+:page-section-summary-toc: 1
+
+`RewriteResponseHeader` 过滤器接受 `name`、`regexp` 和 `replacement` 参数。  
+它使用 Java 正则表达式，提供了一种灵活的方式来重写响应头的值。以下示例展示了如何配置一个 `RewriteResponseHeader` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: rewriteresponseheader_route
+          uri: https://example.org
+          predicates:
+          - Path=/**
+          filters:
+          - RewriteResponseHeader=X-Response-Red, password=[^&]+, password=***
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.AfterFilterFunctions.rewriteResponseHeader;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRewriteResponseHeader() {
+        return route("rewriteresponseheader_route")
+            .GET("/**", http())
+            .before(uri("https://example.org"))
+            .after(rewriteResponseHeader("X-Request-Red", "password=[^&]+", "password=***"))
+            .build();
+    }
+}
+----
+
+假设原始响应头的值为 `/42?user=ford&password=omg!what&flag=true`，在向下游服务请求后，该值将被修改为 `/42?user=ford&password=\***&flag=true`。  
+由于 YAML 规范的限制，在 `application.yml` 文件中必须使用 `$\` 来表示字面量 `$`。

@@ -1,0 +1,49 @@
+[[maprequestheader-filter]]
+= `MapRequestHeader` 过滤器
+
+`MapRequestHeader` 过滤器接受 `fromHeader` 和 `toHeader` 两个参数。  
+它会创建一个新命名的请求头（`toHeader`），其值从传入 HTTP 请求中已有的指定请求头（`fromHeader`）提取。  
+如果输入的请求头不存在，则该过滤器不会产生任何影响。  
+如果目标请求头（`toHeader`）已存在，则其值会被新增的值所补充（即追加，而非覆盖）。  
+
+以下示例展示了如何配置一个 `MapRequestHeader`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: map_request_header_route
+          uri: https://example.org
+          predicates:
+          - Path=/mypath
+          filters:
+          - MapRequestHeader=Blue, X-Request-Red
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.mapRequestHeader;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsMapRequestHeader() {
+        return route("map_request_header_route")
+				.GET("/mypath", http())
+                .before(uri("https://example.org"))
+				.before(mapRequestHeader("Blue", "X-Request-Red"))
+				.build();
+    }
+}
+----
+
+上述配置会将原始请求中的 `Blue` 请求头的值提取出来，并添加到下游请求中作为 `X-Request-Red:<values>` 请求头。

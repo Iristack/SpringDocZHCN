@@ -1,0 +1,84 @@
+[[addrequestheadersifnotpresent-filter]]
+= `AddRequestHeadersIfNotPresent` 过滤器
+
+`AddRequestHeadersIfNotPresent` 过滤器接收一组由冒号分隔的 `名称:值` 键值对。  
+以下示例配置了一个 `AddRequestHeadersIfNotPresent` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: add_request_headers_route_inp
+          uri: https://example.org
+          predicates:
+          - Path=/red
+          filters:
+          - AddRequestHeadersIfNotPresent=X-Request-Color-1:blue,X-Request-Color-2:green
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.addRequestHeadersIfNotPresent;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsAddReqHeaderInp() {
+        return route("add_request_headers_route_inp")
+            .GET("/red", http())
+            .before(uri("https://example.org"))
+            .before(addRequestHeadersIfNotPresent("X-Request-Color-1:blue","X-Request-Color-2:green"));
+    }
+}
+----
+
+上述配置会为所有匹配的请求，在转发到下游服务的请求头中添加两个请求头：`X-Request-Color-1:blue` 和 `X-Request-Color-2:green`。  
+这与 `AddRequestHeader` 的行为类似，但不同之处在于，`AddRequestHeadersIfNotPresent` **仅在请求头不存在时**才会添加；如果客户端请求中已包含同名请求头，则保留原始值并直接发送。
+
+此外，若要设置一个多值请求头，可以多次使用相同的请求头名称，例如：`addRequestHeadersIfNotPresent("X-Request-Color-1:blue","X-Request-Color-1:green")`。
+
+`AddRequestHeadersIfNotPresent` 还支持使用 URI 变量（用于匹配路径或主机）。这些变量可以在值中引用，并在运行时进行展开。以下示例展示了如何在过滤器中使用变量：
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.addRequestHeadersIfNotPresent;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsAddReqHeaderInp() {
+        return route("add_request_header_route_inp")
+            .GET("/red/{segment}", http())
+            .before(uri("https://example.org"))
+            .before(addRequestHeadersIfNotPresent("X-Request-red", "blue-{segment}"));
+    }
+}
+----
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_request_header_route_inp
+        uri: https://example.org
+        predicates:
+        - Path=/red/{segment}
+        filters:
+        - AddRequestHeadersIfNotPresent=X-Request-Red:Blue-{segment}
+----

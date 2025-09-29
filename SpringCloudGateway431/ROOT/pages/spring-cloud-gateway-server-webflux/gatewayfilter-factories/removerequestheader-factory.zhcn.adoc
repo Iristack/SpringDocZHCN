@@ -1,0 +1,20 @@
+[[removerequestheader-gatewayfilter-factory]]
+= `RemoveRequestHeader` 网关过滤器工厂
+:page-section-summary-toc: 1
+
+`RemoveRequestHeader` `GatewayFilter` 工厂接收一个 `name` 参数，该参数指定了要移除的请求头名称。以下配置示例设置了一个 `RemoveRequestHeader` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: removerequestheader_route
+        uri: https://example.org
+        filters:
+        - RemoveRequestHeader=X-Request-Foo
+----
+
+此配置会在请求被转发到下游服务之前，移除名为 `X-Request-Foo` 的请求头。

@@ -1,0 +1,23 @@
+[[modifyresponsebody-gatewayfilter-factory]]
+= `ModifyResponseBody` `GatewayFilter` 工厂
+
+你可以使用 `ModifyResponseBody` 过滤器在将响应体发送回客户端之前对其进行修改。
+
+NOTE: 此过滤器只能通过 Java DSL 进行配置。
+
+以下示例展示了如何配置修改响应体的 `GatewayFilter`：
+
+[source,java]
+----
+@Bean
+public RouteLocator routes(RouteLocatorBuilder builder) {
+    return builder.routes()
+        .route("rewrite_response_upper", r -> r.host("*.rewriteresponseupper.org")
+            .filters(f -> f.prefixPath("/httpbin")
+                .modifyResponseBody(String.class, String.class,
+                    (exchange, s) -> Mono.just(s.toUpperCase()))).uri(uri))
+        .build();
+}
+----
+
+NOTE: 如果响应没有响应体，`RewriteFilter` 将接收到 `null`。此时应返回 `Mono.empty()`，以表示响应中不包含响应体。

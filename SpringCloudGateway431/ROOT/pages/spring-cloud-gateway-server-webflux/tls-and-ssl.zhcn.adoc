@@ -1,0 +1,64 @@
+[[tls-and-ssl]]
+= TLS 和 SSL
+
+网关可以通过遵循标准的 Spring 服务器配置来监听 HTTPS 请求。以下示例展示了如何实现：
+
+.application.yml
+[source,yaml]
+----
+server:
+  ssl:
+    enabled: true
+    key-alias: scg
+    key-store-password: scg1234
+    key-store: classpath:scg-keystore.p12
+    key-store-type: PKCS12
+----
+
+你可以将网关路由转发到 HTTP 和 HTTPS 后端服务。如果你要路由到 HTTPS 后端，可以通过以下配置让网关信任所有下游证书：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      httpclient:
+        ssl:
+          useInsecureTrustManager: true
+----
+
+使用不安全的信任管理器（insecure trust manager）不适合生产环境。对于生产部署，你可以通过如下配置为网关设置一组已知且可信任的证书：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      httpclient:
+        ssl:
+          trustedX509Certificates:
+          - cert1.pem
+          - cert2.pem
+----
+
+如果 Spring Cloud Gateway 未配置受信任的证书，则会使用默认的信任库（可通过设置 `javax.net.ssl.trustStore` 系统属性来覆盖此默认行为）。
+
+[[tls-handshake]]
+== TLS 握手
+
+网关维护一个客户端连接池，用于向后端进行路由请求。当通过 HTTPS 通信时，客户端会发起 TLS 握手。该握手过程涉及多个超时设置。你可以按如下方式配置这些超时时间（已展示默认值）：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      httpclient:
+        ssl:
+          handshake-timeout-millis: 10000
+          close-notify-flush-timeout-millis: 3000
+          close-notify-read-timeout-millis: 0
+----

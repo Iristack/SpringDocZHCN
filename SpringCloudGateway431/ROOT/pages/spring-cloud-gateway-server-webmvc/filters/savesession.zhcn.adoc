@@ -1,0 +1,23 @@
+[[savesession-filter]]
+= `SaveSession` 过滤器
+
+`SaveSession` 过滤器会在将请求向下转发之前，强制执行一次 `WebSession::save` 操作。  
+当使用类似 https://projects.spring.io/spring-session/[Spring Session] 并配合惰性数据存储时，此功能特别有用，可确保在进行转发调用前，会话状态已被保存。以下示例展示了如何配置 `SaveSession` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: save_session
+          uri: https://example.org
+          predicates:
+          - Path=/foo/**
+          filters:
+          - SaveSession=
+----
+
+如果你将 https://projects.spring.io/spring-security/[Spring Security] 与 Spring Session 集成，并希望确保安全信息已传递到远程进程，则此操作至关重要。

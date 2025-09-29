@@ -1,0 +1,16 @@
+[[gateway-handler-filter-functions]]
+= 网关处理器过滤器函数
+
+[[beforefilterfunctions]]
+== 前置过滤器函数（Before Filter Functions）
+
+WebMvc.fn API 提供了“前置”过滤器函数的概念，即一个 `java.util.Function<ServerRequest, ServerRequest>` 类型的函数，它仅作用于请求。许多前置过滤器函数在 `org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions` 中以静态工厂方法的形式被引用。这些函数会在 `org.springframework.cloud.gateway.server.mvc.filter.FilterFunctions` 中被适配为通用的 `org.springframework.web.servlet.function.HandlerFilterFunction<ServerResponse, ServerResponse>` 类型。两者均可使用，但在可能的情况下，建议优先使用更具体的 `BeforeFilterFunctions`，因为它语义更加明确。
+
+[[afterfilterfunctions]]
+== 后置过滤器函数（After Filter Functions）
+
+WebMvc.fn API 还提供了“后置”过滤器函数的概念，即一个 `java.util.BiFunction<ServerRequest, ServerResponse, ServerResponse>` 类型的函数，可用于修改响应。许多后置过滤器函数在 `org.springframework.cloud.gateway.server.mvc.filter.AfterFilterFunctions` 中以静态工厂方法的形式被引用。它们同样在 `org.springframework.cloud.gateway.server.mvc.filter.FilterFunctions` 中被适配为通用的 `org.springframework.web.servlet.function.HandlerFilterFunction<ServerResponse, ServerResponse>` 类型。虽然两者都可以使用，但尽可能推荐使用更具体的 `AfterFilterFunctions`，因为其意图表达更为清晰。
+
+== 高级过滤器函数（Advanced Filter Functions）
+
+某些过滤器无法简单归类为前置或后置过滤器。这类过滤器会在代理请求执行前后都进行操作。其中包括位于 `org.springframework.cloud.gateway.server.mvc.filter` 包中的 `BodyFilterFunctions`、`Bucket4jFilterFunctions`、`CircuitBreakerFilterFunctions`、`LoadBalancerFilterFunctions`、`RetryFilterFunctions` 和 `TokenRelayFilterFunctions` 中的一些过滤器。

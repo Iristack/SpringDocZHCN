@@ -1,0 +1,23 @@
+[[rewritepath-gatewayfilter-factory]]
+= `RewritePath` `GatewayFilter` 工厂
+
+`RewritePath` `GatewayFilter` 工厂接受一个路径 `regexp` 参数和一个 `replacement` 参数。  
+它使用 Java 正则表达式，以灵活的方式重写请求路径。  
+以下示例配置了一个 `RewritePath` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: rewritepath_route
+        uri: https://example.org
+        predicates:
+        - Path=/red/**
+        filters:
+        - RewritePath=/red/?(?<segment>.*), /$\{segment}
+----
+
+对于请求路径 `/red/blue`，在向下游服务转发请求之前，该配置会将其路径设置为 `/blue`。注意，由于 YAML 规范的要求，`$` 需要写成 `$\`。

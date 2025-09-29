@@ -1,0 +1,61 @@
+[[rewritelocationresponseheader-filter]]
+= `RewriteLocationResponseHeader` 过滤器
+
+`RewriteLocationResponseHeader` 过滤器用于修改响应头中的 `Location` 值，通常是为了去除与后端服务相关的特定细节。  
+该过滤器接受 `stripVersionMode`、`locationHeaderName`、`hostValue` 和 `protocolsRegex` 参数。  
+以下示例展示了如何配置一个 `RewriteLocationResponseHeader` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: rewritelocationresponseheader_route
+          uri: http://example.org
+          predicates:
+          - Path=/**
+          filters:
+          - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.RewriteLocationResponseHeaderFilterFunctions.rewriteLocationResponseHeader;
+import static org.springframework.cloud.gateway.server.mvc.filter.RewriteLocationResponseHeaderFilterFunctions.StripVersion;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRewriteLocationResponseHeader() {
+        return route("rewritelocationresponseheader_route")
+            .GET("/**", http())
+            .before(uri("https://example.org"))
+            .after(rewriteLocationResponseHeader(config -> config.setLocationHeaderName("Location")
+                    .setStripVersion(StripVersion.AS_IN_REQUEST)))
+            .build();
+    }
+}
+----
+
+
+
+例如，当收到请求 `POST https://api.example.com/some/object/name` 时，如果响应中包含 `Location` 头为 `https://object-service.prod.example.net/v2/some/object/id`，则会被重写为 `https://api.example.com/some/object/id`。
+
+`stripVersionMode` 参数有以下可选值：`NEVER_STRIP`、`AS_IN_REQUEST`（默认）和 `ALWAYS_STRIP`。
+
+* `NEVER_STRIP`：即使原始请求路径中不包含版本号，也不会移除版本。
+* `AS_IN_REQUEST`：仅当原始请求路径中不包含版本号时，才移除版本。
+* `ALWAYS_STRIP`：始终移除版本，即使原始请求路径中包含版本号。
+
+`hostValue` 参数（如果提供）将用于替换响应中 `Location` 头的 `host:port` 部分。  
+如果未提供此参数，则使用请求头中 `Host` 的值。
+
+`protocolsRegex` 参数必须是一个有效的正则表达式字符串，用于匹配协议名称。如果协议不匹配，该过滤器将不执行任何操作。默认值为 `http|https|ftp|ftps`。

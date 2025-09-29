@@ -1,0 +1,31 @@
+[[route-metadata-configuration]]
+= 路由元数据配置
+
+你可以通过使用元数据为每个路由配置额外的参数，如下所示：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: route_with_metadata
+        uri: https://example.org
+        metadata:
+          optionName: "OptionValue"
+          compositeObject:
+            name: "value"
+          iAmNumber: 1
+----
+
+你可以从交换（exchange）中获取所有元数据属性，如下所示：
+
+[source]
+----
+Route route = exchange.getAttribute(GATEWAY_ROUTE_ATTR);
+// 获取所有元数据属性
+route.getMetadata();
+// 获取单个元数据属性
+route.getMetadata(someKey);
+----

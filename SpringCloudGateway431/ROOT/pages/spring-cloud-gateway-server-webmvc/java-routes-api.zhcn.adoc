@@ -1,0 +1,117 @@
+[[java-routes-api]]
+= Java 路由 API
+
+Spring Cloud Gateway Server MVC 使用 Spring WebMvc.fn 的 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RouterFunctions.Builder.html[`RouterFunctions.Builder`] 作为创建路由的默认方式，这些路由是 WebMvc.fn 的 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RouterFunction.html[`RouterFunction`] 实例。
+
+通过调用 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RouterFunctions.html#route()[`RouterFunctions.route()`] 可以获取一个 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RouterFunctions.Builder.html[`RouterFunctions.Builder`] 实例。
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.web.servlet.function.RouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+class SimpleGateway {
+    @Bean
+    public RouterFunction<ServerResponse> getRoute() {
+        return route().GET("/get", http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+`RouterFunctions.Builder` 中为每个 HTTP 方法（如 GET、POST 等）提供了相应的方法，并结合路径谓词使用，例如上面的 `/get`。最后一个参数是 `HandlerFilterFunction`，在本例中为 `HandlerFunctions.http()`。对于每个 HTTP 方法，还提供了支持额外 `RequestPredicate` 参数的重载方法，以及一个通用的 `route(RequestPredicate, HandlerFunction)` 方法供一般使用。
+
+[[gateway-routerfunctions-builder]]
+== Gateway MVC 对 RouterFunctions.Builder 的实现
+
+某些高级过滤器需要向请求属性中添加元数据。为此，提供了 `org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions` 类。`GatewayRouterFunctions.route(String routeId)` 创建一个 `RouterFunctions.Builder` 实例，并添加一个 "before" 过滤器，将 `routeId` 作为请求元数据加入。
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+class SimpleGateway {
+    @Bean
+    public RouterFunction<ServerResponse> getRoute() {
+        return route("simple_route").GET("/get", http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+[[gateway-handlerfunctions]]
+== Gateway MVC 处理函数（Handler Functions）
+
+多个 `RouterFunctions.Builder` 方法需要传入一个 `HandlerFunction<ServerResponse>`。为了创建由 MVC Gateway 代理的路由，`org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions` 提供了相应的 `HandlerFunction` 实现。
+
+=== HTTP 处理函数
+最基本的处理函数是 `http()` `HandlerFunction`。如果传入了 `URI` 参数，则该 `URI` 将作为下游目标用于发送 HTTP 请求（如上例所示）。如果没有传递参数，该函数会查找请求属性中的 `org.springframework.cloud.gateway.server.mvc.common.MvcUtils.GATEWAY_REQUEST_URL_ATTR` 来获取 `URI`。这允许动态目标设置 `URI`，例如负载均衡场景。
+
+WARNING: 从 4.1.7 版本开始，`HandlerFunctions.http(String)` 和 `HandlerFunctions.http(URI)` 已被标记为废弃。请改用 `HandlerFunctions.http()` 结合 `BeforeFilterFunctions.uri()` 过滤器的方式。此更改修复了处理路由 URL 请求属性时的不一致性问题。
+
+=== Spring Cloud Function 处理函数
+当类路径中包含 https://spring.io/projects/spring-cloud-function[Spring Cloud Function] 时，Spring Cloud Gateway 会自动配置路由以调用你定义为 Bean 的函数。函数的 Bean 名称将用作路由的路径。
+
+例如，给定以下依赖配置：
+
+[source,xml]
+----
+<dependency>
+	<groupId>org.springframework.cloud</groupId>
+	<artifactId>spring-cloud-function-context</artifactId>
+</dependency>
+----
+
+一旦引入了 Spring Cloud Function 依赖，Java 函数 Bean 的名称就会成为可用于路由到函数的路径。
+
+例如，假设有如下应用：
+
+[source,java]
+----
+@SpringBootApplication
+public class DemoFunctionGatewayApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(DemoFunctionGatewayApplication.class, args);
+	}
+
+	
+	@Bean
+	public Function<String, String> uppercase() {
+		return v -> v.toUpperCase();
+	}
+	
+	@Bean
+	public Function<String, String> concat() {
+		return v -> v + v;
+	}
+}
+----
+你可以通过向 `/concat` 或 `/uppercase` 发送 `GET` 或 `POST` 请求来调用 `concat` 或 `uppercase` 函数。
+
+向 ``http://localhost:8080/uppercase/hello`` 发起 `GET` 请求，将会以字符串 `hello` 调用 `uppercase` 函数，并在响应体中返回 `HELLO`。
+
+除了将函数参数作为路径参数传递外，你还可以使用 `POST` 请求。例如，可以使用以下 cURL 命令调用 `concat` 函数：
+
+[source,bash]
+----
+$ curl -d ‘"hello"' -H "Content-Type: application/json" -X POST http://localhost:8080/concat
+----
+
+响应体将包含 `hellohello`。
+
+Spring Cloud Gateway 还支持通过向由逗号分隔的函数名组成的路径发起请求来实现函数组合。例如：
+
+[source,bash]
+----
+$ curl -d ‘"hello"' -H "Content-Type: application/json" -X POST http://localhost:8080/concat,uppercase
+----
+
+响应体将包含 `HELLOHELLO`。

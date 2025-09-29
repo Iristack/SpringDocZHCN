@@ -1,0 +1,14 @@
+[[gateway-starter]]
+= 如何引入 Spring Cloud Gateway
+:page-section-summary-toc: 1
+
+要在项目中引入 Spring Cloud Gateway，请使用组 ID 为 `org.springframework.cloud`、构件 ID 为 `spring-cloud-starter-gateway-server-webflux` 的启动器。有关如何使用当前 Spring Cloud Release Train 配置构建系统的详细信息，请参阅 https://projects.spring.io/spring-cloud/[Spring Cloud 项目页面]。
+
+如果你引入了该启动器，但不希望启用网关功能，请设置 `spring.cloud.gateway.enabled=false`。
+
+IMPORTANT: Spring Cloud Gateway 基于 https://spring.io/projects/spring-boot#learn[Spring Boot]、https://docs.spring.io/spring/docs/current/spring-framework-reference/web-reactive.html[Spring WebFlux] 和 https://projectreactor.io/docs[Project Reactor] 构建。  
+因此，当你使用 Spring Cloud Gateway 时，许多你熟悉的同步库（例如 Spring Data 和 Spring Security）和模式可能不再适用。  
+如果你对这些项目不熟悉，我们建议你在使用 Spring Cloud Gateway 之前，先阅读它们的文档，以了解一些新的概念。
+
+IMPORTANT: Spring Cloud Gateway 需要由 Spring Boot 和 Spring WebFlux 提供的 Netty 运行环境。  
+它无法在传统的 Servlet 容器中运行，也不能打包成 WAR 文件部署。

@@ -1,0 +1,96 @@
+[[tokenrelay-filter]]
+= `TokenRelay` 过滤器
+
+**Token Relay（令牌中继）** 是指一个 OAuth2 消费者作为客户端，将传入的令牌转发到对外部资源服务的请求中。该消费者可以是一个纯粹的客户端（例如单点登录应用），也可以是一个资源服务器。
+
+Spring Cloud Gateway Server MVC 可以使用 `TokenRelay` 过滤器，将 OAuth2 访问令牌向下游其代理的服务进行转发。
+
+`TokenRelay` 过滤器接受一个可选参数：`clientRegistrationId`。以下示例展示了如何配置 `TokenRelay` 过滤器：
+
+.RouteConfiguration.java
+[source,java]
+----
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsTokenRelay() {
+        return route("resource")
+            .GET("/resource", http())
+            .before(uri("https://localhost:9000"))
+            .filter(tokenRelay("myregistrationid"))
+            .build();
+    }
+}
+----
+
+或者如下配置：
+
+.application.yaml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: resource
+        uri: http://localhost:9000
+        predicates:
+        - Path=/resource
+        filters:
+        - TokenRelay=myregistrationid
+----
+
+上述示例中指定了一个 `clientRegistrationId`，可用于获取并转发对应任意可用 `ClientRegistration` 的 OAuth2 访问令牌。
+
+当使用 `oauth2Login()` 对用户进行身份验证时，Spring Cloud Gateway Server MVC 能够将当前已认证用户的 OAuth2 访问令牌转发给下游服务。要为网关启用此功能，你可以省略 `clientRegistrationId` 参数，如下所示：
+
+.RouteConfiguration.java
+[source,java]
+----
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsTokenRelay() {
+        return route("resource")
+            .GET("/resource", http())
+            .before(uri("https://localhost:9000"))
+            .filter(tokenRelay())
+            .build();
+    }
+}
+----
+
+或如下配置：
+
+.application.yaml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: resource
+          uri: http://localhost:9000
+          predicates:
+          - Path=/resource
+          filters:
+          - TokenRelay=
+----
+
+这样，在完成用户登录并获取令牌的同时，还会将该认证令牌传递到下游服务（在本例中是 `/resource` 接口）。
+
+要在 Spring Cloud Gateway Server MVC 中启用此功能，请添加以下依赖项：
+
+- `org.springframework.boot:spring-boot-starter-oauth2-client`
+
+它是如何工作的？  
+该过滤器会从当前已认证用户中提取与指定 `clientRegistrationId` 关联的 OAuth2 访问令牌。如果没有提供 `clientRegistrationId`，则使用当前用户登录时获得的自身访问令牌，并将提取出的访问令牌放入向下游服务发起请求的 HTTP 请求头中。
+
+//完整的工作示例请参见 https://github.com/spring-cloud-samples/sample-gateway-oauth2login[此项目]。
+
+NOTE: 仅当正确配置了 `spring.security.oauth2.client.*` 相关属性时，Token Relay 过滤器才能正常工作，因为这些属性会触发创建 `OAuth2AuthorizedClientManager` Bean。
+
+NOTE: Token Relay 过滤器使用的默认实现在内存中存储数据。如果你需要更健壮的解决方案，则需自行实现 `OAuth2AuthorizedClientService` 接口并提供自定义实现。

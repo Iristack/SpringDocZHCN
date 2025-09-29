@@ -1,0 +1,20 @@
+[[removerequestparameter-gatewayfilter-factory]]
+= `RemoveRequestParameter` `GatewayFilter` 工厂
+:page-section-summary-toc: 1
+
+`RemoveRequestParameter` `GatewayFilter` 工厂接收一个 `name` 参数，该参数指定了要移除的查询参数的名称。以下示例配置了一个 `RemoveRequestParameter` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: removerequestparameter_route
+        uri: https://example.org
+        filters:
+        - RemoveRequestParameter=red
+----
+
+此配置会在请求被转发到下游服务之前，移除名为 `red` 的查询参数。

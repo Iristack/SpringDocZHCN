@@ -1,0 +1,162 @@
+[[spring-cloud-circuitbreaker-filter-factory]]
+= `CircuitBreaker` `GatewayFilter` 工厂
+
+Spring Cloud CircuitBreaker GatewayFilter 工厂使用 Spring Cloud CircuitBreaker API 将网关路由封装在断路器中。Spring Cloud CircuitBreaker 支持多种可与 Spring Cloud Gateway 集成的库，其中开箱即支持 Resilience4J。
+
+要启用 Spring Cloud CircuitBreaker 过滤器，需要将 `spring-cloud-starter-circuitbreaker-reactor-resilience4j` 添加到类路径中。以下示例配置了一个 Spring Cloud CircuitBreaker `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: circuitbreaker_route
+        uri: https://example.org
+        filters:
+        - CircuitBreaker=myCircuitBreaker
+----
+
+如需配置断路器，请参考你所使用的底层断路器实现的具体配置文档。
+
+* https://cloud.spring.io/spring-cloud-circuitbreaker/reference/html/spring-cloud-circuitbreaker.html[Resilience4J 文档]
+
+Spring Cloud CircuitBreaker 过滤器还支持一个可选的 `fallbackUri` 参数。
+目前仅支持 `forward:` 协议格式的 URI。
+当触发回退逻辑时，请求会被转发至由该 URI 匹配的控制器。
+以下示例展示了如何配置此类回退：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: circuitbreaker_route
+        uri: lb://backing-service:8088
+        predicates:
+        - Path=/consumingServiceEndpoint
+        filters:
+        - name: CircuitBreaker
+          args:
+            name: myCircuitBreaker
+            fallbackUri: forward:/inCaseOfFailureUseThis
+        - RewritePath=/consumingServiceEndpoint, /backingServiceEndpoint
+----
+
+以下 Java 示例实现了相同的功能：
+
+.Application.java
+[source,java]
+----
+@Bean
+public RouteLocator routes(RouteLocatorBuilder builder) {
+    return builder.routes()
+        .route("circuitbreaker_route", r -> r.path("/consumingServiceEndpoint")
+            .filters(f -> f.circuitBreaker(c -> c.name("myCircuitBreaker").fallbackUri("forward:/inCaseOfFailureUseThis"))
+                .rewritePath("/consumingServiceEndpoint", "/backingServiceEndpoint")).uri("lb://backing-service:8088")
+        .build();
+}
+----
+
+此示例中，当断路器触发回退时，请求将被转发到 `/inCaseOfFailureUseThis` URI。
+请注意，该示例还演示了（可选的）Spring Cloud LoadBalancer 负载均衡功能（通过目标 URI 上的 `lb` 前缀定义）。
+
+CircuitBreaker 还支持在 `fallbackUri` 中使用 URI 变量。
+这允许更复杂的路由选项，例如使用 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/util/pattern/PathPattern.html[PathPattern 表达式] 转发原始主机或 URL 路径的部分内容。
+
+在下面的例子中，对 `consumingServiceEndpoint/users/1` 的调用将在失败时重定向到 `inCaseOfFailureUseThis/users/1`。
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: circuitbreaker_route
+        uri: lb://backing-service:8088
+        predicates:
+        - Path=/consumingServiceEndpoint/{*segments}
+        filters:
+        - name: CircuitBreaker
+          args:
+            name: myCircuitBreaker
+            fallbackUri: forward:/inCaseOfFailureUseThis/{segments}
+----
+
+主要的应用场景是使用 `fallbackUri` 在网关应用内部定义一个控制器或处理器。
+然而，你也可以将请求重新路由到外部应用中的控制器或处理器，如下所示：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: ingredients
+        uri: lb://ingredients
+        predicates:
+        - Path=//ingredients/**
+        filters:
+        - name: CircuitBreaker
+          args:
+            name: fetchIngredients
+            fallbackUri: forward:/fallback
+      - id: ingredients-fallback
+        uri: http://localhost:9994
+        predicates:
+        - Path=/fallback
+----
+
+在此示例中，网关应用本身没有 `fallback` 端点或处理器，但在另一个注册为 `http://localhost:9994` 的应用中存在。
+
+当请求被转发至回退处理路径时，Spring Cloud CircuitBreaker GatewayFilter 还会提供导致回退的异常（`Throwable`）对象。
+该异常会被作为属性添加到 `ServerWebExchange` 中，其键名为 `ServerWebExchangeUtils.CIRCUITBREAKER_EXECUTION_EXCEPTION_ATTR`，可在网关应用内处理回退逻辑时使用。
+
+对于外部控制器/处理器场景，可以通过添加包含异常详情的头信息来传递错误上下文。
+更多相关信息，请参阅 xref:spring-cloud-gateway-server-webflux/gatewayfilter-factories/fallback-headers.adoc[FallbackHeaders GatewayFilter Factory 章节]。
+
+[[circuit-breaker-status-codes]]
+== 根据状态码触发断路器
+
+在某些情况下，你可能希望根据其所包装的路由返回的状态码来触发断路器。
+断路器配置对象接受一个状态码列表，若响应包含这些状态码之一，则会触发断路器。
+设置希望触发断路器的状态码时，可以使用整数值表示状态码，也可以使用 `HttpStatus` 枚举的字符串形式。
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: circuitbreaker_route
+        uri: lb://backing-service:8088
+        predicates:
+        - Path=/consumingServiceEndpoint
+        filters:
+        - name: CircuitBreaker
+          args:
+            name: myCircuitBreaker
+            fallbackUri: forward:/inCaseOfFailureUseThis
+            statusCodes:
+              - 500
+              - "NOT_FOUND"
+----
+
+.Application.java
+[source,java]
+----
+@Bean
+public RouteLocator routes(RouteLocatorBuilder builder) {
+    return builder.routes()
+        .route("circuitbreaker_route", r -> r.path("/consumingServiceEndpoint")
+            .filters(f -> f.circuitBreaker(c -> c.name("myCircuitBreaker").fallbackUri("forward:/inCaseOfFailureUseThis").addStatusCode("INTERNAL_SERVER_ERROR"))
+                .rewritePath("/consumingServiceEndpoint", "/backingServiceEndpoint")).uri("lb://backing-service:8088")
+        .build();
+}
+----

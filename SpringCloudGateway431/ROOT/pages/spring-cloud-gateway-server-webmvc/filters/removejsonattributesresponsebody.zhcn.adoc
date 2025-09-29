@@ -1,0 +1,42 @@
+[[removejsonattributesresponsebody-filter]]
+= `RemoveJsonAttributesResponseBody` 过滤器
+
+`RemoveJsonAttributesResponseBody` 过滤器接收一个要搜索的 `属性名称` 集合，参数列表中的最后一个可选参数可以是一个布尔值，用于指定是否仅在根级别删除这些属性（如果未在参数配置末尾显式指定，则默认值为 `false`），或递归地删除所有层级的属性（`true`）。  
+该过滤器提供了一种便捷的方法，用于对 JSON 响应体内容进行转换，通过从其中删除指定属性来实现。
+
+以下示例配置了一个 `RemoveJsonAttributesResponseBody` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: removejsonattributes_route
+          uri: https://example.org
+          filters:
+          - RemoveJsonAttributesResponseBody=id,color
+----
+
+此配置会从 JSON 响应体内容的根级别中删除 "id" 和 "color" 属性。
+
+以下示例配置了一个使用可选最后一个参数的 `RemoveJsonAttributesResponseBody` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: removejsonattributes_recursively_route
+        uri: https://example.org
+        predicates:
+        - Path=/red/{segment}
+        filters:
+        - RemoveJsonAttributesResponseBody=id,color,true
+----
+
+此配置会从 JSON 响应体内容的任意嵌套层级中递归删除 "id" 和 "color" 属性。

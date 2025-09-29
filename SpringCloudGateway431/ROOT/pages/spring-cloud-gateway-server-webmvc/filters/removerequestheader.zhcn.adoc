@@ -1,0 +1,45 @@
+[[removerequestheader-filter]]
+= `RemoveRequestHeader` 网关过滤器工厂
+:page-section-summary-toc: 1
+
+`RemoveRequestHeader` 过滤器接收一个 `name` 参数，该参数指定了要移除的请求头名称。以下配置示例定义了一个 `RemoveRequestHeader` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: removerequestheader_route
+          uri: https://example.org
+          predicates:
+          - Path=/**
+          filters:
+          - RemoveRequestHeader=X-Request-Foo
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.removeRequestHeader;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRemoveRequestHeader() {
+        return route("removerequestheader_route")
+            .GET("/**", http())
+            .before(uri("https://example.org"))
+            .before(removeRequestHeader("X-Request-Foo"))
+            .build();
+    }
+}
+----
+
+上述配置会在请求被转发到下游服务之前，移除名为 `X-Request-Foo` 的请求头。

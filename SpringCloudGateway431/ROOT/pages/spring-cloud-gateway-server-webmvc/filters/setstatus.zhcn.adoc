@@ -1,0 +1,74 @@
+[[setstatus-filter]]
+= `SetStatus` 过滤器
+
+`SetStatus` 过滤器接受一个参数：`status`。  
+该参数必须是一个有效的 Spring `HttpStatus`。  
+可以是整数值 `404`，也可以是枚举的字符串表示形式，例如 `NOT_FOUND`。  
+以下示例展示了如何配置 `SetStatus` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: setstatusstring_route
+          uri: https://example.org
+          predicates:
+          - Path=/path1
+          filters:
+          - SetStatus=UNAUTHORIZED
+        - id: setstatusint_route
+          uri: https://example.org
+          predicates:
+          - Path=/path2
+          filters:
+          - SetStatus=401
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.AfterFilterFunctions.setStatus;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsSetStatus() {
+        return route("setstatus_route")
+                .GET("/path1", http())
+                .before(uri("https://example.org"))
+                // setStatus("UNAUTHORIZED") 同样有效
+                .after(setStatus(HttpStatus.UNAUTHORIZED))
+            .build().and(route("setstatusint_route")
+                .before(uri("https://example.org"))
+                .GET("/path2", http())
+                .after(setStatus("401"))
+                .build());
+    }
+}
+----
+
+在上述两种情况下，响应的 HTTP 状态码都会被设置为 401。
+
+////
+TODO: 支持原始状态头
+你可以配置 `SetStatus` 过滤器，在响应头中返回被代理请求的原始 HTTP 状态码。
+如果通过以下属性进行配置，则会在响应中添加该头部：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      set-status:
+        original-status-header-name: original-http-status
+----
+////

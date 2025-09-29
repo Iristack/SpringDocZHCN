@@ -1,0 +1,89 @@
+[[tokenrelay-gatewayfilter-factory]]
+= `TokenRelay` `GatewayFilter` 工厂
+
+**Token Relay（令牌传递）** 是指一个 OAuth2 消费者充当客户端，将传入的令牌转发到对外部资源请求中。该消费者可以是一个纯粹的客户端（例如单点登录应用），也可以是一个资源服务器。
+
+Spring Cloud Gateway 可以使用 `TokenRelay` `GatewayFilter` 将 OAuth2 访问令牌向下传递给它所代理的服务。
+
+`TokenRelay` `GatewayFilter` 接受一个可选参数：`clientRegistrationId`。以下示例展示了如何配置 `TokenRelay` `GatewayFilter`：
+
+.App.java
+[source,java]
+----
+@Bean
+public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
+    return builder.routes()
+            .route("resource", r -> r.path("/resource")
+                    .filters(f -> f.tokenRelay("myregistrationid"))
+                    .uri("http://localhost:9000"))
+            .build();
+}
+----
+
+或者如下配置：
+
+.application.yaml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: resource
+        uri: http://localhost:9000
+        predicates:
+        - Path=/resource
+        filters:
+        - TokenRelay=myregistrationid
+----
+
+上述示例中指定了 `clientRegistrationId`，可用于获取并转发与任意可用 `ClientRegistration` 对应的 OAuth2 访问令牌。
+
+Spring Cloud Gateway 还可以转发当前已认证用户的 OAuth2 访问令牌（前提是使用了 `oauth2Login()` 来进行用户身份验证）。  
+要为网关启用此功能，可以省略 `clientRegistrationId` 参数，如下所示：
+
+.App.java
+[source,java]
+----
+@Bean
+public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
+    return builder.routes()
+            .route("resource", r -> r.path("/resource")
+                    .filters(f -> f.tokenRelay())
+                    .uri("http://localhost:9000"))
+            .build();
+}
+----
+
+或如下配置：
+
+.application.yaml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: resource
+        uri: http://localhost:9000
+        predicates:
+        - Path=/resource
+        filters:
+        - TokenRelay=
+----
+
+这样，在完成用户登录并获取令牌的同时，还会将认证令牌向下传递给后端服务（在本例中是 `/resource` 路径对应的服务）。
+
+要在 Spring Cloud Gateway 中启用此功能，请添加以下依赖项：
+
+- `org.springframework.boot:spring-boot-starter-oauth2-client`
+
+它是如何工作的？  
+https://github.com/spring-cloud/spring-cloud-gateway/blob/main/spring-cloud-gateway-server/src/main/java/org/springframework/cloud/gateway/filter/factory/TokenRelayGatewayFilterFactory.java[该过滤器]  
+会从当前已认证用户中提取指定 `clientRegistrationId` 的 OAuth2 访问令牌。如果未提供 `clientRegistrationId`，则使用当前已认证用户自身的访问令牌（即登录过程中获得的令牌）。无论哪种情况，提取出的访问令牌都会被放入下游请求的 HTTP 请求头中。
+
+完整的可运行示例请参见：https://github.com/spring-cloud-samples/sample-gateway-oauth2login[此项目]。
+
+NOTE: 只有当正确设置了 `spring.security.oauth2.client.*` 相关属性时，才会创建 `TokenRelayGatewayFilterFactory` Bean，因为这些属性会触发 `ReactiveClientRegistrationRepository` Bean 的创建。
+
+NOTE: `TokenRelayGatewayFilterFactory` 使用的 `ReactiveOAuth2AuthorizedClientService` 默认实现采用的是内存中的数据存储。如果你需要更健壮的解决方案，则需要自行提供 `ReactiveOAuth2AuthorizedClientService` 的实现。

@@ -1,0 +1,110 @@
+[[retry-filter]]
+= `Retry` 过滤器
+
+`Retry` 过滤器支持以下参数：
+
+* `retries`：应尝试的重试次数。
+//TODO: implement statuses
+//* `statuses`：应进行重试的 HTTP 状态码，使用 `org.springframework.http.HttpStatus` 表示。
+* `methods`：应进行重试的 HTTP 方法，使用 `org.springframework.http.HttpMethod` 表示。
+* `series`：应重试的状态码系列，使用 `org.springframework.http.HttpStatus.Series` 表示。
+* `exceptions`：应触发重试的异常列表。
+* `cacheBody`：一个标志位，表示是否应缓存请求体。如果设置为 `true`，则必须使用 `adaptCacheBody` 过滤器将缓存的请求体向下传递。
+//* `backoff`：配置的指数退避策略用于重试。
+//重试将在 `firstBackoff * (factor ^ n)` 的退避间隔后执行，其中 `n` 是重试次数。
+//如果配置了 `maxBackoff`，应用的最大退避时间将限制为 `maxBackoff`。
+//如果 `basedOnPreviousValue` 为 true，则退避时间按 `prevBackoff * factor` 计算。
+
+启用 `Retry` 过滤器时，其默认配置如下：
+
+* `retries`：3 次
+* `series`：5XX 系列状态码
+* `methods`：GET 方法
+* `exceptions`：`IOException`、`TimeoutException` 和 `RetryException`
+* `cacheBody`：`false`
+//* `backoff`：禁用
+
+WARNING: 将 `cacheBody` 设置为 `true` 会导致网关将整个请求体读入内存。请谨慎使用此选项。
+
+以下示例展示了如何配置 Retry 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: retry_route
+          uri: http://localhost:8080/flakey
+          predicates:
+          - Host=*.retry.com
+          filters:
+          - name: Retry
+            args:
+              retries: 3
+              series: SERVER_ERROR
+              methods: GET,POST
+              cacheBody: true
+          - name: AdaptCachedBody
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.FilterFunctions.adaptCachedBody;
+import static org.springframework.cloud.gateway.server.mvc.filter.RetryFilterFunctions.retry;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.host;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRetry() {
+        return route("retry_route")
+            .route(host("*.retry.com"), http())
+            .before(uri("http://localhost:8080/flakey"))
+            .filter(retry(config -> config.setRetries(3)
+                    .setSeries(Set.of(HttpStatus.Series.SERVER_ERROR))
+                    .setMethods(Set.of(HttpMethod.GET, HttpMethod.POST))
+                    .setCacheBody(true)))
+            .filter(adaptCachedBody())
+            .build();
+    }
+}
+----
+
+NOTE: 当在带有 `forward:` 前缀的 URL 上使用重试过滤器时，目标端点应小心编写，以确保在发生错误时不会执行可能导致响应发送给客户端并提交的操作。例如，如果目标端点是一个注解控制器，目标控制器方法不应返回带有错误状态码的 `ResponseEntity`。相反，它应该抛出一个 `Exception` 或发出错误信号（例如通过返回 `Mono.error(ex)`），以便重试过滤器可以配置为处理该异常并进行重试。
+
+NOTE: 使用重试过滤器时，它会重试其之后的所有过滤器。请确保在多次执行时，重试过滤器之后的各个过滤器的行为符合预期。
+
+WARNING: 当对带有请求体的任何 HTTP 方法使用重试过滤器且 `cacheBody=true` 时，请求体会被缓存，可能导致网关内存受限。请求体被缓存在由 `MvcUtils.CACHED_REQUEST_BODY_ATT` 定义的请求属性中，该对象的类型为 `ByteArrayInputStream`。
+
+可以使用简化的“快捷方式”语法，仅指定单个 `status` 和 `method`。
+
+以下两个路由示例是等效的：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: retry_route
+        uri: https://example.org
+        filters:
+        - name: Retry
+          args:
+            retries: 3
+            statuses: INTERNAL_SERVER_ERROR
+            methods: GET
+      - id: retryshortcut_route
+        uri: https://example.org
+        filters:
+        - Retry=3,INTERNAL_SERVER_ERROR,GET
+----

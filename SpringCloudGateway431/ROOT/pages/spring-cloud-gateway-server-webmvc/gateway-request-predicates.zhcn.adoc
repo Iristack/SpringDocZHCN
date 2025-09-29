@@ -1,0 +1,545 @@
+[[gateway-request-predicates]]
+= 网关请求谓词（Gateway Request Predicates）
+
+Spring Cloud Gateway MVC 作为 Spring WebMvc.fn 的 `HandlerMapping` 基础设施的一部分来匹配路由。  
+Spring Cloud Gateway 复用了许多来自 WebMvc.fn 的 https://docs.spring.io/spring-framework/reference/web/webmvc-functional.html#webmvc-fn-predicates[`RequestPredicate`] 实现，并额外提供了自定义的 `RequestPredicate` 实现。  
+这些谓词都基于 HTTP 请求的不同属性进行匹配。  
+你可以使用 `RequestPredicate.and()` 和 `RequestPredicate.or()` 方法组合多个路由谓词工厂。
+
+[[after-request-predicate]]
+== After 请求谓词
+
+`After` 路由谓词工厂接受一个参数：`datetime`（即 Java 的 `ZonedDateTime` 类型）。  
+该谓词会匹配发生在指定时间之后的请求。  
+以下示例配置了一个 after 路由谓词：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: after_route
+          uri: https://example.org
+          predicates:
+          - After=2017-01-20T17:42:47.789-07:00[America/Denver]
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import java.time.ZonedDateTime;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.after;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsAfter() {
+        return route("after_route")
+            .route(after(ZonedDateTime.parse("2017-01-20T17:42:47.789-07:00[America/Denver]")), http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+此路由将匹配在 2017 年 1 月 20 日 17:42 山地时间（丹佛）之后发起的任何请求。
+
+[[before-request-predicate]]
+== Before 请求谓词
+
+`Before` 路由谓词工厂接受一个参数：`datetime`（即 Java 的 `ZonedDateTime` 类型）。  
+该谓词会匹配发生在指定时间之前的请求。  
+以下示例配置了一个 before 路由谓词：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: before_route
+          uri: https://example.org
+          predicates:
+          - Before=2017-01-20T17:42:47.789-07:00[America/Denver]
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import java.time.ZonedDateTime;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.before;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsBefore() {
+        return route("before_route")
+            .route(before(ZonedDateTime.parse("2017-01-20T17:42:47.789-07:00[America/Denver]")), http()
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+此路由将匹配在 2017 年 1 月 20 日 17:42 山地时间（丹佛）之前发起的任何请求。
+
+[[between-request-predicate]]
+== Between 请求谓词
+
+`Between` 路由谓词工厂接受两个参数：`datetime1` 和 `datetime2`，均为 Java 的 `ZonedDateTime` 对象。  
+该谓词匹配发生在 `datetime1` 之后且 `datetime2` 之前的请求。  
+注意：`datetime2` 必须晚于 `datetime1`。  
+以下示例配置了一个 between 路由谓词：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: between_route
+          uri: https://example.org
+          predicates:
+          - Between=2017-01-20T17:42:47.789-07:00[America/Denver], 2017-01-21T17:42:47.789-07:00[America/Denver]
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import java.time.ZonedDateTime;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.between;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsBetween() {
+        return route("between_route")
+            .route(between(ZonedDateTime.parse("2017-01-20T17:42:47.789-07:00[America/Denver]"),
+                ZonedDateTime.parse("2017-01-21T17:42:47.789-07:00[America/Denver]")), http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+此路由将匹配 2017 年 1 月 20 日 17:42 到 2017 年 1 月 21 日 17:42 山地时间（丹佛）之间的所有请求。  
+这在维护窗口期间非常有用。
+
+[[cookie-request-predicate]]
+== Cookie 请求谓词
+
+`Cookie` 路由谓词工厂接受两个参数：cookie 的 `name` 和一个 `regexp`（Java 正则表达式）。  
+该谓词匹配具有指定名称且值符合正则表达式的 cookie。  
+以下示例配置了一个 cookie 路由谓词工厂：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: cookie_route
+          uri: https://example.org
+          predicates:
+          - Cookie=chocolate, ch.p
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.cookie;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsCookie() {
+        return route("cookie_route")
+            .route(cookie("chocolate", "ch.p"), http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+此路由将匹配包含名为 `chocolate` 且其值符合正则表达式 `ch.p` 的 cookie 的请求。
+
+[[header-request-predicate]]
+== Header 请求谓词
+
+`Header` 路由谓词工厂接受两个参数：`header` 名称和一个 `regexp`（Java 正则表达式）。  
+该谓词匹配具有指定名称且值符合正则表达式的请求头。  
+以下示例配置了一个 header 路由谓词：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: header_route
+          uri: https://example.org
+          predicates:
+          - Header=X-Request-Id, \d+
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.header;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsHeader() {
+        return route("header_route")
+            .route(header("X-Request-Id", "\\d+"), http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+如果请求中包含名为 `X-Request-Id` 且其值符合 `\d+` 正则表达式（即一个或多个数字）的请求头，则该路由会被匹配。
+
+[[host-request-predicate]]
+== Host 请求谓词
+
+`Host` 路由谓词工厂接受一个参数：一组主机名 `patterns`。  
+模式采用 Ant 风格，以 `.` 作为分隔符。  
+该谓词匹配与模式相符合的 `Host` 请求头。  
+以下示例配置了一个 host 路由谓词：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: host_route
+          uri: https://example.org
+          predicates:
+          - Host=**.somehost.org,**.anotherhost.org
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.host;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsHost() {
+        return route("host_route")
+            .route(host("**.somehost.org", "**.anotherhost.org"), http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+也支持 URI 模板变量（例如 `\{sub}.myhost.org`）。
+
+如果请求的 `Host` 请求头为 `www.somehost.org`、`beta.somehost.org` 或 `www.anotherhost.org`，则该路由会被匹配。
+
+该谓词会将 URI 模板变量（如前面示例中的 `sub`）提取为一个名称与值的映射，并通过键 `MvcUtils.URI_TEMPLATE_VARIABLES_ATTRIBUTE` 存储在 `ServerRequest.attributes()` 中。  
+// TODO: figure out link to gateway-handler-filter-functions  
+这些值随后可供网关处理过滤器函数（Gateway Handler Filter Functions）使用。
+
+[[method-request-predicate]]
+== Method 请求谓词
+
+`Method` 请求谓词接受一个 `methods` 参数，可以是一个或多个 HTTP 方法。  
+以下示例配置了一个 method 路由谓词：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: method_route
+          uri: https://example.org
+          predicates:
+          - Method=GET,POST
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import org.springframework.http.HttpMethod;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.method;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsMethod() {
+        return route("method_route")
+            .route(method(HttpMethod.GET, HttpMethod.POST), http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+如果请求方法是 `GET` 或 `POST`，则该路由会被匹配。
+
+`GatewayRequestPredicates.method` 是 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RequestPredicates.html#methods(org.springframework.http.HttpMethod...)[`RequestPredicates.methods`] 的简单别名。此外，`RouterFunctions.Builder` API 提供了便利方法，可同时组合 `method` 和 `path` 谓词。
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsMethodAndPath() {
+        return route("method_and_path_route")
+            .GET("/mypath", http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+如果请求方法是 `GET` 且路径为 `/mypath`，则该路由会被匹配。
+
+[[path-request-predicate]]
+== Path 请求谓词
+
+`Path` 请求谓词接受两个参数：一组 Spring `PathPattern` 模式列表。  
+// 及一个可选标志 `matchTrailingSlash`（默认为 `true`）。  
+该请求谓词底层使用 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RequestPredicates.html#path(java.lang.String)[`RequestPredicates.path()`] 实现。  
+以下示例配置了一个 path 路由谓词：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: path_route
+          uri: https://example.org
+          predicates:
+          - Path=/red/{segment},/blue/{segment}
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.path;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsPath() {
+        return route("path_route")
+            .route(path("/red/{segment}", "/blue/{segment}"), http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+例如，当请求路径为 `/red/1`、`/red/1/`、`/red/blue` 或 `/blue/green` 时，该路由会被匹配。
+
+// 如果 `matchTrailingSlash` 设置为 `false`，则路径 `/red/1/` 不会被匹配。
+
+该谓词会将 URI 模板变量（如上例中的 `segment`）提取为一个名称与值的映射，并通过 `RouterFunctions.URI_TEMPLATE_VARIABLES_ATTRIBUTE` 键存储在 `ServerRequest.attributes()` 中。  
+// TODO: figure out link  
+这些值随后可供网关处理过滤器函数使用。
+
+提供了一个名为 `get` 的工具方法，便于访问这些变量。  
+以下示例展示如何使用 `get` 方法：
+
+[source,java]
+----
+Map<String, Object> uriVariables = MvcUtils.getUriTemplateVariables(request);
+
+String segment = uriVariables.get("segment");
+----
+
+[[query-request-predicate]]
+== Query 请求谓词
+
+`Query` 路由谓词工厂接受两个参数：必需的 `param` 和可选的 `regexp`（Java 正则表达式）。  
+以下示例配置了一个 query 路由谓词：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: query_route
+          uri: https://example.org
+          predicates:
+          - Query=green
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.query;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsQuery() {
+        return route("query_route")
+            .route(query("green"), http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+上述路由将在请求包含名为 `green` 的查询参数时被匹配。
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: query_route
+          uri: https://example.org
+          predicates:
+          - Query=red, gree.
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.query;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsQuery() {
+        return route("query_route")
+            .route(query("red", "gree."), http())
+            .before(uri("https://example.org"))
+            .build();
+    }
+}
+----
+
+上述路由将在请求包含名为 `red` 的查询参数且其值符合 `gree.` 正则表达式时被匹配，因此 `green` 和 `greet` 都能匹配。
+
+[[weight-request-predicate]]
+== Weight 请求谓词
+
+`Weight` 路由谓词工厂接受两个参数：`group` 和 `weight`（整数类型）。权重按组计算。  
+以下示例配置了一个 weight 路由谓词：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: weight_high
+          uri: https://weighthigh.org
+          predicates:
+          - Weight=group1, 8
+        - id: weight_low
+          uri: https://weightlow.org
+          predicates:
+          - Weight=group1, 2
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.path;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.weight;
+
+@Configuration
+class RouteConfiguration {
+
+	@Bean
+	public RouterFunction<ServerResponse> gatewayRouterFunctionsWeights() {
+        return route("weight_high")
+                .route(weight("group1", 8).and(path("/**")), http())
+                .before(uri("https://weighthigh.org"))
+                .build().and(
+            route("weight_low")
+                .route(weight("group1", 2).and(path("/**")), http())
+                .before(uri("https://weightlow.org"))
+                .build());
+	}
+}
+----
+
+该路由会将大约 80% 的流量转发到 https://weighthigh.org，约 20% 的流量转发到 https://weightlow.org。

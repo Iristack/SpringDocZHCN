@@ -1,0 +1,57 @@
+[[requestsize-filter]]
+= `RequestSize` 过滤器
+
+当请求大小超过允许的限制时，`RequestSize` 过滤器可以阻止该请求到达下游服务。  
+该过滤器接受一个 `maxSize` 参数。  
+`maxSize` 是 `DataSize` 类型，因此其值可以定义为一个数字后跟一个可选的 `DataUnit` 单位后缀（例如 'KB' 或 'MB'），默认单位是 'B'（字节）。  
+它表示以字节为单位定义的请求允许的最大尺寸。  
+以下配置示例展示了如何设置一个 `RequestSize` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: request_size_route
+          uri: http://localhost:8080
+          predicates:
+          - Path=/upload
+          filters:
+          - name: RequestSize
+            args:
+              maxSize: 5000000
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.requestSize;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRequestSize() {
+        return route("request_size_route")
+            .GET("/upload", http())
+            .before(uri("http://localhost:8080"))
+            .before(requestSize("5000000"))
+            .build();
+    }
+}
+----
+
+当请求因大小超出限制而被拒绝时，`RequestSize` 过滤器会将响应状态设置为 `413 Payload Too Large`，并添加一个名为 `errorMessage` 的响应头。以下是一个 `errorMessage` 示例：
+
+[source]
+----
+errorMessage : 请求大小超过了允许的限制。当前请求大小为 6.0 MB，而允许的最大限制为 5.0 MB
+----
+
+NOTE: 如果在路由定义中未提供 `maxSize` 参数，则默认请求大小限制为 5 MB。

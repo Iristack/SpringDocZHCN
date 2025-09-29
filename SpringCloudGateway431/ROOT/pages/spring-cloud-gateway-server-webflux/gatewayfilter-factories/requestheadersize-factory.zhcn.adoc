@@ -1,0 +1,22 @@
+[[requestheadersize-gatewayfilter-factory]]
+= `RequestHeaderSize` `GatewayFilter` 工厂
+:page-section-summary-toc: 1
+
+`RequestHeaderSize` `GatewayFilter` 工厂接受 `maxSize` 和 `errorHeaderName` 参数。  
+`maxSize` 参数表示请求头（包括键和值）允许的最大数据大小。`errorHeaderName` 参数设置包含错误消息的响应头名称，默认为 "errorMessage"。  
+以下示例配置了一个 `RequestHeaderSize` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: requestheadersize_route
+        uri: https://example.org
+        filters:
+        - RequestHeaderSize=1000B
+----
+
+如果任意请求头的大小超过 1000 字节，将返回状态码 431。

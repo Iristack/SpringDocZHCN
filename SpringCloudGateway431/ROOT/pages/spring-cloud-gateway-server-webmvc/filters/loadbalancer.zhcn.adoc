@@ -1,0 +1,57 @@
+[[loadbalancer-filter]]
+= LoadBalancer 过滤器
+
+LoadBalancer 过滤器接受一个 `serviceId` 参数。`LoadBalancerClient` 使用该参数选择一个实例进行路由。在 Java DSL 中，必须显式使用 LoadBalancer 过滤器。当使用 LoadBalancer 过滤器时，在 `org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions` 中应使用空的 `http()` 方法。
+
+.RouteConfiguration.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.LoadBalancerFilterFunctions.lb;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsAddReqHeader() {
+		return route("api_route")
+				.GET("/api/**", http())
+					.filter(lb("apiservice"))
+					.build();
+    }
+}
+----
+
+== 在配置中使用 LoadBalancer 过滤器
+
+可以通过使用以 `lb` 协议开头的 URI（例如 `lb://myservice`）在配置中使用 LoadBalancer 过滤器。它会使用 Spring Cloud 的 `LoadBalancerClient` 将名称（如本例中的 `myservice`）解析为实际的主机和端口，并替换掉原始 URI 属性中的内容。
+// 原始未修改的 URL 会被添加到 `ServerWebExchangeUtils.GATEWAY_ORIGINAL_REQUEST_URL_ATTR` 属性的列表中。
+
+以下示例展示了如何配置一个 LoadBalancer 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: api_route
+          uri: lb://apiservice
+          predicates:
+          - Path=/api/**
+----
+
+WARNING: 如果使用 `lb()` 过滤器，它必须位于任何修改路径的过滤器（如 `setPath()` 或 `stripPrefix()`）之后，否则可能导致最终生成的 URL 不正确。通过配置方式使用 `lb:` 协议时，该过滤器会自动被置于最高优先级顺序。
+
+NOTE: 默认情况下，当 `ReactorLoadBalancer` 无法找到服务实例时，网关将返回 `503` 状态码。
+// TODO: implement use404
+// 您可以通过设置 `spring.cloud.gateway.loadbalancer.use404=true` 来配置网关返回 `404`。
+
+NOTE: `LoadBalancerClient` 返回的 `ServiceInstance` 的 `isSecure` 值会覆盖请求进入网关时所使用的协议方案。
+例如，如果请求是通过 `HTTPS` 到达网关的，但 `ServiceInstance` 表明其不安全，则下游请求将以 `HTTP` 发出。反之亦然。
+// 然而，如果在网关配置中为路由设置了 `GATEWAY_SCHEME_PREFIX_ATTR`，则前缀将被移除，并且路由 URL 的协议方案将覆盖 `ServiceInstance` 的配置。
+
+TIP: 网关支持所有 LoadBalancer 功能。您可以在 https://docs.spring.io/spring-cloud-commons/docs/current/reference/html/#spring-cloud-loadbalancer[Spring Cloud Commons 文档] 中了解更多相关内容。

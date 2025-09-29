@@ -1,0 +1,37 @@
+[[addrequestheader-gatewayfilter-factory]]
+= `AddRequestHeader` 网关过滤器工厂
+
+`AddRequestHeader` `GatewayFilter` 工厂接收一个 `name`（名称）和一个 `value`（值）参数。  
+以下示例配置了一个 `AddRequestHeader` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_request_header_route
+        uri: https://example.org
+        filters:
+        - AddRequestHeader=X-Request-red, blue
+----
+
+上述配置会为所有匹配的请求，在向下游服务发送请求时添加请求头 `X-Request-red:blue`。
+
+`AddRequestHeader` 能够识别用于匹配路径或主机的 URI 变量。这些变量可以在值中使用，并在运行时被展开。以下示例配置了一个使用变量的 `AddRequestHeader` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_request_header_route
+        uri: https://example.org
+        predicates:
+        - Path=/red/{segment}
+        filters:
+        - AddRequestHeader=X-Request-Red, Blue-{segment}
+----

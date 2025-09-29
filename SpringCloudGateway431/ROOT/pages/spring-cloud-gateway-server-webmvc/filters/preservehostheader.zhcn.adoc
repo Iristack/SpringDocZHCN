@@ -1,0 +1,45 @@
+[[preservehostheader-filter]]
+= `PreserveHostHeader` 过滤器
+:page-section-summary-toc: 1
+
+`PreserveHostHeader` 过滤器没有任何参数。  
+该过滤器会设置一个请求属性，`HandlerFunction` 会检查此属性，以确定是否应发送原始的 Host 头，而不是由 HTTP 客户端决定的 Host 头。  
+以下示例展示了如何配置一个 `PreserveHostHeader` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: preserve_host_route
+          uri: https://example.org
+          predicates:
+          - Path=/**
+          filters:
+          - PreserveHostHeader
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.preserveHostHeader;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsPreserveHostHeader() {
+        return route("preserve_host_route")
+            .GET("/**", http())
+            .before(uri("https://example.org"))
+            .before(preserveHostHeader())
+            .build();
+    }
+}
+----

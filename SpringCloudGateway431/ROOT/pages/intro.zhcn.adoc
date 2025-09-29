@@ -1,0 +1,9 @@
+[[introduction]]
+= Spring Cloud Gateway
+
+本项目基于 Spring 生态系统（包括 Spring 6、Spring Boot 3 和 Project Reactor）构建了一个 API 网关。Spring Cloud Gateway 致力于提供一种简单而高效的方法来路由到 API，并为这些 API 提供横切关注点，例如：安全性、监控/指标以及容错能力。
+
+Spring Cloud Gateway 有两种不同的形式：*Server*（服务器模式）和 *Proxy Exchange*（代理交换模式）。每种形式都支持 WebFlux 和 Web MVC。
+
+- **服务器模式** 是一个功能完整的 API 网关，可以作为独立服务运行，也可以嵌入到 Spring Boot 应用程序中。
+- **代理交换模式** 专用于基于注解的 WebFlux 或 Web MVC 应用程序，允许在 Web 处理方法中将特殊的 `ProxyExchange` 对象作为参数使用。

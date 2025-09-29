@@ -1,0 +1,6 @@
+[[sharing-routes-between-multiple-gateway-instances]]
+= 在多个网关实例之间共享路由
+
+Spring Cloud Gateway 提供了两种 `RouteDefinitionRepository` 实现。第一种是 `InMemoryRouteDefinitionRepository`，它仅存在于单个网关实例的内存中。这种类型的仓库不适合在多个网关实例之间共享路由配置。
+
+为了在一组 Spring Cloud Gateway 实例集群中共享路由，可以使用 `RedisRouteDefinitionRepository`。要启用此类仓库，必须将以下属性设置为 true：`spring.cloud.gateway.redis-route-definition-repository.enabled`。与 RedisRateLimiter 过滤器工厂类似，它需要引入 Spring Boot 的 `spring-boot-starter-data-redis-reactive` 起步依赖。

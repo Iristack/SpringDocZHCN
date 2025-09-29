@@ -1,0 +1,22 @@
+[[prefixpath-gatewayfilter-factory]]
+= `PrefixPath` `GatewayFilter` 工厂
+:page-section-summary-toc: 1
+
+`PrefixPath` `GatewayFilter` 工厂接受一个名为 `prefix` 的参数。  
+以下示例配置了一个 `PrefixPath` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: prefixpath_route
+        uri: https://example.org
+        filters:
+        - PrefixPath=/mypath
+----
+
+该配置会将 `/mypath` 添加到所有匹配请求路径的前面。  
+例如，对 `/hello` 的请求将被转发至 `/mypath/hello`。

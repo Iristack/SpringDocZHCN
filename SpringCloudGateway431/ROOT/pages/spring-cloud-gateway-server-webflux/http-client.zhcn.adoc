@@ -1,0 +1,49 @@
+[[http-client]]
+= HttpClientCustomizer
+
+`HttpClientCustomizer` 是 Spring Cloud Gateway 中的一个接口，用于自定义网关所使用的 HTTP 客户端。该接口仅提供一个方法 `customize`，该方法接收一个 `HttpClient` 实例作为参数，并返回经过自定义配置后的客户端实例。
+
+此接口适用于需要对 HTTP 客户端进行特定配置或行为调整的场景，例如设置超时时间、添加自定义请求头，或启用某些特定功能。通过实现该接口，你可以提供满足具体需求的自定义逻辑。
+
+以下是一个使用 `HttpClientCustomizer` 接口的示例：
+
+.MyHttpClientCustomizer.java
+[source,java]
+----
+import org.springframework.cloud.gateway.config.HttpClientCustomizer;
+import reactor.netty.http.client.HttpClient;
+
+public class MyHttpClientCustomizer implements HttpClientCustomizer {
+
+    @Override
+    public HttpClient customize(HttpClient httpClient) {
+        // 在此处自定义 HTTP 客户端
+        return httpClient.tcpConfiguration(tcpClient -> {
+            // 设置连接超时为 5 秒
+            tcpClient.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
+            // 设置读取超时为 10 秒
+            tcpClient.option(ChannelOption.SO_TIMEOUT, 10000);
+            return tcpClient;
+        });
+    }
+}
+----
+
+在上面的例子中，`MyHttpClientCustomizer` 类实现了 `HttpClientCustomizer` 接口并重写了 `customize` 方法。在该方法内部，通过将连接超时设置为 5 秒、读取超时设置为 10 秒，对 HTTP 客户端进行了自定义配置。
+
+要使用这个自定义器，你需要将其注册到 Spring Cloud Gateway 的配置中：
+
+.GatewayConfiguration.java
+[source,java]
+----
+@Configuration
+public class GatewayConfiguration {
+
+    @Bean
+    public HttpClientCustomizer myHttpClientCustomizer() {
+        return new MyHttpClientCustomizer();
+    }
+}
+----
+
+通过将该自定义器注册为 Spring Bean，它将自动应用于网关所使用的 HTTP 客户端。

@@ -1,0 +1,38 @@
+[[observability-metrics]]
+=== 可观测性 - 指标
+
+以下列出了该项目声明的所有指标。
+
+[[observability-metrics-gateway-http-client-observation]]
+==== 网关 HTTP 客户端观测（Gateway Http Client Observation）
+
+____
+在通过网关发送请求时创建的观测。
+____
+
+**指标名称** `http.client.requests`（由约定类 `org.springframework.cloud.gateway.filter.headers.observation.DefaultGatewayObservationConvention` 定义）。**类型** `timer`（计时器）。
+
+**指标名称** `http.client.requests.active`（由约定类 `org.springframework.cloud.gateway.filter.headers.observation.DefaultGatewayObservationConvention` 定义）。**类型** `long task timer`（长任务计时器）。
+
+IMPORTANT: 在 Observation 启动后添加的 KeyValues 可能不会出现在 *.active 指标中。
+
+IMPORTANT: Micrometer 内部使用 `nanoseconds`（纳秒）作为基本单位。然而，每个后端系统决定其实际的基本单位。（例如，Prometheus 使用 seconds（秒））
+
+包含此类的完全限定类名：`org.springframework.cloud.gateway.filter.headers.observation.GatewayDocumentedObservation`。
+
+.低基数键（Low cardinality Keys）
+[cols="a,a"]
+|===
+|名称 | 说明
+|`http.method` _(必需)_ | HTTP 方法。
+|`http.status_code` _(必需)_ | HTTP 状态码。
+|`spring.cloud.gateway.route.id` _(必需)_ | 路由 ID。
+|`spring.cloud.gateway.route.uri` _(必需)_ | 从路由中获取的 HTTP URI。
+|===
+
+.高基数键（High cardinality Keys）
+[cols="a,a"]
+|===
+|名称 | 说明
+|`http.uri` _(必需)_ | 完整的 HTTP URI。
+|===

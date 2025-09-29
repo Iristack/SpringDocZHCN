@@ -1,0 +1,10 @@
+[[glossary]]
+= 术语表
+:page-section-summary-toc: 1
+
+* *路由（Route）*：网关的基本组成单元。  
+它由一个 ID、一个目标 URI、一组断言（predicates）和一组过滤器（filters）定义。当所有断言的组合为真时，该路由即被匹配。
+* *断言（Predicate）*：这是 Java 8 的 https://docs.oracle.com/javase/8/docs/api/java/util/function/Predicate.html[函数式断言（Function Predicate）]。其输入类型是 Spring Framework 的 https://docs.spring.io/spring/docs/5.0.x/javadoc-api/org/springframework/web/server/ServerWebExchange.html[`ServerWebExchange`]。  
+这使得你可以根据 HTTP 请求中的任意内容（如请求头或参数）进行匹配。
+* *过滤器（Filter）*：这些是通过特定工厂创建的 https://github.com/spring-cloud/spring-cloud-gateway/blob/main/spring-cloud-gateway-server/src/main/java/org/springframework/cloud/gateway/filter/GatewayFilter.java[`GatewayFilter`] 实例。  
+在此，你可以在向下游发送请求之前或之后，对请求和响应进行修改。

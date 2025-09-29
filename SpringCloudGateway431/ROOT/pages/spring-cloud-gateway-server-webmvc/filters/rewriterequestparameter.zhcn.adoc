@@ -1,0 +1,47 @@
+= `RewriteRequestParameter` 过滤器
+
+`RewriteRequestParameter` 过滤器接收一个 `name` 参数和一个 `replacement` 参数。  
+它会重写具有指定 `name` 的请求参数的值。  
+如果存在多个同名的请求参数，它们将被替换为单个值。  
+如果未找到对应的请求参数，则不会进行任何更改。  
+以下配置示例展示了如何设置一个 `RewriteRequestParameter` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: rewriterequestparameter_route
+          uri: https://example.org
+          predicates:
+          - Path=/products
+          filters:
+          - RewriteRequestParameter=campaign,fall2023
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.addRequestParameter;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRewriteRequestParameter() {
+        return route("rewriterequestparameter_route")
+            .GET("products", http())
+            .before(uri("https://example.org"))
+            .before(addRequestParameter("red", "blue"))
+            .build();
+    }
+}
+----
+
+对于请求 `/products?campaign=old`，该过滤器会将请求参数修改为 `campaign=fall2023`。

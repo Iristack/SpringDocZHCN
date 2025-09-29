@@ -1,0 +1,146 @@
+[[developer-guide]]
+= 开发者指南
+
+以下是一些编写网关自定义组件的基本指南。
+
+[[writing-custom-route-predicate-factories]]
+== 编写自定义路由断言工厂（Route Predicate Factory）
+
+要编写一个路由断言（Route Predicate），你需要将 `RoutePredicateFactory` 实现为一个 Spring Bean。你可以继承一个名为 `AbstractRoutePredicateFactory` 的抽象类。
+
+.MyRoutePredicateFactory.java
+[source,java]
+----
+@Component
+public class MyRoutePredicateFactory extends AbstractRoutePredicateFactory<MyRoutePredicateFactory.Config> {
+
+    public MyRoutePredicateFactory() {
+        super(Config.class);
+    }
+
+    @Override
+    public Predicate<ServerWebExchange> apply(Config config) {
+        // 从 Config 对象中获取配置
+        return exchange -> {
+            // 获取请求
+            ServerHttpRequest request = exchange.getRequest();
+            // 根据请求中的信息判断是否匹配配置条件
+            return matches(config, request);
+        };
+    }
+
+    public static class Config {
+        // 在此处放置你的过滤器的配置属性
+    }
+
+}
+----
+
+[[writing-custom-gatewayfilter-factories]]
+== 编写自定义 GatewayFilter 工厂
+
+要编写一个 `GatewayFilter`，你需要将 `GatewayFilterFactory` 实现为一个 Spring Bean。你可以继承名为 `AbstractGatewayFilterFactory` 的抽象类。以下示例展示了如何实现：
+
+.PreGatewayFilterFactory.java
+====
+[source,java]
+----
+@Component
+public class PreGatewayFilterFactory extends AbstractGatewayFilterFactory<PreGatewayFilterFactory.Config> {
+
+	public PreGatewayFilterFactory() {
+		super(Config.class);
+	}
+
+	@Override
+	public GatewayFilter apply(Config config) {
+		// 从 Config 对象中获取配置
+		return (exchange, chain) -> {
+			// 如果你想构建一个“前置”过滤器（pre-filter），需要在调用 chain.filter 之前操作请求
+			ServerHttpRequest.Builder builder = exchange.getRequest().mutate();
+			// 使用 builder 来修改请求
+			return chain.filter(exchange.mutate().request(builder.build()).build());
+		};
+	}
+
+	public static class Config {
+		// 在此处放置你的过滤器的配置属性
+	}
+
+}
+----
+
+.PostGatewayFilterFactory.java
+[source,java]
+----
+@Component
+public class PostGatewayFilterFactory extends AbstractGatewayFilterFactory<PostGatewayFilterFactory.Config> {
+
+	public PostGatewayFilterFactory() {
+		super(Config.class);
+	}
+
+	@Override
+	public GatewayFilter apply(Config config) {
+		// 从 Config 对象中获取配置
+		return (exchange, chain) -> {
+			return chain.filter(exchange).then(Mono.fromRunnable(() -> {
+				ServerHttpResponse response = exchange.getResponse();
+				// 以某种方式修改响应
+			}));
+		};
+	}
+
+	public static class Config {
+		// 在此处放置你的过滤器的配置属性
+	}
+
+}
+----
+====
+
+[[naming-custom-filters-and-references-in-configuration]]
+=== 自定义过滤器的命名及配置中的引用
+
+自定义过滤器的类名必须以 `GatewayFilterFactory` 结尾。
+
+例如，在配置文件中引用名为 `Something` 的过滤器时，该过滤器必须位于名为 `SomethingGatewayFilterFactory` 的类中。
+
+WARNING: 虽然可以创建不带 `GatewayFilterFactory` 后缀的网关过滤器，比如命名为 `class AnotherThing`，并在配置文件中通过 `AnotherThing` 引用它，但这种命名方式 **不受支持**，且该语法可能在未来版本中被移除。请更新你的过滤器名称以符合规范。
+
+[[writing-custom-global-filters]]
+== 编写自定义全局过滤器（Global Filter）
+
+要编写自定义的全局过滤器，你需要将 `GlobalFilter` 接口实现为一个 Spring Bean。这样会将该过滤器应用于所有请求。
+
+以下示例分别展示了如何设置全局的前置和后置过滤器：
+
+[source,java]
+----
+@Bean
+public GlobalFilter customGlobalFilter() {
+    return (exchange, chain) -> exchange.getPrincipal()
+        .map(Principal::getName)
+        .defaultIfEmpty("Default User")
+        .map(userName -> {
+          // 向代理请求中添加头部信息
+          ServerHttpRequest.Builder builder = exchange.getRequest().mutate().header("CUSTOM-REQUEST-HEADER", userName);
+          // 使用 builder 修改请求
+          return exchange.mutate().request(builder.build()).build();
+        })
+        .flatMap(chain::filter);
+}
+
+@Bean
+public GlobalFilter customGlobalPostFilter() {
+    return (exchange, chain) -> chain.filter(exchange)
+        .then(Mono.just(exchange))
+        .map(serverWebExchange -> {
+          // 向响应中添加头部信息
+          serverWebExchange.getResponse().getHeaders().set("CUSTOM-RESPONSE-HEADER",
+              HttpStatus.OK.equals(serverWebExchange.getResponse().getStatusCode()) ? "It worked": "It did not work");
+          return serverWebExchange;
+        })
+        .then();
+}
+----

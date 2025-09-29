@@ -1,0 +1,5 @@
+[[configuration-properties]]
+= 配置属性
+:page-section-summary-toc: 1
+
+要查看所有与 Spring Cloud Gateway 相关的配置属性列表，请参见 link:../appendix.html[附录]。

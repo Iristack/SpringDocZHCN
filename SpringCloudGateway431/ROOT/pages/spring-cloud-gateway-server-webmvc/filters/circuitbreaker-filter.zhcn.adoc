@@ -1,0 +1,208 @@
+[[spring-cloud-circuitbreaker-filter-factory]]
+= `CircuitBreaker` 过滤器
+
+Spring Cloud CircuitBreaker GatewayFilter 工厂使用 Spring Cloud CircuitBreaker API 将网关路由包装在断路器中。Spring Cloud CircuitBreaker 支持多种可与 Spring Cloud Gateway 集成的库，其中开箱即用支持 Resilience4J。
+
+要启用 Spring Cloud CircuitBreaker 过滤器，你需要将 `spring-cloud-starter-circuitbreaker-reactor-resilience4j` 添加到类路径中。以下示例配置了一个 Spring Cloud CircuitBreaker 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: circuitbreakernofallback
+          uri: https://example.org
+          predicates:
+          - Path=/anything/circuitbreakernofallback
+          filters:
+          - CircuitBreaker=myCircuitBreaker
+----
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.CircuitBreakerFilterFunctions.circuitBreaker;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsCircuitBreakerNoFallback() {
+        return route("circuitbreakernofallback")
+            .route(path("/anything/circuitbreakernofallback"), http())
+            .before(uri("https://example.org"))
+            .filter(circuitBreaker("myCircuitBreaker"))
+            .build();
+    }
+}
+----
+
+有关断路器的配置，请参考你所使用的底层断路器实现的具体文档。
+
+* https://cloud.spring.io/spring-cloud-circuitbreaker/reference/html/spring-cloud-circuitbreaker.html[Resilience4J 文档]
+
+Spring Cloud CircuitBreaker 过滤器还支持一个可选的 `fallbackUri` 参数。目前仅支持 `forward:` 协议的 URI。当触发回退逻辑时，请求会被转发到由该 URI 匹配的控制器。以下示例展示了如何配置此类回退：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: circuitbreaker_route
+          uri: https://example.org
+          predicates:
+          - Path=/consumingServiceEndpoint
+          filters:
+          - name: CircuitBreaker
+            args:
+              name: myCircuitBreaker
+              fallbackUri: forward:/inCaseOfFailureUseThis
+----
+
+以下 Java 示例实现了相同的功能：
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import java.net.URI;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.CircuitBreakerFilterFunctions.circuitBreaker;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsCircuitBreakerFallback() {
+        return route("circuitbreaker_route")
+            .route(path("/consumingServiceEndpoint"), http())
+            .before(uri("https://example.org"))
+            .filter(circuitBreaker("myCircuitBreaker", URI.create("forward:/inCaseOfFailureUseThis")))
+            .build();
+    }
+}
+----
+
+此示例会在断路器触发回退时，将请求转发至 `/inCaseofFailureUseThis` URI。
+
+CircuitBreaker 还支持在 `fallbackUri` 中使用 URI 变量，从而实现更复杂的路由选项，例如使用 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/util/pattern/PathPattern.html[PathPattern 表达式] 转发原始主机或 URL 路径的部分内容。
+
+在下面的示例中，对 `consumingServiceEndpoint/users/1` 的调用将在失败时重定向到 `inCaseOfFailureUseThis/users/1`。
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import java.net.URI;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.CircuitBreakerFilterFunctions.circuitBreaker;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsCircuitBreakerFallback() {
+        return route("circuitbreaker_route")
+            .route(path("/consumingServiceEndpoint/{*segments}"), http())
+            .before(uri("https://example.org"))
+            .filter(circuitBreaker("myCircuitBreaker", URI.create("forward:/inCaseOfFailureUseThis/{segments}")))
+            .build();
+    }
+}
+----
+
+
+主要使用场景是通过 `fallbackUri` 在网关应用内部定义一个控制器或处理器作为回退处理逻辑。但你也可以将请求重新路由到外部应用中的控制器或处理器，如下所示：
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.CircuitBreakerFilterFunctions.circuitBreaker;
+import static org.springframework.cloud.gateway.server.mvc.filter.LoadBalancerFilterFunctions.lb;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsCircuitBreakerFallbackToGatewayRoute() {
+        return route("ingredients")
+                .route(path("/ingredients/**"), http())
+                .filter(lb("ingredients"))
+                .filter(circuitBreaker("fetchIngredients", URI.create("forward:/fallback")))
+                .build()
+            .and(route("ingredients-fallback")
+                .route(path("/fallback"), http())
+                .before(uri("https://localhost:9994"))
+                .build());
+    }
+}
+----
+
+在此示例中，网关应用本身没有名为 `fallback` 的端点或处理器，但在另一个注册于 `http://localhost:9994` 的应用中存在该端点。
+
+当请求被转发至回退路径时，Spring Cloud CircuitBreaker 网关过滤器还会提供导致该操作的异常（`Throwable`）。该异常会作为属性添加到 `ServerRequest` 中，属性名为 `MvcUtils.CIRCUITBREAKER_EXECUTION_EXCEPTION_ATTR`，可在网关应用内处理回退逻辑时使用。
+
+对于外部控制器/处理器的场景，可以通过添加包含异常详情的头部信息来传递错误上下文。更多相关信息请参阅 xref:spring-cloud-gateway-server-webmvc/filters/fallback-headers.adoc[回退头部（FallbackHeaders）过滤器章节]。
+
+[[circuit-breaker-status-codes]]
+== 基于状态码触发断路器
+
+在某些情况下，你可能希望根据被包装路由返回的状态码来触发断路器。断路器配置对象允许传入一个状态码列表，若响应包含这些状态码，则会触发断路器跳闸。设置这些状态码时，可以使用整数值表示状态码，也可以使用 `HttpStatus` 枚举的字符串表示形式。
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: circuitbreaker_route
+          uri: lb://backing-service:8088
+          predicates:
+          - Path=/consumingServiceEndpoint
+          filters:
+          - name: CircuitBreaker
+            args:
+              name: myCircuitBreaker
+              fallbackUri: forward:/inCaseOfFailureUseThis
+              statusCodes:
+                - 500
+                - "NOT_FOUND"
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import java.net.URI;
+import static org.springframework.cloud.gateway.server.mvc.filter.CircuitBreakerFilterFunctions.circuitBreaker;
+import static org.springframework.cloud.gateway.server.mvc.filter.LoadBalancerFilterFunctions.lb;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsCircuitBreakerFallback() {
+        return route("circuitbreaker_route")
+                .route(path("/consumingServiceEndpoint"), http())
+                .filter(lb("backing-service"))
+				.filter(circuitBreaker(config -> config.setId("myCircuitBreaker").setFallbackUri("forward:/inCaseOfFailureUseThis").setStatusCodes("500", "NOT_FOUND")))
+                .build();
+    }
+}
+----

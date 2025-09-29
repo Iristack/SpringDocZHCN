@@ -1,0 +1,69 @@
+[[addrequestheader-filter]]
+= `AddRequestHeader` 过滤器
+
+`AddRequestHeader` 是一个“前置”过滤器，接受 `name` 和 `value` 两个参数。  
+以下示例配置了一个 `AddRequestHeader` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: add_request_header_route
+          uri: https://example.org
+          predicates:
+          - Path=/red
+          filters:
+          - AddRequestHeader=X-Request-red, blue
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.addRequestHeader;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsAddReqHeader() {
+        return route("add_request_header_route")
+            .GET("/red", http())
+            .before(uri("https://example.org"))
+            .before(addRequestHeader("X-Request-red", "blue"));
+    }
+}
+----
+
+上述配置会为所有匹配的请求，在向下游服务转发时的请求头中添加 `X-Request-red: blue`。
+
+`AddRequestHeader` 能识别用于匹配路径或主机的 URI 变量。  
+这些变量可以在值中使用，并在运行时被展开。  
+以下示例展示了如何在 `AddRequestHeader` 过滤器中使用变量：
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.addRequestHeader;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsAddReqHeader() {
+        return route("add_request_header_route")
+            .GET("/red/{segment}", http())
+            .before(uri("https://example.org"))
+            .before(addRequestHeader("X-Request-red", "blue-{segment}"));
+    }
+}
+----

@@ -1,0 +1,41 @@
+[[addresponseheader-gatewayfilter-factory]]
+= `AddResponseHeader` `GatewayFilter` 工厂
+
+`AddResponseHeader` `GatewayFilter` 工厂接受三个参数：`name`、`value` 和 `override`（默认值为 `true`）。  
+以下示例配置了一个 `AddResponseHeader` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_response_header_route
+        uri: https://example.org
+        filters:
+        - AddResponseHeader=X-Response-Red, Blue
+        - AddResponseHeader=X-Response-Black, White, false
+----
+
+此配置会将 `X-Response-Red:Blue` 头添加到所有匹配请求的下游响应头中。  
+如果响应中已包含 `X-Response-Black` 头，则**不会**再添加 `X-Response-Black: White` 头到下游响应头中。
+
+`AddResponseHeader` 能够识别用于匹配路径或主机的 URI 变量。  
+这些 URI 变量可以在值中使用，并在运行时被展开。  
+以下示例配置了一个使用变量的 `AddResponseHeader` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_response_header_route
+        uri: https://example.org
+        predicates:
+        - Host: {segment}.myhost.org
+        filters:
+        - AddResponseHeader=foo, bar-{segment}
+----

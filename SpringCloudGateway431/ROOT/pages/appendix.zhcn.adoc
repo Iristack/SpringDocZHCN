@@ -1,0 +1,22 @@
+:numbered!:
+[appendix]
+[[common-application-properties]]
+= 常用应用程序属性
+:page-section-summary-toc: 1
+
+
+您可以在 `application.properties` 文件、`application.yml` 文件或作为命令行参数来指定各种属性。  
+本附录列出了常见的 Spring Cloud Gateway 属性，并提供了引用这些属性的底层类的参考信息。
+
+NOTE: 您类路径中额外的 JAR 文件也可能提供属性定义，因此您不应将此列表视为完整无缺的。此外，您还可以定义自己的属性。
+
+include::partial$_configprops.adoc[]
+
+[[observability]]
+== 可观测性元数据
+
+include::partial$_metrics.adoc[]
+
+include::partial$_spans.adoc[]
+
+include::partial$_conventions.adoc[]

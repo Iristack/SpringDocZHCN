@@ -1,0 +1,75 @@
+[[ratelimiter-filter]]
+= RateLimiter 过滤器
+
+RateLimiter 过滤器使用 https://bucket4j.com/[Bucket4j] 来判断当前请求是否被允许继续执行。如果请求不被允许，则默认返回 `HTTP 429 - Too Many Requests` 状态码。
+
+在阅读本文档之前，请先查阅 https://bucket4j.com/8.7.0/toc.html#concepts[Bucket4j 概念]。
+
+Bucket4j 使用的算法是 https://en.wikipedia.org/wiki/Token_bucket[令牌桶算法（Token Bucket Algorithm）]。
+
+该过滤器接受一个 `keyResolver` 参数以及其他 Bucket4j 配置参数。`keyResolver` 是一个 `java.util.Function<ServerRequest, String>` 类型的函数，允许用户从请求中提取任意信息作为键，用于配置的 https://github.com/bucket4j/bucket4j#bucket4j-distributed-features[Bucket4j 分布式] 机制。常见的键是从 `ServerRequest` 中获取的 `Principal`（主体）。
+
+默认情况下，如果 key resolver 未能找到对应的键，则请求将被拒绝，并返回 `FORBIDDEN` 状态。
+
+NOTE: 目前，只能通过 Java DSL 而不能通过外部属性来配置 key resolver。
+
+== Bucket4j 分布式配置
+
+需要定义一个类型为 `io.github.bucket4j.distributed.proxy.AsyncProxyManager` 的 Bean。可以通过调用 `ProxyManager.asAsync()` 方法实现。
+
+.RateLimiterConfiguration.java
+[source,java]
+----
+import com.github.benmanes.caffeine.cache.Caffeine;
+import io.github.bucket4j.caffeine.CaffeineProxyManager;
+
+@Configuration
+class RateLimiterConfiguration {
+
+	@Bean
+	public AsyncProxyManager<String> caffeineProxyManager() {
+		Caffeine<String, RemoteBucketState> builder = (Caffeine) Caffeine.newBuilder().maximumSize(100);
+		return new CaffeineProxyManager<>(builder, Duration.ofMinutes(1)).asAsync();
+	}
+}
+----
+
+以上代码使用 `Caffeine`（一种本地内存缓存）配置了一个 `AsyncProxyManager`，适用于测试场景。
+
+== 配置令牌桶（Buckets）
+
+默认情况下，令牌桶通过设置 `capacity`（容量）和 `period`（周期）进行配置。`capacity` 表示桶中最多可容纳的令牌数量；`period` 是一个 `java.util.Duration` 类型，表示桶中令牌重新生成的时间间隔。
+
+其他可配置项包括：
+- `statusCode`：当请求被拒绝时返回的状态码，默认为 429（TOO_MANY_REQUESTS）。
+- `tokens`：每次请求消耗的令牌数，默认为 1。
+- `headerName`：包含剩余令牌数量的响应头名称，默认为 `X-RateLimit-Remaining`。
+- `timeout`：分布式桶返回结果的超时时间（`Duration` 类型），默认未设置。
+
+以下是一个配置限流路由的示例：
+
+.RouteConfiguration.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.Bucket4jFilterFunctions.rateLimit;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRateLimited() {
+        return route("rate_limited_route")
+            .GET("/api/**", http())
+            .before(uri("https://example.org"))
+            .filter(rateLimit(c -> c.setCapacity(100)
+                    .setPeriod(Duration.ofMinutes(1))
+                    .setKeyResolver(request -> request.servletRequest().getUserPrincipal().getName())))
+            .build();
+    }
+}
+----
+
+上述配置表示每分钟最多允许 100 个请求（即桶容量为 100 个令牌，周期为 1 分钟）。key resolver 从 Servlet 请求中获取用户主体名称作为区分不同用户的键。

@@ -1,0 +1,23 @@
+[[savesession-gatewayfilter-factory]]
+= `SaveSession` `GatewayFilter` 工厂
+
+`SaveSession` `GatewayFilter` 工厂会在将请求转发到下游之前，强制执行一次 `WebSession::save` 操作。  
+当你使用类似 https://projects.spring.io/spring-session/[Spring Session] 并配合惰性数据存储（lazy data store）时，这一点特别有用，因为它可确保在进行转发调用之前，会话状态已经被保存。  
+以下示例展示了如何配置一个 `SaveSession` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: save_session
+        uri: https://example.org
+        predicates:
+        - Path=/foo/**
+        filters:
+        - SaveSession
+----
+
+如果你将 https://projects.spring.io/spring-security/[Spring Security] 与 Spring Session 集成，并希望确保安全信息已传递到远程进程，则此配置至关重要。

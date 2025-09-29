@@ -1,0 +1,78 @@
+[[http-timeouts-configuration]]
+= HTTP 超时配置
+
+HTTP 超时（响应超时和连接超时）可以为所有路由进行全局配置，并可针对每个具体路由进行覆盖。
+
+[[global-timeouts]]
+== 全局超时
+
+要配置全局 HTTP 超时：
++  
+`connect-timeout` 必须以毫秒为单位指定。+
+`response-timeout` 必须以 `java.time.Duration` 格式指定。
+
+.全局 HTTP 超时示例
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      httpclient:
+        connect-timeout: 1000
+        response-timeout: 5s
+----
+
+[[per-route-timeouts]]
+== 单个路由的超时配置
+
+要配置单个路由的超时：
++  
+`connect-timeout` 必须以毫秒为单位指定。+
+`response-timeout` 必须以毫秒为单位指定。
+
+.通过配置文件设置单个路由的 HTTP 超时
+[source,yaml]
+----
+      - id: per_route_timeouts
+        uri: https://example.org
+        predicates:
+          - name: Path
+            args:
+              pattern: /delay/{timeout}
+        metadata:
+          response-timeout: 200
+          connect-timeout: 200
+----
+
+.使用 Java DSL 配置单个路由超时
+[source,java]
+----
+import static org.springframework.cloud.gateway.support.RouteMetadataUtils.CONNECT_TIMEOUT_ATTR;
+import static org.springframework.cloud.gateway.support.RouteMetadataUtils.RESPONSE_TIMEOUT_ATTR;
+
+      @Bean
+      public RouteLocator customRouteLocator(RouteLocatorBuilder routeBuilder){
+         return routeBuilder.routes()
+               .route("test1", r -> {
+                  return r.host("*.somehost.org").and().path("/somepath")
+                        .filters(f -> f.addRequestHeader("header1", "header-value-1"))
+                        .uri("http://someuri")
+                        .metadata(RESPONSE_TIMEOUT_ATTR, 200)
+                        .metadata(CONNECT_TIMEOUT_ATTR, 200);
+               })
+               .build();
+      }
+----
+
+如果某个路由的 `response-timeout` 设置为负值，则会禁用全局的 `response-timeout`。
+
+----
+      - id: per_route_timeouts
+        uri: https://example.org
+        predicates:
+          - name: Path
+            args:
+              pattern: /delay/{timeout}
+        metadata:
+          response-timeout: -1
+----

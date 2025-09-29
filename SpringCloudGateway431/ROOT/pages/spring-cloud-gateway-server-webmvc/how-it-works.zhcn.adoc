@@ -1,0 +1,16 @@
+[[gateway-how-it-works]]
+= 工作原理
+:page-section-summary-toc: 1
+
+下图展示了 Spring Cloud Gateway 的高层工作原理：
+
+image::spring_cloud_gateway_mvc_diagram.png[Spring Cloud Gateway Server MVC 架构图]
+
+在 Spring Cloud Gateway Server MVC 中，路由是普通的 WebMvc.fn `RouterFunction` 实例，它们使用一种特殊的 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/HandlerFunction.html[HandlerFunction] 来通过 HTTP 转发请求。该 HandlerFunction 定义在 https://github.com/spring-cloud/spring-cloud-gateway/blob/main/spring-cloud-gateway-server-mvc/src/main/java/org/springframework/cloud/gateway/server/mvc/handler/HandlerFunctions.java[org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions] 类中。有关函数式 API 的常规用法，请参考 https://docs.spring.io/spring-framework/reference/web/webmvc-functional.html[WebMvc.fn] 文档。
+
+除了用于 HTTP 转发的自定义 `HandlerFunctions` 外，Spring Cloud Gateway Server MVC 还提供了额外的 `RequestPredicate` 实现，位于 https://github.com/spring-cloud/spring-cloud-gateway/blob/main/spring-cloud-gateway-server-mvc/src/main/java/org/springframework/cloud/gateway/server/mvc/predicate/GatewayRequestPredicates.java[org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates]，以及 `HandlerFilterFunctions` 的实现，位于 https://github.com/spring-cloud/spring-cloud-gateway/blob/main/spring-cloud-gateway-server-mvc/src/main/java/org/springframework/cloud/gateway/server/mvc/filter/FilterFunctions.java[org.springframework.cloud.gateway.server.mvc.filter.FilterFunctions]。所有可以作为纯“前置”过滤器（'before' filters）的自定义过滤器都实现在 https://github.com/spring-cloud/spring-cloud-gateway/blob/main/spring-cloud-gateway-server-mvc/src/main/java/org/springframework/cloud/gateway/server/mvc/filter/BeforeFilterFunctions.java[org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions] 中，并在 `FilterFunctions` 中被适配为请求处理器。而“后置”过滤器（'after' filters）的自定义实现位于 https://github.com/spring-cloud/spring-cloud-gateway/blob/main/spring-cloud-gateway-server-mvc/src/main/java/org/springframework/cloud/gateway/server/mvc/filter/AfterFilterFunctions.java[org.springframework.cloud.gateway.server.mvc.filter.AfterFilterFunctions]，同样在 `FilterFunctions` 中被适配为响应处理器。
+
+此外，还有一些 `*FilterFunctions` 类用于可选的过滤器，这些过滤器将在各自文档中详细说明。
+
+
+WARNING: 路由 URI 上定义的任何路径都将被忽略。

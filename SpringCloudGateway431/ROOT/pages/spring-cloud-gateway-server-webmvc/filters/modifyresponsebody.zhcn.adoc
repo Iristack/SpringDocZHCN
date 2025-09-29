@@ -1,0 +1,55 @@
+[[modifyresponsebody-filter]]
+= `ModifyResponseBody` 过滤器
+
+你可以使用 `ModifyResponseBody` 过滤器在将响应体返回给客户端之前对其进行修改。
+
+NOTE: 该过滤器只能通过 Java DSL 进行配置。
+
+以下示例展示了如何配置修改响应体的过滤器：
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.AfterFilterFunctions.modifyResponseBody;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Bean
+public RouterFunction<ServerResponse> gatewayRouterFunctionsModifyResponseBodySimple() {
+	return route("modify_response_body")
+			.GET("/anything/modifyresponsebody", http())
+            .before(uri("https://example.org"))
+			.after(modifyResponseBody(String.class, String.class, null,
+					(request, response, s) -> s.replace("fooval", "FOOVAL")))
+			.build();
+}
+----
+
+上面的示例不会更改内容类型，也不会执行任何动态操作。下面的示例则会更改内容类型并动态修改内容。
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.AfterFilterFunctions.modifyResponseBody;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.host;
+import org.springframework.http.MediaType;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsModifyResponseBody() {
+        return route("modify_response_bodu")
+            .route(host("*.modifyresponsebodu.org"), http())
+            .before(uri("https://example.org"))
+            .after(modifyResponseBody(String.class, String.class, MediaType.APPLICATION_JSON_VALUE,
+                    (request, s) -> s.toUpperCase()))
+            .build();
+    }
+
+}
+----

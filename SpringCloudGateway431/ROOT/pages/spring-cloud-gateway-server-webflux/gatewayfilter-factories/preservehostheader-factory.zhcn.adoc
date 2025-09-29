@@ -1,0 +1,20 @@
+[[preservehostheader-gatewayfilter-factory]]
+= `PreserveHostHeader` `GatewayFilter` 工厂
+:page-section-summary-toc: 1
+
+`PreserveHostHeader` `GatewayFilter` 工厂没有任何参数。  
+该过滤器会设置一个请求属性，路由过滤器将检查该属性，以确定是否应发送原始的 Host 头，而不是由 HTTP 客户端决定的 Host 头。  
+以下示例配置了一个 `PreserveHostHeader` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: preserve_host_route
+        uri: https://example.org
+        filters:
+        - PreserveHostHeader
+----

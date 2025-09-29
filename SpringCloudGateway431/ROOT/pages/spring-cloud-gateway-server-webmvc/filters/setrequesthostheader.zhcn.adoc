@@ -1,0 +1,48 @@
+[[setrequesthostheader-filter]]
+= `SetRequestHostHeader` 过滤器
+
+在某些情况下，可能需要覆盖请求中的主机头（host header）。此时，可以使用 `SetRequestHostHeader` 过滤器将现有的 host 头替换为指定的值。  
+该过滤器接受一个 `host` 参数。  
+以下示例展示了如何配置 `SetRequestHostHeader` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: set_request_host_header_route
+          uri: http://localhost:8080
+          predicates:
+          - Path=/headers
+          filters:
+          - name: SetRequestHostHeader
+            args:
+              host: example.org
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.setRequestHostHeader;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsSetRequestHostHeader() {
+        return route("set_request_host_header_route")
+            .GET("/headers", http())
+            .before(uri("http://localhost:8080"))
+            .before(setRequestHostHeader("example.org"))
+            .build();
+    }
+}
+----
+
+`SetRequestHostHeader` 过滤器会将请求中的 Host 头的值替换为 `example.org`。

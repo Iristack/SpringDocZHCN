@@ -1,0 +1,52 @@
+[[deduperesponseheader-filter]]
+= `DedupeResponseHeader` 过滤器
+
+`DedupeResponseHeader` GatewayFilter 工厂接收一个必需的 `name` 参数和一个可选的 `strategy` 参数。`name` 参数可以包含一个由空格分隔的多个请求头名称列表。
+
+以下示例配置了一个 `DedupeResponseHeader` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: dedupe_response_header_route
+          uri: https://example.org
+          predicates:
+          - Path=/hello
+          filters:
+          - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.AfterFilterFunctions.dedupeResponseHeader;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.web.servlet.function.RequestPredicates.path;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsDedupeResponseHeader() {
+        return route("dedupe_response_header_route")
+                .route(path("/hello"), http())
+                .before(uri("https://example.org"))
+                .after(dedupeResponseHeader("Access-Control-Allow-Credentials Access-Control-Allow-Origin"))
+                .build();
+    }
+}
+----
+
+当网关的 CORS 逻辑和下游服务都添加了相同的响应头时，该过滤器会去除 `Access-Control-Allow-Credentials` 和 `Access-Control-Allow-Origin` 响应头中的重复值。
+
+`DedupeResponseHeader` 过滤器还支持一个可选的 `strategy` 参数，其可接受的值包括：
+- `RETAIN_FIRST`（默认）：保留第一个出现的值；
+- `RETAIN_LAST`：保留最后一个出现的值；
+- `RETAIN_UNIQUE`：仅保留唯一的值，去除所有重复项。

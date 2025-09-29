@@ -1,0 +1,42 @@
+[[redirectto-gatewayfilter-factory]]
+= `RedirectTo` `GatewayFilter` 工厂
+
+`RedirectTo` `GatewayFilter` 工厂接受三个参数：`status`、`url`，以及可选的 `includeRequestParams`。  
+`status` 参数应为 300 系列的重定向 HTTP 状态码，例如 301。  
+`url` 参数应为一个有效的 URL，该值将作为 `Location` 响应头的内容。  
+`includeRequestParams` 参数用于指定是否应将请求中的查询参数附加到目标 `url` 上。如果未设置该参数，则默认值为 `false`。  
+对于相对重定向，你应该在路由定义中使用 `uri: no://op` 作为 URI。  
+
+以下示例配置了一个 `RedirectTo` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: prefixpath_route
+        uri: https://example.org
+        filters:
+        - RedirectTo=302, https://acme.org
+----
+
+该配置会发送一个状态码为 302 的响应，并包含 `Location: https://acme.org` 响应头，以执行重定向。
+
+下面的示例展示了如何配置一个 `includeRequestParams` 设置为 `true` 的 `RedirectTo` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: prefixpath_route
+        uri: https://example.org
+        filters:
+        - RedirectTo=302, https://acme.org, true
+----
+
+当网关接收到带有查询参数 `?skip=10` 的请求时，网关将发送一个状态码为 302 的响应，并包含 `Location: https://acme.org?skip=10` 响应头来执行重定向。

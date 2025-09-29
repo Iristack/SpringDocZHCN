@@ -1,0 +1,37 @@
+[[modifyrequestbody-filter]]
+= `ModifyRequestBody` 过滤器
+
+你可以使用 `ModifyRequestBody` 过滤器在网关将请求发送到下游服务之前修改请求体。
+
+NOTE: 此过滤器只能通过 Java DSL 进行配置。
+
+以下示例展示了如何配置修改请求体的过滤器：
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.modifyRequestBody;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.host;
+import org.springframework.http.MediaType;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsModifyRequestBody() {
+        return route("modify_request_body")
+            .route(host("*.modifyrequestbody.org"), http())
+            .before(uri("https://example.org"))
+            .before(modifyRequestBody(String.class, Hello.class, MediaType.APPLICATION_JSON_VALUE,
+                    (request, s) -> new Hello(s.toUpperCase())))
+            .build();
+    }
+
+	record Hello(String message) { }
+}
+----
+
+NOTE: 如果请求没有请求体，`RewriteFilter` 将接收到 `null`。此时应返回 `Mono.empty()` 来表示请求中不包含请求体。

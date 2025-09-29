@@ -1,0 +1,40 @@
+[[cacherequestbody-gatewayfilter-factory]]
+= `CacheRequestBody` `GatewayFilter` 工厂
+
+在某些情况下，需要读取请求体。由于请求体只能被读取一次，因此我们必须将其缓存。  
+你可以使用 `CacheRequestBody` 过滤器在将请求发送到下游服务之前缓存请求体，并通过 `exchange` 属性获取该请求体。
+
+以下示例展示了如何配置缓存请求体的 `GatewayFilter`：
+
+[source,java]
+----
+@Bean
+public RouteLocator routes(RouteLocatorBuilder builder) {
+    return builder.routes()
+        .route("cache_request_body_route", r -> r.path("/downstream/**")
+            .filters(f -> f.prefixPath("/httpbin")
+                .cacheRequestBody(String.class).uri(uri))
+        .build();
+}
+----
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: cache_request_body_route
+        uri: lb://downstream
+        predicates:
+        - Path=/downstream/**
+        filters:
+        - name: CacheRequestBody
+          args:
+            bodyClass: java.lang.String
+----
+
+`CacheRequestBody` 会提取请求体并将其转换为目标类型（例如上面示例中的 `java.lang.String` 类型），然后将转换后的对象放入 `ServerWebExchange.getAttributes()` 的属性中，其键由 `ServerWebExchangeUtils.CACHED_REQUEST_BODY_ATTR` 定义。
+
+NOTE: 此过滤器仅适用于 HTTP（包括 HTTPS）请求。

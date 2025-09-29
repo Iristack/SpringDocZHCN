@@ -1,0 +1,32 @@
+[[rewritelocationresponseheader-gatewayfilter-factory]]
+= `RewriteLocationResponseHeader` `GatewayFilter` 工厂
+
+`RewriteLocationResponseHeader` `GatewayFilter` 工厂用于修改 `Location` 响应头的值，通常是为了去除与后端相关的细节信息。  
+该工厂接受 `Mode`、`locationHeaderName`、`hostValue` 和 `protocols` 参数。  
+以下配置示例展示了如何设置一个 `RewriteLocationResponseHeader` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: rewritelocationresponseheader_route
+        uri: http://example.org
+        filters:
+        - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+----
+
+例如，对于请求 `POST https://api.example.com/some/object/name`，若响应中的 `Location` 头为 `https://object-service.prod.example.net/v2/some/object/id`，则会被重写为 `https://api.example.com/some/object/id`。
+
+`Mode` 参数可取以下值：`NEVER_STRIP`、`AS_IN_REQUEST`（默认值）和 `ALWAYS_STRIP`。
+
+* `NEVER_STRIP`：版本号不会被移除，即使原始请求路径中不包含版本。
+* `AS_IN_REQUEST`：仅当原始请求路径中不包含版本时，才移除版本号。
+* `ALWAYS_STRIP`：始终移除版本号，即使原始请求路径中包含版本。
+
+如果提供了 `hostValue` 参数，则使用它来替换响应中 `Location` 头的 `host:port` 部分。  
+如果没有提供该参数，则使用请求头中 `Host` 的值。
+
+`protocols` 参数必须是一个有效的正则表达式字符串，用于匹配协议名称。如果协议不匹配，该过滤器将不执行任何操作。默认值为 `https?|ftps?`。

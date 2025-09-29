@@ -1,0 +1,60 @@
+[[cors-configuration]]
+= CORS 配置
+:cors-configuration-docs-uri: https://docs.spring.io/spring/docs/5.0.x/javadoc-api/org/springframework/web/cors/CorsConfiguration.html
+
+你可以配置网关，以全局或按路由的方式控制 CORS 行为。  
+这两种方式提供了相同的配置能力。
+
+[[global-cors-configuration]]
+== 全局 CORS 配置
+
+"`global`"（全局）CORS 配置是一个从 URL 模式到 {cors-configuration-docs-uri}[Spring Framework `CorsConfiguration`] 的映射。  
+以下示例展示了如何配置 CORS：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "https://docs.spring.io"
+            allowedMethods:
+            - GET
+----
+
+在上述示例中，所有来自 `https://docs.spring.io` 的 GET 请求，针对任意路径的 CORS 请求都会被允许。
+
+为了让未被任何网关路由断言处理的请求也应用相同的 CORS 配置，请将 `spring.cloud.gateway.globalcors.add-to-simple-url-handler-mapping` 属性设置为 `true`。  
+这在处理 CORS 预检请求（preflight requests）时非常有用，因为当 HTTP 方法为 `OPTIONS` 时，路由断言可能不会匹配成功。
+
+[[route-cors-configuration]]
+== 路由 CORS 配置
+
+"`route`"（路由）级别的配置允许将 CORS 直接作为元数据（key 为 `cors`）应用到特定路由上。  
+与全局配置类似，这些属性属于 {cors-configuration-docs-uri}[Spring Framework `CorsConfiguration`]。
+
+NOTE: 如果路由中没有 `Path` 断言，则会默认应用 `'/**'` 路径模式。
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: cors_route
+        uri: https://example.org
+        predicates:
+        - Path=/service/**
+        metadata:
+          cors:
+            allowedOrigins: '*'
+            allowedMethods:
+              - GET
+              - POST
+            allowedHeaders: '*'
+            maxAge: 30
+----

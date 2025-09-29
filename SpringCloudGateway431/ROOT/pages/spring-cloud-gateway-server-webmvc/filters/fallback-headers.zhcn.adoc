@@ -1,0 +1,72 @@
+[[fallback-headers]]
+= `FallbackHeaders` 过滤器
+
+`FallbackHeaders` 工厂允许你在请求被转发到外部应用中的 `fallbackUri` 时，将 Spring Cloud CircuitBreaker 执行异常的详细信息添加到请求头中，如下述场景所示：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: ingredients
+          uri: lb://ingredients
+          predicates:
+          - Path=/ingredients/**
+          filters:
+          - name: CircuitBreaker
+            args:
+              name: fetchIngredients
+              fallbackUri: forward:/fallback
+        - id: ingredients-fallback
+          uri: http://localhost:9994
+          predicates:
+          - Path=/fallback
+          filters:
+          - name: FallbackHeaders
+            args:
+              executionExceptionTypeHeaderName: Test-Header
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.fallbackHeaders;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.CircuitBreakerFilterFunctions.circuitBreaker;
+import static org.springframework.cloud.gateway.server.mvc.filter.LoadBalancerFilterFunctions.lb;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsCircuitBreakerFallbackToGatewayRoute() {
+        return route("ingredients")
+                .route(path("/ingredients/**"), http())
+                .filter(lb("ingredients"))
+                .filter(circuitBreaker("fetchIngredients", URI.create("forward:/fallback")))
+                .build()
+            .and(route("ingredients-fallback")
+                .route(path("/fallback"), http())
+                .before(uri("http://localhost:9994"))
+                .before(fallbackHeaders())
+                .build());
+    }
+}
+----
+
+在此示例中，当执行断路器过程中发生执行异常时，请求会被转发至运行在 `localhost:9994` 上的应用程序中的 `fallback` 端点或处理器。  
+`FallbackHeaders` 过滤器会向该请求中添加包含异常类型、异常消息以及（如果存在）根本原因异常类型和消息的请求头。
+
+你可以通过设置以下参数来自定义这些请求头的名称（括号中为默认值）：
+
+* `executionExceptionTypeHeaderName` （默认值：`"Execution-Exception-Type"`）
+* `executionExceptionMessageHeaderName` （默认值：`"Execution-Exception-Message"`）
+* `rootCauseExceptionTypeHeaderName` （默认值：`"Root-Cause-Exception-Type"`）
+* `rootCauseExceptionMessageHeaderName` （默认值：`"Root-Cause-Exception-Message"`）
+
+有关断路器和网关的更多信息，请参阅 xref:spring-cloud-gateway-server-webmvc/filters/circuitbreaker-filter.adoc[Spring Cloud CircuitBreaker Filter 节]。

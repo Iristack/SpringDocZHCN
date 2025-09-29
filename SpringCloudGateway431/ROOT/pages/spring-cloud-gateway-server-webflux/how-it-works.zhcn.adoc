@@ -1,0 +1,16 @@
+[[gateway-how-it-works]]
+= 工作原理
+:page-section-summary-toc: 1
+
+下图展示了 Spring Cloud Gateway 的高层工作流程：
+
+image::spring_cloud_gateway_diagram.png[Spring Cloud Gateway Diagram]
+
+客户端向 Spring Cloud Gateway 发起请求。如果网关处理器映射（Gateway Handler Mapping）确定该请求与某个路由匹配，则将请求发送给网关 Web 处理器（Gateway Web Handler）。  
+该处理器会将请求通过一个针对此请求定制的过滤器链进行处理。  
+过滤器之间用虚线分隔，是因为这些过滤器可以在代理请求发送之前和之后分别执行逻辑。  
+首先执行所有 "`pre`"（前置）过滤器逻辑，然后发起代理请求，代理请求完成后，再执行 "`post`"（后置）过滤器逻辑。
+
+NOTE: 在路由中定义的 URI 如果未指定端口，则 HTTP 和 HTTPS 的 URI 将分别默认使用 80 和 443 端口。
+
+WARNING: 路由 URI 上定义的任何路径都将被忽略。

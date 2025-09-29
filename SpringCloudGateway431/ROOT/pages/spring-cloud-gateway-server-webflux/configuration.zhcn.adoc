@@ -1,0 +1,44 @@
+[[configuration]]
+= 配置
+
+Spring Cloud Gateway 的配置由一组 `RouteDefinitionLocator` 实例驱动。
+以下列出了 `RouteDefinitionLocator` 接口的定义：
+
+.RouteDefinitionLocator.java
+[source,java]
+----
+public interface RouteDefinitionLocator {
+	Flux<RouteDefinition> getRouteDefinitions();
+}
+----
+
+默认情况下，`PropertiesRouteDefinitionLocator` 使用 Spring Boot 的 `@ConfigurationProperties` 机制加载配置属性。
+
+前面的配置示例均使用了快捷表示法，即使用位置参数而非命名参数。
+以下两个示例是等价的：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: setstatus_route
+        uri: https://example.org
+        filters:
+        - name: SetStatus
+          args:
+            status: 401
+      - id: setstatusshortcut_route
+        uri: https://example.org
+        filters:
+        - SetStatus=401
+----
+
+对于网关的一些使用场景，属性配置已经足够；但在某些生产用例中，从外部源（如数据库）加载配置会更加有利。未来的里程碑版本将提供基于 Spring Data Repository 的 `RouteDefinitionLocator` 实现，例如 Redis、MongoDB 和 Cassandra。
+
+[[routedefinition-metrics]]
+== RouteDefinition 指标
+
+要启用 `RouteDefinition` 指标，请在项目依赖中添加 spring-boot-starter-actuator。然后，默认情况下，只要将属性 `spring.cloud.gateway.metrics.enabled` 设置为 `true`，指标即可生效。此时会添加一个名为 `spring.cloud.gateway.routes.count` 的仪表（gauge）指标，其值为当前 `RouteDefinition` 的数量。该指标可通过 `/actuator/metrics/spring.cloud.gateway.routes.count` 访问。

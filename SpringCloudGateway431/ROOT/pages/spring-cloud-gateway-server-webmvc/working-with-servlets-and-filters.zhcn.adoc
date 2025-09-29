@@ -1,0 +1,30 @@
+[[working-with-servlets-and-filters]]
+= 使用 Servlet 和 Servlet 过滤器
+
+Spring Cloud Gateway Server MVC 是为基于 Servlet API 构建并部署到 Servlet 容器中的 Servlet 技术栈 Web 应用程序而设计的。如果您的应用程序使用了 Servlet 或 Servlet 过滤器，则可能需要特别注意它们的执行顺序。
+
+由于 Servlet 容器处理请求参数的方式，当一个 Spring WebMVC 应用接收到内容类型为 `application/x-www-form-urlencoded` 的请求时，Servlet 容器会将表单数据与查询参数合并为“请求参数”。Spring Cloud Gateway Server MVC 包含了一个特殊的 `FormFilter` Bean，用于为下游应用重建表单请求体。任何在过滤器链执行之前读取请求参数的 Servlet 过滤器，都必须在顺序上 *位于* `FormFilter` *之前*。请参见下面的示例。
+
+.MyFilter.java
+[source,java]
+----
+import jakarta.servlet.Filter;
+import org.springframework.cloud.gateway.server.mvc.filter.FormFilter;
+import org.springframework.core.Ordered;
+
+class MyFilter implements Filter, Ordered {
+
+    @Override
+    public int getOrder() {
+        return FormFilter.FORM_FILTER_ORDER - 1;
+    }
+
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain)
+            throws IOException, ServletException {
+        // ...
+        filterChain.doFilter(request, response);
+        // ...
+    }
+}
+----

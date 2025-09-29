@@ -1,0 +1,49 @@
+[[prefixpath-filter]]
+= `PrefixPath` 过滤器
+:page-section-summary-toc: 1
+
+`PrefixPath` 过滤器接受一个 `prefix` 参数。  
+以下示例配置了一个 `PrefixPath` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: prefixpath_route
+          uri: https://example.org
+          predicates:
+          - Path=/**
+          filters:
+          - PrefixPath=/mypath
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.prefixPath;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsPrefixPath() {
+        return route("prefixpath_route")
+            .GET("/**", http())
+            .before(uri("https://example.org"))
+            .before(prefixPath("/mypath"))
+            .build();
+    }
+}
+----
+
+该配置会将 `/mypath` 添加到所有匹配请求的路径前缀中。  
+例如，对 `/hello` 的请求会被转发到 `/mypath/hello`。
+
+WARNING: 如果同时使用 `lb()` 过滤器，则必须将其放在 `prefixPath()` 过滤器之后，否则生成的 URL 可能不正确。在配置中使用 `lb:` 协议方案时，系统会自动将该过滤器设置为最高优先级。

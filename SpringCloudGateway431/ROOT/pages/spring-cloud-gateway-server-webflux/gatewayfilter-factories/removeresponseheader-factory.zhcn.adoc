@@ -1,0 +1,21 @@
+[[removeresponseheader-gatewayfilter-factory]]
+= `RemoveResponseHeader` `GatewayFilter` 工厂
+
+`RemoveResponseHeader` `GatewayFilter` 工厂接收一个 `name` 参数，该参数指定了需要被移除的响应头名称。以下配置示例定义了一个 `RemoveResponseHeader` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: removeresponseheader_route
+        uri: https://example.org
+        filters:
+        - RemoveResponseHeader=X-Response-Foo
+----
+
+此配置会在将响应返回给网关客户端之前，从响应中移除 `X-Response-Foo` 头。
+
+若要移除任意类型的敏感响应头，你应该为可能需要此功能的所有路由配置该过滤器。此外，你也可以通过 `spring.cloud.gateway.default-filters` 全局配置一次该过滤器，使其应用于所有路由。

@@ -1,0 +1,36 @@
+[[setstatus-gatewayfilter-factory]]
+= `SetStatus` `GatewayFilter` 工厂
+
+`SetStatus` `GatewayFilter` 工厂接受一个参数：`status`。  
+该参数必须是一个有效的 Spring `HttpStatus`，可以是整数值（例如 `404`），也可以是枚举的字符串表示形式（例如 `NOT_FOUND`）。以下示例配置了一个 `SetStatus` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: setstatusstring_route
+        uri: https://example.org
+        filters:
+        - SetStatus=UNAUTHORIZED
+      - id: setstatusint_route
+        uri: https://example.org
+        filters:
+        - SetStatus=401
+----
+
+在上述两种情况下，响应的 HTTP 状态码都会被设置为 401。
+
+你可以配置 `SetStatus` `GatewayFilter`，使其将代理请求的原始 HTTP 状态码作为响应头返回。如果设置了以下属性，则会在响应中添加该头部：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      set-status:
+        original-status-header-name: original-http-status
+----

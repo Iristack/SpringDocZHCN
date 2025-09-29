@@ -1,0 +1,369 @@
+[[gateway-request-predicates-factories]]
+= 路由断言工厂（Route Predicate Factories）
+
+Spring Cloud Gateway 作为 Spring WebFlux `HandlerMapping` 基础设施的一部分进行路由匹配。  
+Spring Cloud Gateway 提供了许多内置的路由断言工厂，所有这些断言都基于 HTTP 请求的不同属性进行匹配。  
+你可以使用逻辑 `and` 操作符组合多个路由断言工厂。
+
+[[after-route-predicate-factory]]
+== After 路由断言工厂
+
+`After` 断言工厂接受一个参数：`datetime`（即 Java 的 `ZonedDateTime` 类型）。  
+该断言匹配在指定时间之后发生的请求。  
+以下示例配置了一个 `After` 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: after_route
+        uri: https://example.org
+        predicates:
+        - After=2017-01-20T17:42:47.789-07:00[America/Denver]
+----
+
+此路由会匹配 2017 年 1 月 20 日 17:42（丹佛山区时间）之后的所有请求。
+
+[[before-route-predicate-factory]]
+== Before 路由断言工厂
+
+`Before` 断言工厂也接受一个参数：`datetime`（Java 的 `ZonedDateTime` 类型）。  
+该断言匹配在指定时间之前发生的请求。  
+以下示例配置了一个 `Before` 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: before_route
+        uri: https://example.org
+        predicates:
+        - Before=2017-01-20T17:42:47.789-07:00[America/Denver]
+----
+
+此路由会匹配 2017 年 1 月 20 日 17:42（丹佛山区时间）之前的所有请求。
+
+[[between-route-predicate-factory]]
+== Between 路由断言工厂
+
+`Between` 断言工厂接受两个参数：`datetime1` 和 `datetime2`（均为 Java 的 `ZonedDateTime` 对象）。  
+该断言匹配发生在 `datetime1` 之后且在 `datetime2` 之前的请求，其中 `datetime2` 必须晚于 `datetime1`。  
+以下示例配置了一个 `Between` 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: between_route
+        uri: https://example.org
+        predicates:
+        - Between=2017-01-20T17:42:47.789-07:00[America/Denver], 2017-01-21T17:42:47.789-07:00[America/Denver]
+----
+
+此路由会匹配 2017 年 1 月 20 日 17:42 到 2017 年 1 月 21 日 17:42（丹佛山区时间）之间的所有请求。  
+这个功能可用于维护窗口期等场景。
+
+[[cookie-route-predicate-factory]]
+== Cookie 路由断言工厂
+
+`Cookie` 断言工厂接受两个参数：`name`（cookie 名称）和 `regexp`（Java 正则表达式）。  
+该断言匹配具有指定名称且值符合正则表达式的 cookie。  
+以下示例配置了一个 Cookie 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: cookie_route
+        uri: https://example.org
+        predicates:
+        - Cookie=chocolate, ch.p
+----
+
+此路由会匹配包含名为 `chocolate` 且其值符合 `ch.p` 正则表达式的 cookie 的请求（例如 `chip` 或 `chop`）。
+
+[[header-route-predicate-factory]]
+== Header 路由断言工厂
+
+`Header` 断言工厂接受两个参数：`header`（头字段名）和 `regexp`（Java 正则表达式）。  
+该断言匹配具有指定名称且其值符合正则表达式的请求头。  
+以下示例配置了一个 Header 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: header_route
+        uri: https://example.org
+        predicates:
+        - Header=X-Request-Id, \d+
+----
+
+如果请求中包含名为 `X-Request-Id` 且值为一个或多个数字（即符合 `\d+` 正则表达式）的头字段，则该路由会被匹配。
+
+[[host-route-predicate-factory]]
+== Host 路由断言工厂
+
+`Host` 断言工厂接受一个参数：一组主机名 `patterns`。  
+模式采用 Ant 风格，以 `.` 作为分隔符。  
+该断言通过匹配请求中的 `Host` 头字段来判断是否符合条件。  
+此外，也支持 URI 模板变量（如 `\{sub}.myhost.org`）。  
+以下示例配置了一个 Host 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: host_route
+        uri: https://example.org
+        predicates:
+        - Host=**.somehost.org,**.anotherhost.org
+----
+
+如果请求的 `Host` 头字段值为 `www.somehost.org`、`beta.somehost.org` 或 `www.anotherhost.org`，则该路由会被匹配。
+
+该断言会将提取出的 URI 模板变量（如前面示例中的 `sub`）以键值对形式存入 `ServerWebExchange.getAttributes()`，键由 `ServerWebExchangeUtils.URI_TEMPLATE_VARIABLES_ATTRIBUTE` 定义。  
+这些变量随后可供 <<gateway-route-filters,`GatewayFilter` 工厂>> 使用。
+
+[[method-route-predicate-factory]]
+== Method 路由断言工厂
+
+`Method` 断言工厂接受一个参数 `methods`，可以是一个或多个 HTTP 方法。  
+以下示例配置了一个 Method 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: method_route
+        uri: https://example.org
+        predicates:
+        - Method=GET,POST
+----
+
+如果请求方法是 `GET` 或 `POST`，则该路由会被匹配。
+
+[[path-route-predicate-factory]]
+== Path 路由断言工厂
+
+`Path` 断言工厂接受两个参数：一组 Spring `PathMatcher` 风格的路径 `patterns`，以及一个可选的 `matchTrailingSlash` 标志（默认为 `true`）。  
+以下示例配置了一个 Path 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: path_route
+        uri: https://example.org
+        predicates:
+        - Path=/red/{segment},/blue/{segment}
+----
+
+如果请求路径为 `/red/1`、`/red/1/`、`/red/blue` 或 `/blue/green` 等，则该路由会被匹配。
+
+若将 `matchTrailingSlash` 设置为 `false`，则路径 `/red/1/` 将不会被匹配。
+
+如果你设置了 `spring.webflux.base-path` 属性，它会影响路径匹配行为 —— 该属性值会自动添加到路径模式前。  
+例如，当 `spring.webflux.base-path=/app` 且路径模式为 `/red/\{segment\}` 时，实际用于匹配的完整模式为 `/app/red/\{segment\}`。
+
+该断言也会提取 URI 模板变量（如上述示例中的 `segment`），并以键值对形式存入 `ServerWebExchange.getAttributes()`，键由 `ServerWebExchangeUtils.URI_TEMPLATE_VARIABLES_ATTRIBUTE` 定义。  
+这些变量后续可供 <<gateway-route-filters,`GatewayFilter` 工厂>> 使用。
+
+提供了一个便捷方法 `get` 来访问这些变量。  
+以下示例展示了如何使用 `get` 方法：
+
+[source,java]
+----
+Map<String, String> uriVariables = ServerWebExchangeUtils.getUriTemplateVariables(exchange);
+
+String segment = uriVariables.get("segment");
+----
+
+[[query-route-predicate-factory]]
+== Query 路由断言工厂
+
+`Query` 断言工厂接受两个参数：必需的 `param` 参数和可选的 `regexp`（Java 正则表达式）。  
+以下示例配置了一个 Query 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: query_route
+        uri: https://example.org
+        predicates:
+        - Query=green
+----
+
+如果请求中包含名为 `green` 的查询参数，则该路由会被匹配。
+
+另一个示例：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: query_route
+        uri: https://example.org
+        predicates:
+        - Query=red, gree.
+----
+
+如果请求中包含名为 `red` 的查询参数，且其值匹配 `gree.` 正则表达式（如 `green` 或 `greet`），则该路由会被匹配。
+
+[[remoteaddr-route-predicate-factory]]
+== RemoteAddr 路由断言工厂
+
+`RemoteAddr` 断言工厂接受一个最小长度为 1 的 CIDR 表示法 IP 地址列表（IPv4 或 IPv6），例如 `192.168.0.1/16`（其中 `192.168.0.1` 是 IP 地址，`16` 是子网掩码）。  
+以下示例配置了一个 RemoteAddr 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: remoteaddr_route
+        uri: https://example.org
+        predicates:
+        - RemoteAddr=192.168.1.1/24
+----
+
+如果请求的远程地址为 `192.168.1.10`，则该路由会被匹配。
+
+[[modifying-the-way-remote-addresses-are-resolved]]
+=== 修改远程地址解析方式
+
+默认情况下，`RemoteAddr` 断言工厂使用请求中的直接远程地址。  
+但如果 Spring Cloud Gateway 位于代理层之后，该地址可能并非真实的客户端 IP 地址。
+
+可以通过设置自定义的 `RemoteAddressResolver` 来修改远程地址的解析方式。  
+Spring Cloud Gateway 提供了一个非默认的解析器：基于 https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Forwarded-For[X-Forwarded-For 头] 的 `XForwardedRemoteAddressResolver`。
+
+`XForwardedRemoteAddressResolver` 提供了两个静态构造方法，代表不同的安全策略：
+
+* `XForwardedRemoteAddressResolver::trustAll` 返回一个始终取 `X-Forwarded-For` 头中第一个 IP 地址的 `RemoteAddressResolver`。  
+  这种方式容易受到伪造攻击，因为恶意客户端可以预先设置 `X-Forwarded-For` 的初始值，从而欺骗解析器。
+
+* `XForwardedRemoteAddressResolver::maxTrustedIndex` 接受一个索引值，表示位于 Spring Cloud Gateway 前面的可信基础设施跳数。  
+  例如，如果 Gateway 只能通过 HAProxy 访问，则应使用 `1`；如果有两层可信代理，则使用 `2`。
+
+考虑如下请求头：
+
+[source]
+----
+X-Forwarded-For: 0.0.0.1, 0.0.0.2, 0.0.0.3
+----
+
+不同 `maxTrustedIndex` 值对应的解析结果如下：
+
+[options="header"]
+|===
+|`maxTrustedIndex`           | 结果
+|[`Integer.MIN_VALUE`,0]     | 无效（初始化时抛出 `IllegalArgumentException`）
+|1                           | 0.0.0.3
+|2                           | 0.0.0.2
+|3                           | 0.0.0.1
+|[4, `Integer.MAX_VALUE`]    | 0.0.0.1
+|===
+
+[[gateway-route-filters]]
+以下示例展示如何用 Java 实现相同配置：
+
+.GatewayConfig.java
+[source,java]
+----
+RemoteAddressResolver resolver = XForwardedRemoteAddressResolver
+    .maxTrustedIndex(1);
+
+...
+
+.route("direct-route",
+    r -> r.remoteAddr("10.1.1.1", "10.10.1.1/24")
+        .uri("https://downstream1"))
+.route("proxied-route",
+    r -> r.remoteAddr(resolver, "10.10.1.1", "10.10.1.1/24")
+        .uri("https://downstream2"))
+----
+
+[[weight-route-predicate-factory]]
+== Weight 路由断言工厂
+
+`Weight` 断言工厂接受两个参数：`group`（组名）和 `weight`（权重，整数类型），权重按组计算。  
+以下示例配置了一个 Weight 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: weight_high
+        uri: https://weighthigh.org
+        predicates:
+        - Weight=group1, 8
+      - id: weight_low
+        uri: https://weightlow.org
+        predicates:
+        - Weight=group1, 2
+----
+
+该配置会将大约 80% 的流量转发到 https://weighthigh.org，约 20% 的流量转发到 https://weightlow.org。
+
+[[xforwarded-remote-addr-route-predicate-factory]]
+== XForwarded Remote Addr 路由断言工厂
+
+`XForwarded Remote Addr` 断言工厂接受一个最小长度为 1 的 CIDR 格式 IP 地址列表（如 `192.168.0.1/16`）。
+
+该断言根据请求头中的 `X-Forwarded-For` 字段进行过滤。
+
+适用于反向代理环境（如负载均衡器或 Web 应用防火墙），只有来自可信代理 IP 列表的请求才被允许通过。
+
+以下示例配置了一个 `XForwardedRemoteAddr` 路由断言：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: xforwarded_remoteaddr_route
+        uri: https://example.org
+        predicates:
+        - XForwardedRemoteAddr=192.168.1.1/24
+----
+
+如果 `X-Forwarded-For` 头中包含类似 `192.168.1.10` 的地址，则该路由会被匹配。

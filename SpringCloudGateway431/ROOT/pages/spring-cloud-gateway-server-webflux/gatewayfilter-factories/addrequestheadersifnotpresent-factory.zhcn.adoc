@@ -1,0 +1,42 @@
+[[addrequestheadersifnotpresent-gatewayfilter-factory]]
+= `AddRequestHeadersIfNotPresent` `GatewayFilter` 工厂
+
+`AddRequestHeadersIfNotPresent` `GatewayFilter` 工厂接收一组以冒号分隔的 `name` 和 `value` 键值对。  
+以下示例配置了一个 `AddRequestHeadersIfNotPresent` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_request_headers_route
+        uri: https://example.org
+        filters:
+        - AddRequestHeadersIfNotPresent=X-Request-Color-1:blue,X-Request-Color-2:green
+----
+
+上述配置会为所有匹配的请求，在向下游转发的请求头中添加两个请求头：`X-Request-Color-1:blue` 和 `X-Request-Color-2:green`。  
+这与 `AddRequestHeader` 的行为类似，但不同之处在于，`AddRequestHeadersIfNotPresent` 仅在请求头不存在时才添加；如果请求中已存在这些头，则保留客户端请求中的原始值。
+
+此外，若要设置一个多值请求头，可以多次使用相同的头名称，例如：`AddRequestHeadersIfNotPresent=X-Request-Color-1:blue,X-Request-Color-1:green`。
+
+`AddRequestHeadersIfNotPresent` 还支持在匹配路径或主机时使用的 URI 变量。这些变量可在值中引用，并在运行时被展开。以下示例展示了一个使用变量的 `AddRequestHeadersIfNotPresent` `GatewayFilter` 配置：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_request_header_route
+        uri: https://example.org
+        predicates:
+        - Path=/red/{segment}
+        filters:
+        - AddRequestHeadersIfNotPresent=X-Request-Red:Blue-{segment}
+----
+
+在该示例中，如果请求路径为 `/red/test`，则会添加请求头 `X-Request-Red:Blue-test`。

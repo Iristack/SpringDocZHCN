@@ -1,0 +1,171 @@
+[[global-filters]]
+= 全局过滤器
+
+`GlobalFilter` 接口与 `GatewayFilter` 拥有相同的签名。这些是特殊过滤器，会根据条件应用于所有路由。
+
+NOTE: 此接口及其用法在未来里程碑版本中可能会发生变化。
+
+[[gateway-combined-global-filter-and-gatewayfilter-ordering]]
+== 全局过滤器与 `GatewayFilter` 的组合排序
+
+当一个请求匹配某个路由时，过滤 Web 处理器会将所有 `GlobalFilter` 实例以及该路由特定的 `GatewayFilter` 实例添加到一个过滤器链中。这个组合的过滤器链通过 `org.springframework.core.Ordered` 接口进行排序，你可以通过实现 `getOrder()` 方法来设置顺序。
+
+由于 Spring Cloud Gateway 区分了过滤器逻辑执行的 "`pre`" 和 "`post`" 阶段（参见 xref:spring-cloud-gateway-server-webflux/how-it-works.adoc[工作原理]），因此在"`pre`"阶段优先级最高的过滤器最先执行，而在"`post`"阶段则最后执行。
+
+以下示例配置了一个过滤器链：
+
+.ExampleConfiguration.java
+[source,java]
+----
+@Bean
+public GlobalFilter customFilter() {
+    return new CustomGlobalFilter();
+}
+
+public class CustomGlobalFilter implements GlobalFilter, Ordered {
+
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        log.info("自定义全局过滤器");
+        return chain.filter(exchange);
+    }
+
+    @Override
+    public int getOrder() {
+        return -1;
+    }
+}
+----
+
+[[gateway-metrics-filter]]
+== 网关指标过滤器
+
+要启用网关指标功能，请将 `spring-boot-starter-actuator` 添加为项目依赖项。默认情况下，只要未将 `spring.cloud.gateway.metrics.enabled` 属性设置为 `false`，网关指标过滤器就会运行。该过滤器会添加一个名为 `spring.cloud.gateway.requests` 的计时器指标，并包含以下标签：
+
+* `routeId`: 路由 ID。
+* `routeUri`: API 被路由到的 URI。
+* `outcome`: 请求结果，按照 link:https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/http/HttpStatus.Series.html[HttpStatus.Series] 分类。
+* `status`: 返回给客户端的请求 HTTP 状态。
+* `httpStatusCode`: 返回给客户端的请求 HTTP 状态码。
+* `httpMethod`: 请求使用的 HTTP 方法。
+
+此外，通过 `spring.cloud.gateway.metrics.tags.path.enabled` 属性（默认为 `false`），你可以激活一个带有路径标签的额外指标：
+
+* `path`: 请求的路径。
+
+这些指标随后可以从 `/actuator/metrics/spring.cloud.gateway.requests` 获取，并可轻松集成 Prometheus，以创建一个 link:images/gateway-grafana-dashboard.jpeg[Grafana] 仪表板（link:gateway-grafana-dashboard.json[dashboard]）。你还可以利用这些有用的指标进行告警，参考示例模板 link:gateway-alarming.adoc[alarming-template]。
+
+NOTE: 要启用 Prometheus 端点，请将 `micrometer-registry-prometheus` 添加为项目依赖项。
+
+[[local-cache-response-global-filter]]
+== 本地响应缓存过滤器
+
+当相关属性被启用时，`LocalResponseCache` 将会运行：
+
+* `spring.cloud.gateway.global-filter.local-response-cache.enabled`: 为所有路由启用全局缓存
+* `spring.cloud.gateway.filter.local-response-cache.enabled`: 在路由级别启用对应的过滤器
+
+此功能使用 Caffeine 为满足以下条件的所有响应启用本地缓存：
+
+* 请求是一个无请求体的 GET 请求。
+* 响应具有以下状态码之一：HTTP 200 (OK)、HTTP 206 (Partial Content) 或 HTTP 301 (Moved Permanently)。
+* HTTP `Cache-Control` 头允许缓存（即请求中不包含 `no-store`，且响应中不包含 `no-store` 或 `private`）。
+
+它接受两个配置参数：
+
+* `spring.cloud.gateway.filter.local-response-cache.size`: 设置缓存的最大大小（单位为 KB、MB 或 GB），用于淘汰此路由中的条目。
+* `spring.cloud.gateway.filter.local-response-cache.time-to-live`: 设置缓存条目的过期时间（以 s 表示秒，m 表示分钟，h 表示小时）。
+
+如果未配置这两个参数但已启用全局过滤器，则默认将缓存响应的存活时间为 5 分钟。
+
+该过滤器还实现了对 HTTP `Cache-Control` 头中 `max-age` 值的自动计算。如果原始响应中存在 `max-age`，其值将被重写为 `timeToLive` 配置参数中设置的秒数。在后续调用中，该值会根据响应剩余的有效时间重新计算。
+
+将 `spring.cloud.gateway.global-filter.local-response-cache.enabled` 设置为 `false` 会禁用所有路由的本地响应缓存，而 xref:spring-cloud-gateway-server-webflux/gatewayfilter-factories/local-cache-response-filter.adoc[LocalResponseCache 过滤器] 允许在路由级别使用此功能。
+
+NOTE: 要启用此功能，请将 `com.github.ben-manes.caffeine:caffeine` 和 `spring-boot-starter-cache` 添加为项目依赖项。
+
+WARNING: 如果你的项目创建了自定义的 `CacheManager` Bean，则需要使用 `@Primary` 注解标记，或通过 `@Qualifier` 注入。
+
+[[forward-routing-filter]]
+== 转发路由过滤器
+
+`ForwardRoutingFilter` 会在交换属性 `ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR` 中查找 URI。如果 URL 使用 `forward` 协议（例如 `forward:///localendpoint`），则使用 Spring 的 `DispatcherHandler` 来处理请求。请求 URL 的路径部分会被 forward URL 中的路径覆盖。原始未修改的 URL 将被追加到 `ServerWebExchangeUtils.GATEWAY_ORIGINAL_REQUEST_URL_ATTR` 属性的列表中。
+
+[[netty-routing-filter]]
+== Netty 路由过滤器
+
+当位于 `ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR` 交换属性中的 URL 使用 `http` 或 `https` 协议时，Netty 路由过滤器将会运行。它使用 Netty 的 `HttpClient` 发起下游代理请求。响应结果会被放入 `ServerWebExchangeUtils.CLIENT_RESPONSE_ATTR` 交换属性中，供后续过滤器使用。（还有一个实验性的 `WebClientHttpRoutingFilter` 可执行相同功能，但不需要 Netty。）
+
+[[netty-write-response-filter]]
+== Netty 写响应过滤器
+
+当 `ServerWebExchangeUtils.CLIENT_RESPONSE_ATTR` 交换属性中存在 Netty `HttpClientResponse` 时，`NettyWriteResponseFilter` 将会运行。它在所有其他过滤器完成后执行，将代理响应写回网关客户端响应。（还有一个实验性的 `WebClientWriteResponseFilter` 可执行相同功能，但不需要 Netty。）
+
+[[reactive-loadbalancer-client-filter]]
+== `ReactiveLoadBalancerClientFilter`
+
+`ReactiveLoadBalancerClientFilter` 会在名为 `ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR` 的交换属性中查找 URI。如果 URL 使用 `lb` 协议（例如 `lb://myservice`），它将使用 Spring Cloud 的 `ReactorLoadBalancer` 将名称（本例中为 `myservice`）解析为实际的主机和端口，并替换该属性中的 URI。原始未修改的 URL 将被追加到 `ServerWebExchangeUtils.GATEWAY_ORIGINAL_REQUEST_URL_ATTR` 属性的列表中。该过滤器还会检查 `ServerWebExchangeUtils.GATEWAY_SCHEME_PREFIX_ATTR` 属性是否等于 `lb`，如果是，则应用相同的规则。以下示例配置了一个 `ReactiveLoadBalancerClientFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: myRoute
+        uri: lb://service
+        predicates:
+        - Path=/service/**
+----
+
+NOTE: 默认情况下，当 `ReactorLoadBalancer` 无法找到服务实例时，会返回 `503`。你可以通过设置 `spring.cloud.gateway.loadbalancer.use404=true` 让网关返回 `404`。
+
+NOTE: `ReactiveLoadBalancerClientFilter` 返回的 `ServiceInstance` 的 `isSecure` 值会覆盖请求到达网关时指定的协议方案。例如，如果请求通过 `HTTPS` 到达网关，但 `ServiceInstance` 表明其不安全，则下游请求将通过 `HTTP` 发起。相反的情况也可能发生。然而，如果在网关配置中为路由指定了 `GATEWAY_SCHEME_PREFIX_ATTR`，前缀将被移除，路由 URL 的最终协议将覆盖 `ServiceInstance` 的配置。
+
+TIP: 网关支持所有 LoadBalancer 功能。你可以在 https://docs.spring.io/spring-cloud-commons/docs/current/reference/html/#spring-cloud-loadbalancer[Spring Cloud Commons 文档] 中了解更多内容。
+
+[[routetorequesturl-filter]]
+== `RouteToRequestUrl` 过滤器
+
+如果 `ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR` 交换属性中存在 `Route` 对象，则 `RouteToRequestUrlFilter` 将会运行。它基于请求 URI 创建一个新的 URI，但使用 `Route` 对象的 URI 属性进行更新。新的 URI 被放置在 `ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR` 交换属性中。
+
+如果 URI 包含协议前缀（如 `lb:ws://serviceid`），则 `lb` 前缀将从 URI 中剥离，并放入 `ServerWebExchangeUtils.GATEWAY_SCHEME_PREFIX_ATTR` 中，以便在后续过滤器链中使用。
+
+[[websocket-routing-filter]]
+== WebSocket 路由过滤器
+
+当位于 `ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR` 交换属性中的 URL 使用 `ws` 或 `wss` 协议时，WebSocket 路由过滤器将会运行。它使用 Spring WebSocket 基础设施将 WebSocket 请求向下转发。
+
+你可以通过在 URI 前加上 `lb` 前缀（如 `lb:ws://serviceid`）来实现 WebSocket 的负载均衡。
+
+NOTE: 如果你使用 https://github.com/sockjs[SockJS] 作为普通 HTTP 的备用方案，则应同时配置普通的 HTTP 路由和 WebSocket 路由。
+
+以下示例配置了一个 WebSocket 路由过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      # SockJS 路由
+      - id: websocket_sockjs_route
+        uri: http://localhost:3001
+        predicates:
+        - Path=/websocket/info/**
+      # 普通 WebSocket 路由
+      - id: websocket_route
+        uri: ws://localhost:3001
+        predicates:
+        - Path=/websocket/**
+----
+
+[[marking-an-exchange-as-routed]]
+== 标记交换为已路由
+
+当网关完成对 `ServerWebExchange` 的路由后，它会通过向交换属性中添加 `gatewayAlreadyRouted` 来标记该交换为"`已路由`"。一旦请求被标记为已路由，其他路由过滤器将不再对该请求进行路由，从而跳过该过滤器。提供了便捷方法可用于标记交换为已路由，或检查交换是否已被路由。
+
+* `ServerWebExchangeUtils.isAlreadyRouted` 接收一个 `ServerWebExchange` 对象并检查其是否已被"`路由`"。
+* `ServerWebExchangeUtils.setAlreadyRouted` 接收一个 `ServerWebExchange` 对象并将其标记为"`已路由`"。

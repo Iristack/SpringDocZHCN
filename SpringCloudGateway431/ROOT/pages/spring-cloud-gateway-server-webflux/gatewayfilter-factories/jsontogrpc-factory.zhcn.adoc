@@ -1,0 +1,78 @@
+[[jsontogrpc-gatewayfilter-factory]]
+= `JsonToGrpc` `GatewayFilter` 工厂
+
+`JsonToGrpc` 网关过滤器工厂（`GatewayFilter Factory`）用于将 JSON 负载转换为 gRPC 请求。
+
+该过滤器接受以下参数：
+
+* `protoDescriptor`：Proto 描述文件。
+
+该文件可以通过使用 `protoc` 并指定 `--descriptor_set_out` 参数生成：
+
+[source,bash]
+----
+protoc --proto_path=src/main/resources/proto/ \
+--descriptor_set_out=src/main/resources/proto/hello.pb  \
+src/main/resources/proto/hello.proto
+----
+
+* `protoFile`：Proto 定义文件。
+
+* `service`：处理请求的服务的短名称。
+
+* `method`：服务中处理请求的方法名。
+
+NOTE: 不支持 `streaming`（流式传输）。
+
+*application.yml 示例。*
+
+[source,java]
+----
+@Bean
+public RouteLocator routes(RouteLocatorBuilder builder) {
+    return builder.routes()
+            .route("json-grpc", r -> r.path("/json/hello").filters(f -> {
+                String protoDescriptor = "file:src/main/proto/hello.pb";
+                String protoFile = "file:src/main/proto/hello.proto";
+                String service = "HelloService";
+                String method = "hello";
+                return f.jsonToGRPC(protoDescriptor, protoFile, service, method);
+            }).uri(uri))
+----
+
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: json-grpc
+          uri: https://localhost:6565/testhello
+          predicates:
+            - Path=/json/**
+          filters:
+            - name: JsonToGrpc
+              args:
+                protoDescriptor: file:proto/hello.pb
+                protoFile: file:proto/hello.proto
+                service: HelloService
+                method: hello
+
+----
+
+当通过网关向 `/json/hello` 发起请求时，系统会使用 `hello.proto` 中定义的结构将请求转换为 gRPC 请求，发送至 `HelloService/hello` 方法，并将返回的 gRPC 响应再转换为 JSON 格式返回。
+
+默认情况下，该过滤器使用默认的 `TrustManagerFactory` 创建一个 `NettyChannel`。但是，您可以通过创建一个类型为 `GrpcSslConfigurer` 的 Bean 来自定义此 `TrustManager`：
+
+[source,java]
+----
+
+@Configuration
+public class GRPCLocalConfiguration {
+    @Bean
+    public GRPCSSLContext sslContext() {
+		TrustManager trustManager = trustAllCerts();
+        return new GRPCSSLContext(trustManager);
+    }
+}
+----

@@ -1,0 +1,72 @@
+[[addrequestparameter-filter]]
+= `AddRequestParameter` 过滤器
+
+`AddRequestParameter` 过滤器接收一个 `name` 和一个 `value` 参数。  
+以下示例配置了一个 `AddRequestParameter` 过滤器：
+
+application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: add_request_parameter_route
+          uri: https://example.org
+          predicates:
+          - Path=/anything/addrequestparam
+          filters:
+          - AddRequestParameter=red, blue
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.addRequestParameter;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsAddReqParameter() {
+        return route("add_request_parameter_route")
+            .GET("/anything/addrequestparam", http())
+            .before(uri("https://example.org"))
+            .before(addRequestParameter("red", "blue"))
+            .build();
+    }
+}
+----
+
+对于所有匹配的请求，该配置会将 `red=blue` 添加到下游请求的查询字符串中。
+
+`AddRequestParameter` 能识别用于匹配路径或主机的 URI 变量。  
+值中可以使用 URI 变量，并在运行时进行展开。  
+以下示例配置了一个使用变量的 `AddRequestParameter` 过滤器：
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.addRequestParameter;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static org.springframework.cloud.gateway.server.mvc.predicate.GatewayRequestPredicates.host;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsAddReqParameter() {
+        return route("add_request_parameter_route")
+            .route(host("{segment}.myhost.org"), http())
+            .before(uri("https://example.org"))
+            .before(addRequestParameter("foo", "bar-{segment}"))
+            .build();
+    }
+}
+----

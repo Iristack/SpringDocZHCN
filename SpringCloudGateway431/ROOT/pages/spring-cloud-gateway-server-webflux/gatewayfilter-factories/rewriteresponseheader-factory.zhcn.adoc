@@ -1,0 +1,22 @@
+[[rewriteresponseheader-gatewayfilter-factory]]
+= `RewriteResponseHeader` `GatewayFilter` 工厂
+:page-section-summary-toc: 1
+
+`RewriteResponseHeader` `GatewayFilter` 工厂接受 `name`、`regexp` 和 `replacement` 参数。  
+它使用 Java 正则表达式，以灵活的方式重写响应头的值。以下示例配置了一个 `RewriteResponseHeader` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: rewriteresponseheader_route
+        uri: https://example.org
+        filters:
+        - RewriteResponseHeader=X-Response-Red, , password=[^&]+, password=***
+----
+
+当原始响应头的值为 `/42?user=ford&password=omg!what&flag=true` 时，在向下游服务请求后，该值将被修改为 `/42?user=ford&password=\***&flag=true`。  
+由于 YAML 规范的限制，你必须使用 `$\` 来表示字面意义的 `$` 符号。

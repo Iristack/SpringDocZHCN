@@ -1,0 +1,9 @@
+[[gatewayfilter-factories]]
+= `GatewayFilter` 工厂
+:page-section-summary-toc: 1
+
+路由过滤器（Route filters）可用于以某种方式修改传入的 HTTP 请求或传出的 HTTP 响应。  
+路由过滤器的作用范围限定在特定路由内。  
+Spring Cloud Gateway 提供了许多内置的 GatewayFilter 工厂。
+
+NOTE: 如需了解如何使用以下任一过滤器的更详细示例，请参阅 https://github.com/spring-cloud/spring-cloud-gateway/tree/master/spring-cloud-gateway-server/src/test/java/org/springframework/cloud/gateway/filter/factory[单元测试]。

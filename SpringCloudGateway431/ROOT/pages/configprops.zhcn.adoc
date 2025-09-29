@@ -1,0 +1,6 @@
+[[configuration-properties]]
+= 配置属性
+
+以下列出了可用的配置属性。
+
+include::partial$_configprops.adoc[]

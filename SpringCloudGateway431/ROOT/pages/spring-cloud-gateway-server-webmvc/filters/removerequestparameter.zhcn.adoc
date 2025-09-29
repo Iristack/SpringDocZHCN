@@ -1,0 +1,45 @@
+[[removerequestparameter-filter]]
+= `RemoveRequestParameter` 过滤器
+:page-section-summary-toc: 1
+
+`RemoveRequestParameter` 过滤器接收一个 `name` 参数，该参数指定了要移除的查询参数名称。以下示例配置了一个 `RemoveRequestParameter` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: removerequestparameter_route
+          uri: https://example.org
+          predicates:
+          - Path=/**
+          filters:
+          - RemoveRequestParameter=red
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.removeRequestParameter;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsRemoveRequestParameter() {
+        return route("removerequestparameter_route")
+            .GET("/**", http())
+            .before(uri("https://example.org"))
+            .before(removeRequestParameter("red"))
+            .build();
+    }
+}
+----
+
+上述配置会在请求被转发到下游服务之前移除名为 `red` 的参数。

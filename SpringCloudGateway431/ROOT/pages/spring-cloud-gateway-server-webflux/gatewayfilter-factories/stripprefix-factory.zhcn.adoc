@@ -1,0 +1,23 @@
+[[stripprefix-gatewayfilter-factory]]
+= `StripPrefix` `GatewayFilter` 工厂
+
+`StripPrefix` `GatewayFilter` 工厂接受一个参数：`parts`。  
+`parts` 参数表示在将请求转发到下游服务之前，需要从请求路径中截掉的路径段数量。  
+以下配置示例设置了一个 `StripPrefix` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: nameRoot
+        uri: https://nameservice
+        predicates:
+        - Path=/name/**
+        filters:
+        - StripPrefix=2
+----
+
+当通过网关向 `/name/blue/red` 发起请求时，转发到 `nameservice` 的请求地址将变为 `https://nameservice/red`。

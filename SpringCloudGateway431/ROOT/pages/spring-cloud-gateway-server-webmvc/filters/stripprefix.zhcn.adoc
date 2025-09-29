@@ -1,0 +1,48 @@
+[[stripprefix-filter]]
+= `StripPrefix` 过滤器
+
+`StripPrefix` 过滤器接受一个参数：`parts`。  
+`parts` 参数表示在将请求转发到下游服务之前，需要从请求路径中移除的路径段数量。  
+以下示例配置了一个 `StripPrefix` 过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      mvc:
+        routes:
+        - id: strip_prefix_route
+          uri: https://example.org
+          predicates:
+          - Path=/name/**
+          filters:
+          - StripPrefix=2
+----
+
+.GatewaySampleApplication.java
+[source,java]
+----
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.stripPrefix;
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.uri;
+import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+
+@Configuration
+class RouteConfiguration {
+
+    @Bean
+    public RouterFunction<ServerResponse> gatewayRouterFunctionsStripPrefix() {
+        return route("strip_prefix_route")
+            .GET("/name/**", http())
+            .before(uri("https://example.org"))
+            .before(stripPrefix(2))
+            .build();
+    }
+}
+----
+
+当通过网关向 `/name/blue/red` 发起请求时，实际发送到后端服务的完整请求 URL 将变为 `https://example.org/red`。
+
+WARNING: 如果使用了 `lb()` 过滤器，则它必须位于 `stripPrefix()` 过滤器之后，否则可能导致生成的 URL 不正确。在配置中使用 `lb:` 协议方案时，该过滤器会被自动设置为最高优先级，因此需要注意顺序问题。

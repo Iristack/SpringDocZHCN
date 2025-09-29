@@ -1,0 +1,39 @@
+[[addrequestparameter-gatewayfilter-factory]]
+= `AddRequestParameter` 网关过滤器工厂
+
+`AddRequestParameter` 网关过滤器工厂接受一个 `name` 和 `value` 参数。  
+以下示例配置了一个 `AddRequestParameter` 网关过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_request_parameter_route
+        uri: https://example.org
+        filters:
+        - AddRequestParameter=red, blue
+----
+
+对于所有匹配的请求，这将在下游请求的查询字符串中添加 `red=blue`。
+
+`AddRequestParameter` 能够识别用于匹配路径或主机的 URI 变量。  
+这些 URI 变量可以在值中使用，并在运行时进行展开。  
+以下示例配置了一个使用变量的 `AddRequestParameter` 网关过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_request_parameter_route
+        uri: https://example.org
+        predicates:
+        - Host: {segment}.myhost.org
+        filters:
+        - AddRequestParameter=foo, bar-{segment}
+----

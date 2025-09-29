@@ -1,0 +1,55 @@
+[[local-cache-response-filter]]
+= `LocalResponseCache` `GatewayFilter` 工厂
+
+该过滤器允许缓存响应体和响应头，遵循以下规则：
+
+* 仅支持对无请求体的 GET 请求进行缓存。
+* 仅在以下状态码之一时缓存响应：HTTP 200（OK）、HTTP 206（部分内容）或 HTTP 301（永久移动）。
+* 如果 `Cache-Control` 头部不允许缓存（请求中包含 `no-store`，或响应中包含 `no-store` 或 `private`），则不会缓存响应数据。
+* 如果响应已被缓存，并且新的请求在 `Cache-Control` 头部中包含 `no-cache` 值，则返回一个无响应体的 304（未修改）响应。
+
+该过滤器为每个路由配置本地响应缓存，**只有当 `spring.cloud.gateway.filter.local-response-cache.enabled` 属性启用时才可用**。此外，还提供了一个 xref:spring-cloud-gateway-server-webflux/global-filters.adoc#local-cache-response-global-filter[全局配置的本地响应缓存] 功能。
+
+它接受两个参数：
+1. 第一个参数用于覆盖缓存条目的过期时间（以 `s` 表示秒，`m` 表示分钟，`h` 表示小时）；
+2. 第二个参数用于设置此路由缓存的最大容量（单位为 `KB`、`MB` 或 `GB`），超出后将逐出旧条目。
+
+以下示例展示了如何添加本地响应缓存 `GatewayFilter`：
+
+[source,java]
+----
+@Bean
+public RouteLocator routes(RouteLocatorBuilder builder) {
+    return builder.routes()
+        .route("rewrite_response_upper", r -> r.host("*.rewriteresponseupper.org")
+            .filters(f -> f.prefixPath("/httpbin")
+                .localResponseCache(Duration.ofMinutes(30), "500MB")
+            ).uri(uri))
+        .build();
+}
+----
+
+或者使用 YAML 配置方式：
+
+.application.yaml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: resource
+        uri: http://localhost:9000
+        predicates:
+        - Path=/resource
+        filters:
+        - LocalResponseCache=30m,500MB
+----
+
+NOTE: 此过滤器还会自动计算 HTTP `Cache-Control` 头部中的 `max-age` 值。  
+只有当原始响应中已存在 `max-age` 时，才会将其重写为 `timeToLive` 配置参数所设定的秒数。  
+在后续请求中，该值会根据响应剩余的有效时间重新计算。
+
+NOTE: 要启用此功能，需在项目依赖中添加 `com.github.ben-manes.caffeine:caffeine` 和 `spring-boot-starter-cache`。
+
+WARNING: 如果你的项目中定义了自定义的 `CacheManager` Bean，则必须使用 `@Primary` 注解标记其中一个，或通过 `@Qualifier` 显式注入，以避免冲突。

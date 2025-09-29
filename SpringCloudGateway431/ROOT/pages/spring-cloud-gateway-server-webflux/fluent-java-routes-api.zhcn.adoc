@@ -1,0 +1,40 @@
+[[fluent-java-routes-api]]
+= Fluent Java Routes API
+
+为了简化 Java 中的配置，`RouteLocatorBuilder` Bean 提供了一个流式的 Fluent API。  
+以下示例展示了其用法：
+
+.GatewaySampleApplication.java
+[source,java]
+----
+// 静态导入自 GatewayFilters 和 RoutePredicates
+@Bean
+public RouteLocator customRouteLocator(RouteLocatorBuilder builder, ThrottleGatewayFilterFactory throttle) {
+    return builder.routes()
+            .route(r -> r.host("**.abc.org").and().path("/image/png")
+                .filters(f ->
+                        f.addResponseHeader("X-TestHeader", "foobar"))
+                .uri("http://httpbin.org:80")
+            )
+            .route(r -> r.path("/image/webp")
+                .filters(f ->
+                        f.addResponseHeader("X-AnotherHeader", "baz"))
+                .uri("http://httpbin.org:80")
+                .metadata("key", "value")
+            )
+            .route(r -> r.order(-1)
+                .host("**.throttle.org").and().path("/get")
+                .filters(f -> f.filter(throttle.apply(1,
+                        1,
+                        10,
+                        TimeUnit.SECONDS)))
+                .uri("http://httpbin.org:80")
+                .metadata("key", "value")
+            )
+            .build();
+}
+----
+
+这种风格还支持更灵活的断言条件定制。  
+由 `RouteDefinitionLocator` Bean 定义的断言会通过逻辑 `and` 进行组合。  
+而使用 Fluent Java API 时，你可以直接在 `Predicate` 类上使用 `and()`、`or()` 和 `negate()` 操作符。

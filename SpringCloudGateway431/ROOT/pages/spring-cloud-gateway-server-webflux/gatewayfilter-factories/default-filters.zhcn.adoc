@@ -1,0 +1,18 @@
+[[default-filters]]
+= 默认过滤器
+:page-section-summary-toc: 1
+
+要添加一个过滤器并将其应用于所有路由，可以使用 `spring.cloud.gateway.default-filters`。
+该属性接收一个过滤器列表。
+以下示例定义了一组默认过滤器：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      default-filters:
+      - AddResponseHeader=X-Response-Default-Red, Default-Blue
+      - PrefixPath=/httpbin
+----

@@ -1,0 +1,22 @@
+[[seturi-gatewayfilter-factory]]
+= `SetRequestUri` `GatewayFilter` 工厂
+
+`SetRequestUri` `GatewayFilter` 工厂接受一个 `uri` 参数。  
+它提供了一种简单的方式来操作请求的 URI，允许对路径中的模板化段进行替换。该功能使用了 Spring Framework 的 URI 模板机制，支持多个匹配段。以下示例配置了一个 `SetRequestUri` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: seturi_route
+        uri: no://op
+        predicates:
+        - Path=/{appId}/**
+        filters:
+        - SetRequestUri=http://{appId}.example.com
+----
+
+对于请求路径 `/red-application/blue`，在发起下游请求之前，此配置会将 URI 设置为 `http://red-application.example.com`，最终包含路径的完整 URL 将是 `http://red-application.example.com/red-application/blue`。

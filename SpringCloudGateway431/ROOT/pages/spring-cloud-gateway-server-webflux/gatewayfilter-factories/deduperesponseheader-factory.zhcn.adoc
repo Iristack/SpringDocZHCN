@@ -1,0 +1,21 @@
+[[deduperesponseheader-gatewayfilter-factory]]
+= `DedupeResponseHeader` `GatewayFilter` 工厂
+
+`DedupeResponseHeader` GatewayFilter 工厂接收一个 `name` 参数和一个可选的 `strategy` 参数。`name` 参数可以包含一个由空格分隔的多个头部名称列表。以下示例配置了一个 `DedupeResponseHeader` `GatewayFilter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: dedupe_response_header_route
+        uri: https://example.org
+        filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+----
+
+当网关的 CORS 逻辑和下游服务都添加了相同的响应头时，该配置会去除 `Access-Control-Allow-Credentials` 和 `Access-Control-Allow-Origin` 响应头中的重复值。
+
+`DedupeResponseHeader` 过滤器还接受一个可选的 `strategy` 参数。可接受的值包括：`RETAIN_FIRST`（默认）、`RETAIN_LAST` 和 `RETAIN_UNIQUE`。

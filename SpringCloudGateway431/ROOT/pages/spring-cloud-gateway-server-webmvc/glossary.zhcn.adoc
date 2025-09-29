@@ -1,0 +1,10 @@
+[[glossary]]
+= 术语表
+:page-section-summary-toc: 1
+
+* *路由（Route）*：网关的基本构建单元。  
+  它由一个 ID、一个目标 URI、一组断言（predicates）和一组过滤器（filters）定义。当所有断言组合为真时，该路由即被匹配。
+* *断言（Predicate）*：这是 Spring WebMvc.fn 中的 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/RequestPredicate.html[`RequestPredicate`]。输入类型为 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/ServerRequest.html[`ServerRequest`]。  
+  它允许你根据 HTTP 请求中的任意内容（如请求头或参数）进行匹配。
+* *过滤器（Filter）*：这些是 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/HandlerFilterFunction.html[`HandlerFilterFunction`] 的实例。  
+  你可以在向下游服务发送请求之前或之后，使用它们来修改请求和响应。过滤器也可以实现 `Function<ServerRequest, ServerRequest>` 接口，并通过 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/HandlerFilterFunction.html#ofRequestProcessor(java.util.function.Function)[`HandlerFilterFunction.ofRequestProcessor()`] 适配为 `HandlerFilterFunction`，用于“前置”过滤器。对于“后置”过滤器，可实现 `BiFunction<ServerRequest,T extends ServerResponse,R extends ServerResponse>` 接口，并通过 https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/function/HandlerFilterFunction.html#ofResponseProcessor(java.util.function.BiFunction)[`HandlerFilterFunction.ofResponseProcessor()`] 进行适配。

@@ -1,0 +1,194 @@
+[[requestratelimiter-gatewayfilter-factory]]
+= `RequestRateLimiter` `GatewayFilter` 工厂
+
+`RequestRateLimiter` `GatewayFilter` 工厂使用一个 `RateLimiter` 实现来判断当前请求是否被允许继续执行。如果请求不被允许，则默认返回 HTTP 状态码 `429 - Too Many Requests`（请求过多）。
+
+该过滤器接受一个可选的 `keyResolver` 参数，以及特定于限流器的参数（本节后文将详细描述）。
+
+`keyResolver` 是一个实现了 `KeyResolver` 接口的 Bean。在配置中，可以通过 SpEL 表达式按名称引用该 Bean。例如：`#{@myKeyResolver}` 是一个 SpEL 表达式，引用名为 `myKeyResolver` 的 Bean。`KeyResolver` 接口定义如下：
+
+.KeyResolver.java
+[source,java]
+----
+public interface KeyResolver {
+	Mono<String> resolve(ServerWebExchange exchange);
+}
+----
+
+[[key-resolver-section]]
+`KeyResolver` 接口允许通过可插拔的策略来确定用于请求限流的键（key）。在未来版本中，将会提供一些内置的 `KeyResolver` 实现。
+
+`KeyResolver` 的默认实现是 `PrincipalNameKeyResolver`，它从 `ServerWebExchange` 中获取 `Principal` 对象，并调用其 `getName()` 方法作为 key。
+
+默认情况下，如果 `KeyResolver` 未能找到 key，请求将被拒绝。你可以通过设置以下两个属性来调整此行为：
+- `spring.cloud.gateway.filter.request-rate-limiter.deny-empty-key`（`true` 或 `false`）
+- `spring.cloud.gateway.filter.request-rate-limiter.empty-key-status-code`
+
+以下示例展示了如何在 Java 中配置一个 `KeyResolver`：
+
+.Config.java
+[source,java]
+----
+@Bean
+KeyResolver userKeyResolver() {
+    return exchange -> Mono.just(exchange.getRequest().getQueryParams().getFirst("user"));
+}
+----
+
+[NOTE]
+=====
+`RequestRateLimiter` 无法使用“快捷方式”语法进行配置。以下示例的配置是 **无效的**：
+
+.application.properties
+[source,properties]
+----
+# 无效的快捷方式配置
+spring.cloud.gateway.routes[0].filters[0]=RequestRateLimiter=2, 2, #{@userkeyresolver}
+----
+
+以下是正确的 YAML 配置示例：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: limit
+        uri: https://example.org
+        filters:
+        - name: RequestRateLimiter
+          args:
+            key-resolver: "#{@userkeyresolver}"
+----
+=====
+
+[[redis-ratelimiter]]
+== Redis `RateLimiter`
+
+Redis 限流器的实现参考了 https://stripe.com/blog/rate-limiters[Stripe] 的工作成果。它要求引入 `spring-boot-starter-data-redis-reactive` Spring Boot Starter。
+
+所使用的算法是 https://zh.wikipedia.org/wiki/%E4%BB%A4%E7%89%8C%E6%A1%B6%E7%AE%97%E6%B3%95[令牌桶算法]（Token Bucket Algorithm）。
+
+- `redis-rate-limiter.replenishRate`：每秒允许的请求数（不会丢弃任何请求），即令牌桶填充令牌的速率。
+- `redis-rate-limiter.burstCapacity`：用户在一秒钟内最多可发起的请求数（不会丢弃任何请求），即令牌桶最多可容纳的令牌数量。若设置为 0，则会阻止所有请求。
+- `redis-rate-limiter.requestedTokens`：每次请求消耗的令牌数，默认值为 `1`，表示每个请求从桶中取出一个令牌。
+
+通过将 `replenishRate` 和 `burstCapacity` 设置为相同值，可以实现稳定的请求速率。若想允许短暂突发流量，可将 `burstCapacity` 设置为高于 `replenishRate`。此时，两次突发之间需要有一定间隔时间（依据 `replenishRate`），否则连续的突发请求会导致部分请求被拒绝（返回 `HTTP 429 - Too Many Requests`）。
+
+以下配置示例定义了一个基于 Redis 的限流规则：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: requestratelimiter_route
+        uri: https://example.org
+        filters:
+        - name: RequestRateLimiter
+          args:
+            redis-rate-limiter.replenishRate: 10
+            redis-rate-limiter.burstCapacity: 20
+            redis-rate-limiter.requestedTokens: 1
+----
+
+上述配置表示每个用户的请求速率为每秒 10 次，允许突发至 20 次，但在下一秒中仅恢复 10 次可用请求。此处使用的 `KeyResolver` 是一个简单的实现，从请求参数中提取 `user` 字段。
+
+NOTE: 此方法不建议用于生产环境。
+
+[[bucket4j-ratelimiter]]
+== Bucket4j `RateLimiter`
+
+该实现基于 https://bucket4j.com/[Bucket4j] Java 库。你需要添加 `com.bucket4j:bucket4j_jdk17-core` 依赖，并选择一种支持分布式持久化的存储方案（参见 https://github.com/bucket4j/bucket4j?tab=readme-ov-file#bucket4j-distributed-features[官方文档]）。
+
+本示例使用 Caffeine 作为本地缓存集成。你需要在项目依赖中包含 `com.github.ben-manes.caffeine:caffeine`，同时还需要引入 `com.bucket4j:bucket4j_jdk17-caffeine`。
+
+.pom.xml
+[source,xml]
+----
+<dependency>
+  <groupId>com.github.ben-manes.caffeine</groupId>
+  <artifactId>caffeine</artifactId>
+  <version>${caffeine.version}</version>
+</dependency>
+<dependency>
+  <groupId>com.bucket4j</groupId>
+  <artifactId>bucket4j_jdk17-caffeine</artifactId>
+  <version>${bucket4j.version}</version>
+</dependency>
+----
+
+首先需要创建一个类型为 `io.github.bucket4j.distributed.proxy.AsyncProxyManager<String>` 的 Bean：
+
+.Config.java
+[source,java]
+----
+@Bean
+AsyncProxyManager<String> caffeineProxyManager() {
+	Caffeine<String, RemoteBucketState> builder = (Caffeine) Caffeine.newBuilder().maximumSize(100);
+	return new CaffeineProxyManager<>(builder, Duration.ofMinutes(1)).asAsync();
+}
+----
+
+相关配置参数说明如下：
+
+- `bucket4j-rate-limiter.capacity`：令牌桶的最大容量，即单个用户每秒最多允许的请求数（无丢弃），必须大于 0。
+- `bucket4j-rate-limiter.refillPeriod`：填充周期。每经过一个周期，向桶中补充 `refillTokens` 个令牌。该参数为必填项，格式遵循 https://docs.spring.io/spring-boot/reference/features/external-config.html#features.external-config.typesafe-configuration-properties.conversion.periods[Spring Boot 的 Period 格式]（如 `1s`, `5m` 等）。
+- `bucket4j-rate-limiter.refillTokens`：每个填充周期补充的令牌数，默认等于 `capacity`，必须 ≥ 0。
+- `bucket4j-rate-limiter.requestedTokens`：每次请求消耗的令牌数，默认为 `1`，必须大于 0。
+- `bucket4j-rate-limiter.refillStyle`：定义令牌补充方式，有三种选项：
+  - `GREEDY`（默认）：尽可能快地补充令牌。
+  - `INTERVALLY`：等待整个 `refillPeriod` 结束后才补充令牌。
+  - `INTERVALLY_ALIGNED`：与 `INTERVALLY` 类似，但可通过 `timeOfFirstRefill` 指定首次补充的时间点。
+- `bucket4j-rate-limiter.timeOfFirstRefill`：仅当 `refillStyle` 设置为 `INTERVALLY_ALIGNED` 时有效，类型为 `Instant`。
+
+以下示例定义了每个用户每秒最多 10 次请求，允许突发到 20 次：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: requestratelimiter_route
+        uri: https://example.org
+        filters:
+        - name: RequestRateLimiter
+          args:
+            bucket4j-rate-limiter.capacity: 20
+            bucket4j-rate-limiter.refillTokens: 10
+            bucket4j-rate-limiter.refillPeriod: 1s
+            bucket4j-rate-limiter.requestedTokens: 1
+----
+
+NOTE: 此配置不推荐用于生产环境。
+
+[[custom-ratelimiter]]
+== 自定义 `RateLimiter`
+
+你也可以自定义一个实现了 `RateLimiter` 接口的 Bean 来作为限流器。在配置中，同样可以使用 SpEL 按名称引用该 Bean。例如：`#{@myRateLimiter}` 表示引用名为 `myRateLimiter` 的 Bean。
+
+以下示例展示如何使用之前定义的 `KeyResolver` 并结合自定义的 `RateLimiter`：
+
+.application.yml
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: requestratelimiter_route
+        uri: https://example.org
+        filters:
+        - name: RequestRateLimiter
+          args:
+            rate-limiter: "#{@myRateLimiter}"
+            key-resolver: "#{@userKeyResolver}"
+----
+
+这样即可灵活地集成自定义限流逻辑。

@@ -1,0 +1,317 @@
+[[actuator-api]]
+= Actuator API
+
+`/gateway` 这个 Actuator 端点允许你监控和与 Spring Cloud Gateway 应用程序进行交互。  
+为了能够远程访问，必须在应用程序属性中启用该端点，并通过 HTTP 或 JMX 暴露它。相关配置可参考 Spring Boot 官方文档的 https://docs.spring.io/spring-boot/docs/current/reference/html/production-ready-endpoints.html#production-ready-endpoints-enabling-endpoints[启用端点] 和 https://docs.spring.io/spring-boot/docs/current/reference/html/production-ready-endpoints.html#production-ready-endpoints-exposing-endpoints[暴露端点] 部分。  
+以下示例展示了如何配置：
+
+.application.properties
+[source,properties]
+----
+management.endpoint.gateway.enabled=true # 默认值
+management.endpoints.web.exposure.include=gateway
+----
+
+该端点提供了子级 Actuator 端点的可用资源概览以及每个引用所支持的方法。返回结果类似于以下内容：
+
+[source,json]
+----
+[
+   {
+      "href":"/actuator/gateway/",
+      "methods":[ "GET" ]
+   },
+   {
+      "href":"/actuator/gateway/routedefinitions",
+      "methods":[ "GET" ]
+   },
+   {
+      "href":"/actuator/gateway/globalfilters",
+      "methods":[ "GET" ]
+   },
+   {
+      "href":"/actuator/gateway/routefilters",
+      "methods":[ "GET" ]
+   },
+   {
+      "href":"/actuator/gateway/routes",
+      "methods":[ "POST", "GET" ]
+   },
+   {
+      "href":"/actuator/gateway/routepredicates",
+      "methods":[ "GET" ]
+   },
+   {
+      "href":"/actuator/gateway/refresh",
+      "methods":[ "POST" ]
+   },
+   {
+      "href":"/actuator/gateway/routes/route-id-1/combinedfilters",
+      "methods":[ "GET" ]
+   },
+   {
+      "href":"/actuator/gateway/routes/route-id-1",
+      "methods":[ "POST", "DELETE", "GET" ]
+   }
+]
+----
+
+[[verbose-actuator-format]]
+== 详细模式的 Actuator 格式
+
+Spring Cloud Gateway 引入了一种新的、更详细的响应格式。  
+这种格式为每条路由提供更多信息，使你可以查看与每条路由关联的断言（predicates）和过滤器（filters），以及可用的配置信息。  
+以下示例展示了 `/actuator/gateway/routes` 的响应内容：
+
+[source,json]
+----
+[
+  {
+    "predicate": "(Hosts: [**.addrequestheader.org] && Paths: [/headers], match trailing slash: true)",
+    "route_id": "add_request_header_test",
+    "filters": [
+      "[[AddResponseHeader X-Response-Default-Foo = 'Default-Bar'], order = 1]",
+      "[[AddRequestHeader X-Request-Foo = 'Bar'], order = 1]",
+      "[[PrefixPath prefix = '/httpbin'], order = 2]"
+    ],
+    "uri": "lb://testservice",
+    "order": 0
+  }
+]
+----
+
+此功能默认启用。若要禁用，请设置如下属性：
+
+.application.properties
+[source,properties]
+----
+spring.cloud.gateway.actuator.verbose.enabled=false
+----
+
+在未来版本中，该属性将默认为 `true`。
+
+[[retrieving-route-filters]]
+== 获取路由过滤器
+
+本节详细介绍如何获取路由过滤器，包括：
+
+* xref:spring-cloud-gateway-server-webflux/actuator-api.adoc#gateway-global-filters[全局过滤器]
+* <<gateway-route-filters>>
+
+[[gateway-global-filters]]
+=== 全局过滤器
+
+要获取应用到所有路由的 xref:spring-cloud-gateway-server-webflux/global-filters.adoc[全局过滤器]，请向 `/actuator/gateway/globalfilters` 发送一个 `GET` 请求。返回结果类似于以下内容：
+
+----
+{
+  "org.springframework.cloud.gateway.filter.ReactiveLoadBalancerClientFilter@77856cc5": 10100,
+  "org.springframework.cloud.gateway.filter.RouteToRequestUrlFilter@4f6fd101": 10000,
+  "org.springframework.cloud.gateway.filter.NettyWriteResponseFilter@32d22650": -1,
+  "org.springframework.cloud.gateway.filter.ForwardRoutingFilter@106459d9": 2147483647,
+  "org.springframework.cloud.gateway.filter.NettyRoutingFilter@1fbd5e0": 2147483647,
+  "org.springframework.cloud.gateway.filter.ForwardPathFilter@33a71d23": 0,
+  "org.springframework.cloud.gateway.filter.AdaptCachedBodyGlobalFilter@135064ea": 2147483637,
+  "org.springframework.cloud.gateway.filter.WebsocketRoutingFilter@23c05889": 2147483646
+}
+----
+
+响应包含当前生效的全局过滤器详情。对于每个全局过滤器，会显示其对象的字符串表示形式（例如：`org.springframework.cloud.gateway.filter.ReactiveLoadBalancerClientFilter@77856cc5`）以及其在过滤器链中的 xref:spring-cloud-gateway-server-webflux/global-filters.adoc#gateway-combined-global-filter-and-gatewayfilter-ordering[顺序（order）]。
+
+[[gateway-route-filters]]
+=== 路由过滤器
+
+要获取应用到路由上的 xref:spring-cloud-gateway-server-webflux/gatewayfilter-factories.adoc[`GatewayFilter` 工厂]，请向 `/actuator/gateway/routefilters` 发送一个 `GET` 请求。返回结果类似于以下内容：
+
+----
+{
+  "[AddRequestHeaderGatewayFilterFactory@570ed9c configClass = AbstractNameValueGatewayFilterFactory.NameValueConfig]": null,
+  "[SecureHeadersGatewayFilterFactory@fceab5d configClass = Object]": null,
+  "[SaveSessionGatewayFilterFactory@4449b273 configClass = Object]": null
+}
+----
+
+响应包含应用于任意特定路由的 `GatewayFilter` 工厂的详细信息。对每个工厂，会显示其对应对象的字符串表示形式（例如：`[SecureHeadersGatewayFilterFactory@fceab5d configClass = Object]`）。注意，`null` 值是由于端点控制器实现不完整所致，因为控制器尝试设置对象在过滤器链中的顺序，但这并不适用于 `GatewayFilter` 工厂对象。
+
+[[refreshing-the-route-cache]]
+== 刷新路由缓存
+
+要清除路由缓存，请向 `/actuator/gateway/refresh` 发送一个 `POST` 请求。请求成功后返回状态码 200，且无响应体。
+
+若要仅清除具有特定元数据值的路由，可在请求中添加查询参数 `metadata`，指定需匹配的 `key:value` 键值对。如果在异步刷新过程中发生错误，则刷新操作不会修改现有路由。
+
+例如，向 `/actuator/gateway/refresh?metadata=group:group-1` 发送 `POST` 请求，将仅刷新元数据中 `group` 字段为 `group-1` 的路由：`first_route` 和 `third_route`。示例如下：
+
+[source,json]
+----
+[{
+  "route_id": "first_route",
+  "route_object": {
+    "predicate": "...",
+  },
+  "metadata": { "group": "group-1" }
+},
+{
+  "route_id": "second_route",
+  "route_object": {
+    "predicate": "...",
+  },
+  "metadata": { "group": "group-2" }
+},
+{
+  "route_id": "third_route",
+  "route_object": {
+    "predicate": "...",
+  },
+  "metadata": { "group": "group-1" }
+}]
+----
+
+[[retrieving-the-routes-defined-in-the-gateway]]
+== 获取网关中定义的路由
+
+要获取网关中定义的所有路由，请向 `/actuator/gateway/routes` 发送一个 `GET` 请求。返回结果类似于以下内容：
+
+----
+[{
+  "route_id": "first_route",
+  "route_object": {
+    "predicate": "org.springframework.cloud.gateway.handler.predicate.PathRoutePredicateFactory$$Lambda$432/1736826640@1e9d7e7d",
+    "filters": [
+      "OrderedGatewayFilter{delegate=org.springframework.cloud.gateway.filter.factory.PreserveHostHeaderGatewayFilterFactory$$Lambda$436/674480275@6631ef72, order=0}"
+    ]
+  },
+  "order": 0
+},
+{
+  "route_id": "second_route",
+  "route_object": {
+    "predicate": "org.springframework.cloud.gateway.handler.predicate.PathRoutePredicateFactory$$Lambda$432/1736826640@cd8d298",
+    "filters": []
+  },
+  "order": 0
+}]
+----
+
+响应包含网关中所有已定义路由的详细信息。下表描述了响应中每个元素（即每条路由）的结构：
+
+[cols="3,2,4"]
+|===
+| 路径 | 类型 | 描述
+
+|`route_id`
+| 字符串
+| 路由 ID。
+
+|`route_object.predicate`
+| 对象
+| 路由断言。
+
+|`route_object.filters`
+| 数组
+| 应用于该路由的 xref:spring-cloud-gateway-server-webflux/gatewayfilter-factories.adoc[`GatewayFilter` 工厂]。
+
+|`order`
+| 数字
+| 路由的优先级顺序。
+
+|===
+
+[[gateway-retrieving-information-about-a-particular-route]]
+== 获取特定路由的信息
+
+要获取某一条路由的详细信息，请向 `/actuator/gateway/routes/\{id}` 发送 `GET` 请求（例如：`/actuator/gateway/routes/first_route`）。返回结果类似于以下内容：
+
+----
+{
+  "id": "first_route",
+  "predicates": [{
+    "name": "Path",
+    "args": {"_genkey_0":"/first"}
+  }],
+  "filters": [],
+  "uri": "https://www.uri-destination.org",
+  "order": 0
+}
+----
+
+下表描述了响应的结构：
+
+[cols="3,2,4"]
+|===
+| 路径 | 类型 | 描述
+
+|`id`
+| 字符串
+| 路由 ID。
+
+|`predicates`
+| 数组
+| 路由断言集合。每一项定义了某个断言的名称及其参数。
+
+|`filters`
+| 数组
+| 应用于该路由的过滤器集合。
+
+|`uri`
+| 字符串
+| 路由的目标 URI。
+
+|`order`
+| 数字
+| 路由的优先级顺序。
+
+|===
+
+[[creating-and-deleting-a-particular-route-definition]]
+== 创建和删除特定的路由定义
+
+要创建一个路由定义，请向 `/gateway/routes/\{id_route_to_create}` 发送 `POST` 请求，并在 JSON 请求体中指定路由字段（参见 xref:spring-cloud-gateway-server-webflux/actuator-api.adoc#gateway-retrieving-information-about-a-particular-route[获取特定路由信息]）。
+
+要删除一个路由定义，请向 `/gateway/routes/\{id_route_to_delete}` 发送 `DELETE` 请求。
+
+[[creating-multiple-route-definitions]]
+== 批量创建多个路由定义
+
+要在单次请求中创建多个路由定义，请向 `/gateway/routes` 发送 `POST` 请求，并在 JSON 请求体中包含多个路由定义（包括 `route id`，参见 xref:spring-cloud-gateway-server-webflux/actuator-api.adoc#gateway-retrieving-information-about-a-particular-route[获取特定路由信息]）。
+
+如果在创建过程中有任何路由出错，所有路由定义都将被丢弃。
+
+[[recap:-the-list-of-all-endpoints]]
+== 小结：所有端点列表
+
+下表总结了 Spring Cloud Gateway 的 Actuator 端点（注意：所有端点均以 `/actuator/gateway` 为基路径）：
+
+[cols="2,2,5"]
+|===
+| ID | HTTP 方法 | 描述
+
+|`globalfilters`
+|GET
+| 显示应用于路由的全局过滤器列表。
+
+|`routefilters`
+|GET
+| 显示应用于特定路由的 `GatewayFilter` 工厂列表。
+
+|`refresh`
+|POST
+| 清除路由缓存。
+
+|`routes`
+|GET
+| 显示网关中定义的路由列表。
+
+|`routes/\{id}`
+|GET
+| 显示特定路由的详细信息。
+
+|`routes/\{id}`
+|POST
+| 向网关添加一条新路由。
+
+|`routes/\{id}`
+|DELETE
+| 从网关中删除一条现有路由。
+
+|===
